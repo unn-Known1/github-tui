@@ -1,7 +1,5 @@
 const ESC = '\x1b';
 const RESET = `${ESC}[0m`;
-const HIDE_CUR = `${ESC}[?25l`;
-const SHOW_CUR = `${ESC}[?25h`;
 
 const FG = {
   bright: `${ESC}[1m`,
@@ -87,7 +85,16 @@ export class Screen {
 
   box(x, y, w, h, title = '') {
     if (h < 2 || w < 4 || y < 0 || y >= this.height) return;
-    this.writeStr(x, y, '┌' + '─'.repeat(w - 2) + '┐', 'bright');
+
+    if (title) {
+      const pad = Math.max(0, Math.floor((w - title.length - 4) / 2));
+      const rightPad = Math.max(0, w - 2 - pad - title.length - 2);
+      const top = '┌' + '─'.repeat(pad) + ' ' + title + ' ' + '─'.repeat(rightPad) + '┐';
+      this.writeStr(x, y, top.substring(0, w), 'bright');
+    } else {
+      this.writeStr(x, y, '┌' + '─'.repeat(w - 2) + '┐', 'bright');
+    }
+
     for (let i = 1; i < h - 1; i++) {
       if (y + i >= this.height) break;
       this.setCell(x, y + i, '│', 'bright');
@@ -95,10 +102,6 @@ export class Screen {
     }
     if (y + h - 1 < this.height) {
       this.writeStr(x, y + h - 1, '└' + '─'.repeat(w - 2) + '┘', 'bright');
-    }
-    if (title) {
-      const tx = x + Math.floor((w - title.length) / 2);
-      this.writeStr(tx, y, title, 'bright');
     }
   }
 
