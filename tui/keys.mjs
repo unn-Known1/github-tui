@@ -186,6 +186,21 @@ export function handleKey(key) {
 
   // 6. Special: 's' globally toggles star when a repo is selected.
   if (key === 's' && currentRepoForAction()) { toggleStar(); return; }
+
+  // 7. Dashboard quick actions: 'n' opens new issue page.
+  if (tabState.current === 0 && key === 'n') {
+    const repos = appState.repos;
+    if (repos.length > 0) {
+      const url = repos[0].html_url + '/issues/new';
+      openUrl(url).then(res => {
+        if (res.ok) showMessage('Opened new issue page', 'success');
+        else showMessage(res.error || 'Open failed', 'error');
+      });
+    } else {
+      showMessage('No repos to create issues for', 'warning');
+    }
+    return;
+  }
 }
 
 function handleSpace() {
@@ -280,4 +295,12 @@ export function registerCoreActions() {
   reg({ id: 'settings.logout', label: 'Log out',                            run: settings.handleLogout });
   reg({ id: 'dashboard.refresh', label: 'Refresh dashboard widgets',
         run: () => dashboard.loadDashboardWidgets(true) });
+  reg({ id: 'dashboard.new-issue', label: 'Dashboard: Create new issue',
+        run: () => {
+          if (appState.repos.length > 0) {
+            openUrl(appState.repos[0].html_url + '/issues/new');
+          } else {
+            showMessage('No repos to create issues for', 'warning');
+          }
+        } });
 }

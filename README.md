@@ -6,7 +6,7 @@ A fast, zero-dependency terminal user interface for GitHub — five tabs, a comm
 
 ## ✨ Highlights
 
-- 🏠 **Real Dashboard** — greeting + 4 stat cards (★ stars, ⑂ forks, ◆ languages, ⏱ account age), profile mini, top repos, language bar chart, live activity feed, trending-this-week, unread-notifications badge.
+- 🏠 **Real Dashboard** — greeting + 5 stat cards (★ stars, ⑂ forks, ◆ languages, ⏱ account age, ⚠ stale repos), profile mini, **contribution heatmap**, **star history sparkline**, top repos, language bar chart, live activity feed, **recent issues/PRs**, stale repos alert, trending-this-week, unread-notifications badge, **quick actions bar**.
 - 📁 **Repos browser, supercharged** — row selection (`▶`), `Enter` drills into Analyze details, sortable columns, **type filter cycle** (`t`: all/sources/forks/archived/private/public/templates), **language facet** (`L`), **stale-only** toggle (`x`), **density toggle** (`D` switches between compact and comfortable), **pinned favorites** (`P` — stick to top, persisted on disk), inline visibility badges (🔒 private, 🔱 fork, 📦 archived, 🗄 template, 📌 pinned, ★ bookmarked), `g`/`G` jump-to-top/bottom.
 - 🗂️ **File explorer** *(new)* — `F` on Analyze details opens a real in-terminal repo browser. Walk the tree, view files with line numbers + naive syntax coloring, switch branches, **save individual files** (`s`), **save whole folders** recursively (`S`), **download zipballs** (`Z`) streamed straight to disk, **`git clone`** into your CWD (`C`), **`gh repo clone`** for private repos (`G`), copy raw URLs (`y`) or file contents (`Y`) to clipboard.
 - 🔍 **Analyze any public repo** — search, 2-column detail view (metadata + languages bar + top contributors + latest releases), pane tabs `[O] Overview / [i] Issues / [P] PRs / [R] README / [F] Files`, parallel ahead/behind compares on forks.
@@ -162,9 +162,10 @@ Every tab module exports `render(screen, y, h)`, an optional `keys` map for tab-
 
 ### 1 · Dashboard
 - Time-of-day greeting (`Good morning/afternoon/evening, <you>`) with 🔔 unread badge.
-- 4 stat cards: ★ Total Stars, ⑂ Total Forks, ◆ Distinct Languages, ⏱ Account Age.
-- **Left:** profile mini (`@login`, email, followers, public/private repos), top 5 repos by stars, language bar chart across all your repos.
-- **Right:** Recent Activity feed (last ~10 events with colored icons per type + relative timestamps), 🔥 Trending This Week (top 5 public repos created in last 7 days, sorted by stars).
+- 5 stat cards: ★ Total Stars, ⑂ Total Forks, ◆ Distinct Languages, ⏱ Account Age, ⚠ Stale Repos.
+- **Left:** profile mini (`@login`, email, followers, public/private repos), **contribution heatmap** (15-week grid from PushEvents), **star history sparkline** (last 30 days), top 5 repos by stars, language bar chart across all your repos.
+- **Right:** Recent Activity feed (last ~10 events with colored icons per type + relative timestamps), **Recent Issues** (across your repos), **Recent Pull Requests** (across your repos), **Stale Repos Alert** (60+ days no push), 🔥 Trending This Week (top 5 public repos created in last 7 days, sorted by stars).
+- **Quick Actions Bar** at bottom: `n` New Issue, `s` Star Repo, `b` Bookmark, `o` Open Browser.
 
 ### 2 · Repos
 - Header shows aggregate **★/⑂/⚡** totals across all your repos plus archived count.
@@ -222,9 +223,11 @@ Every tab module exports `render(screen, y, h)`, an optional `keys` map for tab-
 
 **Shipped in v0.3:** Modular refactor, command palette, themes, inbox triage, README viewer pane, OSC-52 clipboard copy, bookmarks store, star/unstar, ETag cache, token-scope inspector.
 
-**Shipped in v0.3.1 (this update):** Repos tab row selection + Enter drill-in, type/language/stale filters, density toggle, pins, visibility badges, relative-time column, jump-to-top/bottom. **File explorer** with tree browsing, file viewer (line numbers + syntax coloring), branch picker, save file / save folder / download zipball / git clone / gh clone — all CWD-safe.
+**Shipped in v0.3.1:** Repos tab row selection + Enter drill-in, type/language/stale filters, density toggle, pins, visibility badges, relative-time column, jump-to-top/bottom. **File explorer** with tree browsing, file viewer (line numbers + syntax coloring), branch picker, save file / save folder / download zipball / git clone / gh clone — all CWD-safe.
 
-**Next up (v0.4 — "Review from terminal"):**
+**Shipped in v0.4 (this update):** Dashboard enhancements — contribution heatmap (15-week grid), star history sparkline (30-day trend), recent issues/PRs activity, stale repos alert (60+ days), quick actions bar.
+
+**Next up (v0.5 — "Review from terminal"):**
 - In-TUI Issue/PR detail popup with rendered body
 - Comment / react / close-reopen / merge actions
 - PR diff viewer

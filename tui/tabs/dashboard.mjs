@@ -1,9 +1,11 @@
 // Dashboard tab — the home screen.
-// Stat cards, profile mini, top repos, language breakdown, activity feed, trending.
+// v0.4 features: contribution heatmap, issues/PRs activity, stale repos alert,
+// star history sparkline, quick actions bar.
 
 import { appState, render, startAsync, isStale, showMessage } from '../state.mjs';
 import {
   getUserEvents, getTrendingRepos, getStarredRepos,
+  getUserIssues, getUserPullRequests,
 } from '../github.mjs';
 import { relTime, eventGlyph, greeting, shortNum } from '../utils.mjs';
 import { color } from '../theme.mjs';
@@ -16,20 +18,107 @@ export async function loadDashboardWidgets(force = false) {
   const username = appState.user.login;
   try {
     const safe = (p) => p.catch(() => null);
-    const [events, trending, starred] = await Promise.all([
+    const [events, trending, starred, issues, prs] = await Promise.all([
       safe(getUserEvents(appState.token, username, 15)),
       safe(getTrendingRepos(appState.token, 7, 5)),
       safe(getStarredRepos(appState.token, 1, 30)),
+      safe(getUserIssues(appState.token, 1, 10)),
+      safe(getUserPullRequests(appState.token, 1, 10)),
     ]);
     if (isStale(gen)) return;
     appState.events = Array.isArray(events) ? events : [];
     appState.trending = Array.isArray(trending) ? trending : [];
     appState.starred = Array.isArray(starred) ? starred : [];
+    appState.dashboardRecentIssues = Array.isArray(issues) ? issues : [];
+    appState.dashboardRecentPRs = Array.isArray(prs) ? (prs.items || prs) : [];
+
+    // Calculate contribution heatmap from events.
+    appState.dashboardContributions = buildHeatmap(appState.events);
+
+    // Calculate stale repos.
+    const staleResult = findStaleRepos(appState.repos);
+    appState.dashboardStaleCount = staleResult.count;
+    appState.dashboardStaleRepos = staleResult.repos;
+
+    // Build star history from starred repos.
+    appState.dashboardStarHistory = buildStarHistory(appState.starred);
+
     appState.dashboardLoaded = true;
     render();
   } catch (e) {
     if (!isStale(gen)) showMessage('Dashboard widgets failed: ' + e.message, 'error');
   }
+}
+
+// ─── Heatmap builder ──────────────────────────────────────────────────
+// Build a 7-row × 15-column grid from PushEvent timestamps.
+function buildHeatmap(events) {
+  const now = Date.now();
+  const dayMs = 86400000;
+  const weeks = 15;
+  const grid = Array.from({ length: 7 }, () => new Array(weeks).fill(0));
+
+  // Find the Sunday that starts the grid (15 weeks ago).
+  const startDate = new Date(now - (weeks * 7 - 1) * dayMs);
+  const startDay = startDate.getDay();
+  const startOffset = startDate.getTime() - startDay * dayMs;
+
+  for (const ev of events) {
+    if (ev.type !== 'PushEvent' || !ev.created_at) continue;
+    const evTime = new Date(ev.created_at).getTime();
+    const diffDays = Math.floor((evTime - startOffset) / dayMs);
+    if (diffDays < 0 || diffDays >= weeks * 7) continue;
+    const col = Math.floor(diffDays / 7);
+    const row = diffDays % 7;
+    if (row >= 0 && row < 7 && col >= 0 && col < weeks) {
+      grid[row][col]++;
+    }
+  }
+  return { weeks, grid, startDate: new Date(startOffset) };
+}
+
+// ─── Stale repos finder ───────────────────────────────────────────────
+function findStaleRepos(repos) {
+  const cutoff60 = Date.now() - 60 * 86400000;
+  const stale = repos.filter(r => {
+    const lastPush = new Date(r.pushed_at || r.updated_at).getTime();
+    return lastPush < cutoff60;
+  });
+  return { count: stale.length, repos: stale.slice(0, 5).map(r => r.name) };
+}
+
+// ─── Star history sparkline ───────────────────────────────────────────
+function buildStarHistory(starred) {
+  if (!starred || starred.length === 0) return [];
+  const dayMs = 86400000;
+  const days = 30;
+  const counts = new Array(days).fill(0);
+  const now = Date.now();
+  for (const r of starred) {
+    if (!r.starred_at) continue;
+    const diffDays = Math.floor((now - new Date(r.starred_at).getTime()) / dayMs);
+    if (diffDays >= 0 && diffDays < days) {
+      counts[days - 1 - diffDays]++;
+    }
+  }
+  return counts;
+}
+
+// ─── Sparkline renderer ───────────────────────────────────────────────
+function sparkline(data, width) {
+  if (!data || data.length === 0) return '';
+  const chars = ['▁', '▂', '▃', '▄', '▅', '▆', '▇', '█'];
+  const max = Math.max(...data, 1);
+  const sampled = [];
+  const step = data.length / width;
+  for (let i = 0; i < width; i++) {
+    const idx = Math.min(Math.floor(i * step), data.length - 1);
+    sampled.push(data[idx]);
+  }
+  return sampled.map(v => {
+    const normalized = Math.floor((v / max) * (chars.length - 1));
+    return chars[normalized];
+  }).join('');
 }
 
 // Draw a labeled stat card with a thin box.
@@ -81,7 +170,7 @@ export function renderDashboard(screen, y, h) {
     ? ((Date.now() - new Date(user.created_at).getTime()) / (365.25 * 86400 * 1000)).toFixed(1)
     : '?';
 
-  const cardCount = 4;
+  const cardCount = 5;
   const margin = 4;
   const gap = 2;
   const cardW = Math.max(14, Math.floor((W - margin * 2 - gap * (cardCount - 1)) / cardCount));
@@ -90,6 +179,7 @@ export function renderDashboard(screen, y, h) {
     ['⑂ Total Forks',  shortNum(totalForks), color('fork')],
     ['◆ Languages',    String(langSet.size), color('trending')],
     ['⏱ Account Age',  accountAgeYears + 'y', color('success')],
+    ['⚠ Stale Repos',  appState.dashboardStaleCount + '', appState.dashboardStaleCount > 0 ? color('warning') : 'dim'],
   ];
   cards.forEach((c, i) => {
     const cx = margin + i * (cardW + gap);
@@ -119,6 +209,40 @@ export function renderDashboard(screen, y, h) {
     screen.writeStr(leftX, ly++, txt.substring(0, splitX - leftX - 1), style || null);
   }
   ly++;
+
+  // ─── Contribution Heatmap ───
+  if (ly < y + h - 8 && appState.dashboardContributions) {
+    screen.writeStr(leftX, ly++, '📊 Contributions (15 weeks)', 'bright');
+    const hm = appState.dashboardContributions;
+    const dayLabels = ['S', 'M', 'T', 'W', 'T', 'F', 'S'];
+    const cellW = Math.min(2, Math.floor((splitX - leftX - 4) / hm.weeks));
+    const heatChars = [' ', '░', '▒', '▓', '█'];
+    for (let row = 0; row < 7; row++) {
+      if (ly >= y + h - 1) break;
+      screen.writeStr(leftX, ly, dayLabels[row], 'dim');
+      for (let col = 0; col < hm.weeks; col++) {
+        if (leftX + 2 + col * cellW >= splitX - 1) break;
+        const val = hm.grid[row][col];
+        const level = val === 0 ? 0 : val === 1 ? 1 : val <= 3 ? 2 : val <= 5 ? 3 : 4;
+        const ch = heatChars[level].repeat(cellW);
+        const clr = level === 0 ? 'dim' : color('success');
+        screen.writeStr(leftX + 2 + col * cellW, ly, ch, clr);
+      }
+      ly++;
+    }
+    ly++;
+  }
+
+  // ─── Star History Sparkline ───
+  if (ly < y + h - 3 && appState.dashboardStarHistory.length > 0) {
+    screen.writeStr(leftX, ly++, '⭐ Stars Last 30 Days', 'bright');
+    const sparkW = Math.min(30, splitX - leftX - 4);
+    const spark = sparkline(appState.dashboardStarHistory, sparkW);
+    const totalStarsRecent = appState.dashboardStarHistory.reduce((a, b) => a + b, 0);
+    screen.writeStr(leftX, ly, spark, color('star'));
+    screen.writeStr(leftX + sparkW + 2, ly, totalStarsRecent + ' new', 'dim');
+    ly += 2;
+  }
 
   // Top repos by stars.
   if (ly < y + h - 2) {
@@ -175,7 +299,7 @@ export function renderDashboard(screen, y, h) {
     screen.writeStr(rightX, ry++, appState.dashboardLoaded
       ? '(no recent public events)' : 'Loading…', 'dim');
   } else {
-    const maxEvents = Math.min(8, Math.max(1, Math.floor(bodyH * 0.5)));
+    const maxEvents = Math.min(6, Math.max(1, Math.floor(bodyH * 0.35)));
     for (const ev of appState.events.slice(0, maxEvents)) {
       if (ry >= y + h - 1) break;
       const [icon, c, label] = eventGlyph(ev.type);
@@ -190,6 +314,54 @@ export function renderDashboard(screen, y, h) {
   }
   ry++;
 
+  // ─── Recent Issues ───
+  if (ry < y + h - 3 && appState.dashboardRecentIssues.length > 0) {
+    screen.writeStr(rightX, ry++, '◉ Recent Issues', 'bright');
+    const maxIssues = Math.min(4, Math.max(1, Math.floor(bodyH * 0.2)));
+    for (const issue of appState.dashboardRecentIssues.slice(0, maxIssues)) {
+      if (ry >= y + h - 1) break;
+      const num = '#' + (issue.number || '?');
+      const title = (issue.title || '?').substring(0, Math.max(10, rightW - 20));
+      const state = issue.state === 'open' ? color('success') : 'dim';
+      screen.writeStr(rightX, ry, num.padEnd(7), color('issue'));
+      screen.writeStr(rightX + 7, ry, title, state);
+      ry++;
+    }
+    ry++;
+  }
+
+  // ─── Recent PRs ───
+  if (ry < y + h - 3 && appState.dashboardRecentPRs.length > 0) {
+    screen.writeStr(rightX, ry++, '⇄ Recent Pull Requests', 'bright');
+    const maxPRs = Math.min(4, Math.max(1, Math.floor(bodyH * 0.2)));
+    for (const pr of appState.dashboardRecentPRs.slice(0, maxPRs)) {
+      if (ry >= y + h - 1) break;
+      const num = '#' + (pr.number || '?');
+      const title = (pr.title || '?').substring(0, Math.max(10, rightW - 20));
+      const draft = pr.draft ? '[draft] ' : '';
+      const state = pr.state === 'open' ? color('pr') : 'dim';
+      screen.writeStr(rightX, ry, num.padEnd(7), color('pr'));
+      screen.writeStr(rightX + 7, ry, (draft + title).substring(0, rightW - 9), state);
+      ry++;
+    }
+    ry++;
+  }
+
+  // ─── Stale Repos Alert ───
+  if (ry < y + h - 3 && appState.dashboardStaleCount > 0) {
+    screen.writeStr(rightX, ry++, '⚠ Stale Repos (60+ days)', 'bright');
+    for (const name of appState.dashboardStaleRepos) {
+      if (ry >= y + h - 1) break;
+      screen.writeStr(rightX + 2, ry++, name.substring(0, rightW - 4), color('warning'));
+    }
+    if (appState.dashboardStaleCount > appState.dashboardStaleRepos.length) {
+      screen.writeStr(rightX + 2, ry++, '... and ' +
+        (appState.dashboardStaleCount - appState.dashboardStaleRepos.length) + ' more', 'dim');
+    }
+    ry++;
+  }
+
+  // Trending This Week.
   if (ry < y + h - 2) {
     screen.writeStr(rightX, ry++, '🔥 Trending This Week', 'bright');
     if (appState.trending.length === 0) {
@@ -205,6 +377,20 @@ export function renderDashboard(screen, y, h) {
         ry++;
       }
     }
+  }
+
+  // ─── Quick Actions Bar ───
+  const actionsY = y + h - 1;
+  if (actionsY > bodyY) {
+    const actions = [
+      '[r] Refresh',
+      '[n] New Issue',
+      '[s] Star Repo',
+      '[b] Bookmark',
+      '[o] Open Browser',
+    ];
+    const actionsStr = actions.join('  ');
+    screen.writeStr(4, actionsY, actionsStr.substring(0, W - 8), 'dim');
   }
 }
 

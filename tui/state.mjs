@@ -101,6 +101,12 @@ export const appState = {
   trending: [],
   starred: [],
   dashboardLoaded: false,
+  dashboardContributions: null,  // { weeks: [[day, day, ...], ...] } heatmap data
+  dashboardRecentIssues: [],     // recently opened/updated issues across repos
+  dashboardRecentPRs: [],        // recently opened/updated PRs across repos
+  dashboardStaleCount: 0,        // repos with no push in 60+ days
+  dashboardStaleRepos: [],       // stale repo names for display
+  dashboardStarHistory: [],      // daily star counts for sparkline
 
   // ── Inbox ──
   notifications: [],
