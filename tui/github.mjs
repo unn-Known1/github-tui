@@ -155,3 +155,27 @@ export async function getRepositoryReleases(token, owner, repo, page = 1, perPag
     return [];
   }
 }
+
+export async function getRepositoryForks(token, owner, repo, page = 1, perPage = 30) {
+  try {
+    const forks = await makeRequest(
+      `/repos/${owner}/${repo}/forks?page=${page}&per_page=${perPage}&sort=stargazers`,
+      token
+    );
+    return forks;
+  } catch (error) {
+    return [];
+  }
+}
+
+export async function getCompare(token, owner, repo, baseHead, headHead) {
+  try {
+    const result = await makeRequest(
+      `/repos/${owner}/${repo}/compare/${baseHead}...${headHead}`,
+      token
+    );
+    return result;
+  } catch (error) {
+    return null;
+  }
+}
