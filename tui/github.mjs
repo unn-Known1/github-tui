@@ -162,3 +162,30 @@ export async function getRepositoryReleases(token, owner, repo, page = 1, perPag
 export async function getNotifications(token) {
   return makeRequest('/notifications', token);
 }
+
+// Recent public activity for a user — pushes, PRs, issues, stars, etc.
+export async function getUserEvents(token, username, perPage = 15) {
+  return makeRequest(`/users/${username}/events?per_page=${perPage}`, token);
+}
+
+// Trending: repos created in the last `days` days, sorted by stars.
+export async function getTrendingRepos(token, days = 7, perPage = 5) {
+  const since = new Date(Date.now() - days * 24 * 60 * 60 * 1000)
+    .toISOString().split('T')[0];
+  const q = encodeURIComponent(`created:>${since}`);
+  const data = await makeRequest(
+    `/search/repositories?q=${q}&sort=stars&order=desc&per_page=${perPage}`,
+    token
+  );
+  return data.items || [];
+}
+
+// Repos the authenticated user has starred.
+export async function getStarredRepos(token, page = 1, perPage = 30) {
+  return makeRequest(`/user/starred?page=${page}&per_page=${perPage}`, token);
+}
+
+// Recent commits on a repo's default branch.
+export async function getRepoCommits(token, owner, repo, perPage = 10) {
+  return makeRequest(`/repos/${owner}/${repo}/commits?per_page=${perPage}`, token);
+}

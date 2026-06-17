@@ -16,6 +16,10 @@ import {
   getRepositoryLanguages,
   getRepositoryReleases,
   getNotifications,
+  getUserEvents,
+  getTrendingRepos,
+  getStarredRepos,
+  getRepoCommits,
   lastRateLimit,
 } from './tui/github.mjs';
 import { Screen } from './tui/screen.mjs';
@@ -64,6 +68,8 @@ let appState = {
   repoDetails: null,
   analyzeView: 'search',
   forks: [],
+  forksPage: 1,
+  forksHasMore: false,
   forkSort: { field: 'pushed', asc: false },
   selectedFork: 0,
   forkScroll: 0,
@@ -91,6 +97,15 @@ let appState = {
   rateLimit: { remaining: null, limit: null, reset: null },
   // Phase D additions — help overlay.
   showHelp: false,
+  // Phase F additions — dashboard widgets.
+  events: [],              // recent activity feed for the authenticated user
+  trending: [],            // top trending public repos created in last 7 days
+  starred: [],             // repos the user has starred
+  dashboardLoaded: false,  // so we only auto-load widgets once per session
+  // Phase G additions — repo filter + analyze sub-view toggle.
+  repoFilter: '',          // case-insensitive substring filter for personal repos
+  detailsPane: 'overview', // 'overview' | 'issues' | 'prs' — sub-view inside Analyze→details
+  detailsScroll: 0,        // scroll offset inside issues/prs sub-pane
 };
 
 function loadToken() {
@@ -240,6 +255,8 @@ async function loadUserData() {
       appState.reposPage = 1;
       appState.reposHasMore = appState.repos.length >= REPOS_PER_PAGE;
       if (isStale(gen)) return;
+      // Kick off dashboard widgets in the background — don't block the UI.
+      loadDashboardWidgets().catch(() => {});
     }
   } catch (e) {
     if (!isStale(gen)) {
@@ -357,6 +374,9 @@ async function submitLogin() {
       appState.repos = await getUserRepositories(token, 1, REPOS_PER_PAGE);
       appState.reposPage = 1;
       appState.reposHasMore = appState.repos.length >= REPOS_PER_PAGE;
+      // Fire-and-forget dashboard widgets so user sees a full home screen immediately.
+      appState.dashboardLoaded = false;
+      loadDashboardWidgets().catch(() => {});
       showMessage(`Logged in as ${user.login}`, 'success');
     } else {
       showMessage('Invalid token', 'error');
@@ -373,6 +393,8 @@ async function loadRepoDetails(owner, name) {
   appState.loading = true;
   // Reset any stale enriched data from a previous repo so old contributors
   // don't briefly render under a new repo's name.
+  appState.detailsPane = 'overview';
+  appState.detailsScroll = 0;
   appState.repoLanguages = null;
   appState.repoContributors = [];
   appState.repoReleases = [];
@@ -430,6 +452,8 @@ async function loadForks() {
     const forks = await getRepositoryForks(appState.token, owner, name, 1, 30);
     if (isStale(gen)) return;
     appState.forks = forks;
+    appState.forksPage = 1;
+    appState.forksHasMore = forks.length >= 30;
 
     const defaultBranch = repo.default_branch || 'main';
 
@@ -469,6 +493,78 @@ async function loadForks() {
   }
   appState.loading = false;
   if (!isStale(gen)) render();
+}
+
+async function loadMoreForks() {
+  const repo = appState.repoDetails;
+  if (!repo || !appState.forksHasMore) return;
+  const gen = startAsync();
+  appState.loading = true;
+  render();
+  try {
+    const [owner, name] = repo.full_name.split('/');
+    const page = appState.forksPage + 1;
+    const more = await getRepositoryForks(appState.token, owner, name, page, 30);
+    if (isStale(gen)) return;
+    // Compute compares for the new batch in parallel too.
+    const defaultBranch = repo.default_branch || 'main';
+    const offset = appState.forks.length;
+    appState.forks = [...appState.forks, ...more];
+    appState.forksPage = page;
+    appState.forksHasMore = more.length >= 30;
+
+    const CONCURRENCY = 5;
+    let cursor = 0;
+    const worker = async () => {
+      while (true) {
+        const i = cursor++;
+        if (i >= more.length) return;
+        if (isStale(gen)) return;
+        const forkOwner = more[i].owner?.login;
+        if (!forkOwner) continue;
+        try {
+          const compare = await getCompare(
+            appState.token, owner, name, defaultBranch, `${forkOwner}:${defaultBranch}`);
+          if (isStale(gen)) return;
+          appState.forks[offset + i]._aheadBehind = compare
+            ? { ahead: compare.ahead_by || 0, behind: compare.behind_by || 0 }
+            : { ahead: 0, behind: 0 };
+        } catch {
+          appState.forks[offset + i]._aheadBehind = { ahead: 0, behind: 0 };
+        }
+      }
+    };
+    await Promise.all(Array.from({ length: CONCURRENCY }, worker));
+    if (!isStale(gen)) showMessage(`Loaded ${appState.forks.length} forks total`, 'success');
+  } catch (e) {
+    if (!isStale(gen)) showMessage(e.message || 'Failed to load more forks', 'error');
+  }
+  appState.loading = false;
+  if (!isStale(gen)) render();
+}
+
+async function loadDashboardWidgets(force = false) {
+  if (!appState.token || !appState.user) return;
+  if (appState.dashboardLoaded && !force) return;
+  const gen = startAsync();
+  const username = appState.user.login;
+  try {
+    // All best-effort — a single failure shouldn't kill the dashboard.
+    const safe = (p) => p.catch(() => null);
+    const [events, trending, starred] = await Promise.all([
+      safe(getUserEvents(appState.token, username, 15)),
+      safe(getTrendingRepos(appState.token, 7, 5)),
+      safe(getStarredRepos(appState.token, 1, 30)),
+    ]);
+    if (isStale(gen)) return;
+    appState.events = Array.isArray(events) ? events : [];
+    appState.trending = Array.isArray(trending) ? trending : [];
+    appState.starred = Array.isArray(starred) ? starred : [];
+    appState.dashboardLoaded = true;
+    render();
+  } catch (e) {
+    if (!isStale(gen)) showMessage(`Dashboard widgets failed: ${e.message}`, 'error');
+  }
 }
 
 async function loadNotifications() {
@@ -593,13 +689,13 @@ function render() {
     if (appState.inputMode) {
       statusLeft = `[ESC] Cancel  [Enter] Confirm`;
     } else if (currentTab === 1) {
-      statusLeft = `[n/s/f/i/u] Sort  [↑↓jk] Nav  [Space] Load more  [q] Quit`;
+      statusLeft = `[n/s/f/i/u] Sort  [/] Filter  [↑↓jk] Nav  [Space] More  [?] Help  [q] Quit`;
     } else if (currentTab === 2) {
       const v = appState.analyzeView;
-      if (v === 'search') statusLeft = `[Enter/i] Search  [1-4] Tabs  [q] Quit`;
-      else if (v === 'results') statusLeft = `[↑↓jk] Nav  [Enter] View  [Space] More  [Esc/i] Back  [q] Quit`;
-      else if (v === 'details') statusLeft = `[Enter] Forks  [Esc/h] Back  [1-4] Tabs  [q] Quit`;
-      else if (v === 'forks') statusLeft = `[↑↓jk] Nav  [p/s/n] Sort  [Esc/h] Back  [q] Quit`;
+      if (v === 'search') statusLeft = `[Enter/i] Search  [1-5] Tabs  [?] Help  [q] Quit`;
+      else if (v === 'results') statusLeft = `[↑↓jk] Nav  [Enter] View  [Space] More  [o] Browser  [Esc/i] Back`;
+      else if (v === 'details') statusLeft = `[Enter] Forks  [i] Issues  [P] PRs  [O] Overview  [o] Browser  [r] Refresh  [Esc/h] Back`;
+      else if (v === 'forks') statusLeft = `[↑↓jk] Nav  [Space] More  [p/s/n] Sort  [o] Browser  [Esc/h] Back`;
     } else if (currentTab === 4) {
       statusLeft = `[↑↓jk] Nav  [Enter] Open  [r] Refresh  [o] Browser  [?] Help  [q] Quit`;
     } else {
@@ -615,66 +711,269 @@ function render() {
   screen.render();
 }
 
+// ────────────────────────────────────────────────────────────────────────────
+// Dashboard helpers
+// ────────────────────────────────────────────────────────────────────────────
+
+// Format a Date as a short relative string: "3h", "2d", "5w".
+function relTime(iso) {
+  if (!iso) return '';
+  const d = (Date.now() - new Date(iso).getTime()) / 1000;
+  if (d < 60) return `${Math.floor(d)}s`;
+  if (d < 3600) return `${Math.floor(d / 60)}m`;
+  if (d < 86400) return `${Math.floor(d / 3600)}h`;
+  if (d < 86400 * 30) return `${Math.floor(d / 86400)}d`;
+  if (d < 86400 * 365) return `${Math.floor(d / 86400 / 30)}mo`;
+  return `${Math.floor(d / 86400 / 365)}y`;
+}
+
+// Map a GitHub event type to a compact, scannable label + icon.
+function eventGlyph(type) {
+  switch (type) {
+    case 'PushEvent':              return ['↑', 'green',  'pushed'];
+    case 'PullRequestEvent':       return ['⇄', 'cyan',   'PR'];
+    case 'IssuesEvent':            return ['◉', 'yellow', 'issue'];
+    case 'IssueCommentEvent':      return ['✎', 'dim',    'commented'];
+    case 'PullRequestReviewEvent': return ['★', 'cyan',   'reviewed'];
+    case 'WatchEvent':             return ['☆', 'yellow', 'starred'];
+    case 'ForkEvent':              return ['⑂', 'magenta','forked'];
+    case 'CreateEvent':            return ['+', 'green',  'created'];
+    case 'DeleteEvent':            return ['−', 'red',    'deleted'];
+    case 'ReleaseEvent':           return ['▶', 'cyan',   'released'];
+    case 'PublicEvent':            return ['◎', 'green',  'made public'];
+    default:                       return ['•', 'dim',    type ? type.replace('Event','') : '?'];
+  }
+}
+
+// Draw a labeled stat card. Returns nothing.
+function drawCard(x, y, w, label, value, valueColor = 'bright') {
+  // Top + bottom border
+  screen.writeStr(x, y,     '┌' + '─'.repeat(Math.max(0, w - 2)) + '┐', 'dim');
+  screen.writeStr(x, y + 3, '└' + '─'.repeat(Math.max(0, w - 2)) + '┘', 'dim');
+  screen.setCell(x, y + 1, '│', 'dim');
+  screen.setCell(x + w - 1, y + 1, '│', 'dim');
+  screen.setCell(x, y + 2, '│', 'dim');
+  screen.setCell(x + w - 1, y + 2, '│', 'dim');
+  // Label (dim) + value (bold)
+  screen.writeStr(x + 2, y + 1, label.substring(0, w - 4), 'dim');
+  screen.writeStr(x + 2, y + 2, String(value).substring(0, w - 4), valueColor);
+}
+
 function renderDashboard(y, h) {
   const W = screen.width;
   const user = appState.user;
 
   if (!user) {
     screen.writeStr(4, y + 2, 'Not authenticated. Go to Settings [4] to login.', 'dim');
+    screen.writeStr(4, y + 4, 'Once logged in, this Dashboard will show:', 'dim');
+    screen.writeStr(6, y + 5, '• Account stats & language breakdown', 'dim');
+    screen.writeStr(6, y + 6, '• Recent activity feed', 'dim');
+    screen.writeStr(6, y + 7, '• Top repos by stars', 'dim');
+    screen.writeStr(6, y + 8, '• Trending repos this week', 'dim');
+    screen.writeStr(6, y + 9, '• Unread notifications badge', 'dim');
     return;
   }
 
-  screen.writeStr(4, y, 'Account Information', 'bright');
+  // ── Greeting row ────────────────────────────────────────────────
+  const hour = new Date().getHours();
+  const greet = hour < 5  ? 'Good night'
+              : hour < 12 ? 'Good morning'
+              : hour < 18 ? 'Good afternoon'
+              :             'Good evening';
+  const heading = `${greet}, ${user.name || user.login} 👋`;
+  screen.writeStr(4, y, heading, 'bright');
+
+  // Notifications badge on the right
+  const unread = appState.notifications.filter(n => n.unread).length;
+  if (unread > 0) {
+    const badge = `🔔 ${unread} unread`;
+    screen.writeStr(Math.max(4, W - badge.length - 2), y, badge, 'yellow');
+  } else if (appState.notifications.length > 0) {
+    screen.writeStr(Math.max(4, W - 12), y, '🔔 inbox 0', 'dim');
+  }
   screen.hline(y + 1, '─');
 
-  const info = [
-    ['Login:', user.login],
-    ['Name:', user.name || 'N/A'],
-    ['Email:', user.email || 'N/A'],
-    ['Bio:', user.bio || 'N/A'],
-    ['Public Repos:', String(user.public_repos || 0)],
-    ['Private Repos:', String(user.total_private_repos || 0)],
-    ['Followers:', String(user.followers || 0)],
-    ['Following:', String(user.following || 0)],
+  // ── Stat cards row ──────────────────────────────────────────────
+  const cardY = y + 2;
+  const totalStars = appState.repos.reduce((a, r) => a + (r.stargazers_count || 0), 0);
+  const totalForks = appState.repos.reduce((a, r) => a + (r.forks_count || 0), 0);
+  const langSet = new Set(appState.repos.map(r => r.language).filter(Boolean));
+  const accountAgeYears = user.created_at
+    ? ((Date.now() - new Date(user.created_at).getTime()) / (365.25 * 86400 * 1000)).toFixed(1)
+    : '?';
+
+  // 4 evenly-spaced cards, 4 lines tall.
+  const cardCount = 4;
+  const margin = 4;
+  const gap = 2;
+  const cardW = Math.max(14, Math.floor((W - margin * 2 - gap * (cardCount - 1)) / cardCount));
+  const cards = [
+    ['★ Total Stars',  String(totalStars), 'yellow'],
+    ['⑂ Total Forks',  String(totalForks), 'cyan'],
+    ['◆ Languages',    String(langSet.size), 'magenta'],
+    ['⏱ Account Age',  `${accountAgeYears}y`, 'green'],
   ];
-
-  info.forEach(([key, val], i) => {
-    if (y + 2 + i >= y + h) return;
-    screen.writeStr(4, y + 2 + i, key, 'bright');
-    screen.writeStr(18, y + 2 + i, String(val).substring(0, W - 22));
+  cards.forEach((c, i) => {
+    const cx = margin + i * (cardW + gap);
+    if (cardY + 3 >= y + h) return;
+    drawCard(cx, cardY, cardW, c[0], c[1], c[2]);
   });
 
-  const repoY = y + 12;
-  if (repoY + 1 >= y + h) return;
+  // ── Two-column body: left = profile + top repos, right = activity feed + trending
+  const bodyY = cardY + 5;
+  if (bodyY >= y + h) return;
+  const splitX = Math.floor(W / 2);
+  const leftX = 4;
+  const rightX = splitX + 2;
+  const bodyH = (y + h) - bodyY;
 
-  screen.writeStr(4, repoY, 'Recent Repositories', 'bright');
-  screen.hline(repoY + 1, '─');
+  // ── LEFT COLUMN ─────────────────────────────────────────────────
+  let ly = bodyY;
 
-  const repos = appState.repos.slice(0, Math.min(5, h - 16));
-  repos.forEach((repo, i) => {
-    if (repoY + 2 + i >= y + h) return;
-    screen.writeStr(4, repoY + 2 + i, `● ${repo.name}`);
-    screen.writeStr(32, repoY + 2 + i, `★${repo.stargazers_count} ⑂${repo.forks_count}`, 'dim');
-  });
+  // Profile mini
+  screen.writeStr(leftX, ly++, 'Profile', 'bright');
+  const profile = [
+    ['@' + user.login, ''],
+    [user.email || '—', 'dim'],
+    [`Followers: ${user.followers || 0}  Following: ${user.following || 0}`, 'dim'],
+    [`Public: ${user.public_repos || 0}  Private: ${user.total_private_repos || 0}`, 'dim'],
+  ];
+  for (const [txt, style] of profile) {
+    if (ly >= y + h - 1) break;
+    screen.writeStr(leftX, ly++, txt.substring(0, splitX - leftX - 1), style || null);
+  }
+  ly++;
+
+  // Top repos by stars
+  if (ly < y + h - 2) {
+    screen.writeStr(leftX, ly++, '★ Top Repos by Stars', 'bright');
+    const top = [...appState.repos]
+      .sort((a, b) => (b.stargazers_count || 0) - (a.stargazers_count || 0))
+      .slice(0, 5);
+    if (top.length === 0) {
+      screen.writeStr(leftX, ly++, '(no repos)', 'dim');
+    } else {
+      for (const r of top) {
+        if (ly >= y + h - 1) break;
+        const stars = `★${r.stargazers_count || 0}`;
+        screen.writeStr(leftX, ly, r.name.substring(0, splitX - leftX - 10));
+        screen.writeStr(splitX - 8, ly, stars, 'yellow');
+        ly++;
+      }
+    }
+    ly++;
+  }
+
+  // Aggregate language breakdown (counts how many repos use each language)
+  if (ly < y + h - 2 && appState.repos.length > 0) {
+    screen.writeStr(leftX, ly++, '◆ Languages Across Repos', 'bright');
+    const langCount = {};
+    for (const r of appState.repos) {
+      if (r.language) langCount[r.language] = (langCount[r.language] || 0) + 1;
+    }
+    const total = Object.values(langCount).reduce((a, b) => a + b, 0);
+    const sorted = Object.entries(langCount).sort((a, b) => b[1] - a[1]).slice(0, 4);
+    const barW = Math.max(6, splitX - leftX - 22);
+    if (sorted.length === 0) {
+      screen.writeStr(leftX, ly++, '(no language metadata)', 'dim');
+    } else {
+      for (const [lang, count] of sorted) {
+        if (ly >= y + h - 1) break;
+        const pct = count / total;
+        const filled = Math.max(1, Math.round(pct * barW));
+        const bar = '█'.repeat(filled) + '░'.repeat(Math.max(0, barW - filled));
+        screen.writeStr(leftX, ly, lang.substring(0, 10).padEnd(11));
+        screen.writeStr(leftX + 11, ly, bar, 'cyan');
+        screen.writeStr(leftX + 12 + barW, ly, `${count}`, 'dim');
+        ly++;
+      }
+    }
+  }
+
+  // ── RIGHT COLUMN ────────────────────────────────────────────────
+  let ry = bodyY;
+  const rightW = W - rightX - 2;
+
+  // Activity feed
+  screen.writeStr(rightX, ry++, '⚡ Recent Activity', 'bright');
+  if (appState.events.length === 0) {
+    screen.writeStr(rightX, ry++, appState.dashboardLoaded
+      ? '(no recent public events)'
+      : 'Loading…', 'dim');
+  } else {
+    const maxEvents = Math.min(8, Math.max(1, Math.floor(bodyH * 0.5)));
+    for (const ev of appState.events.slice(0, maxEvents)) {
+      if (ry >= y + h - 1) break;
+      const [icon, color, label] = eventGlyph(ev.type);
+      const repo = (ev.repo?.name || '?').substring(0, Math.max(10, rightW - 22));
+      const when = relTime(ev.created_at);
+      screen.writeStr(rightX, ry, icon, color);
+      screen.writeStr(rightX + 2, ry, label.substring(0, 11).padEnd(11), 'dim');
+      screen.writeStr(rightX + 14, ry, repo);
+      // right-align the relative time
+      screen.writeStr(rightX + rightW - when.length - 1, ry, when, 'dim');
+      ry++;
+    }
+  }
+  ry++;
+
+  // Trending repos
+  if (ry < y + h - 2) {
+    screen.writeStr(rightX, ry++, '🔥 Trending This Week', 'bright');
+    if (appState.trending.length === 0) {
+      screen.writeStr(rightX, ry++, appState.dashboardLoaded
+        ? '(none)' : 'Loading…', 'dim');
+    } else {
+      for (const r of appState.trending.slice(0, 5)) {
+        if (ry >= y + h - 1) break;
+        const name = (r.full_name || '?').substring(0, Math.max(10, rightW - 12));
+        const stars = `★${r.stargazers_count || 0}`;
+        screen.writeStr(rightX, ry, name);
+        screen.writeStr(rightX + rightW - stars.length - 1, ry, stars, 'yellow');
+        ry++;
+      }
+    }
+  }
 }
 
 function renderRepos(y, h) {
   const W = screen.width;
-  const repos = sortRepos(appState.repos, appState.repoSort);
+  let repos = sortRepos(appState.repos, appState.repoSort);
+
+  // Apply substring filter if active.
+  if (appState.repoFilter) {
+    const q = appState.repoFilter.toLowerCase();
+    repos = repos.filter(r =>
+      (r.name || '').toLowerCase().includes(q) ||
+      (r.description || '').toLowerCase().includes(q) ||
+      (r.language || '').toLowerCase().includes(q)
+    );
+  }
+
+  // Aggregate stats over the *unfiltered* list — gives a true account-wide picture.
+  const totalStars = appState.repos.reduce((a, r) => a + (r.stargazers_count || 0), 0);
+  const totalForks = appState.repos.reduce((a, r) => a + (r.forks_count || 0), 0);
+  const totalIssues = appState.repos.reduce((a, r) => a + (r.open_issues_count || 0), 0);
+
+  const headerRight = `★${totalStars}  ⑂${totalForks}  ⚡${totalIssues}  (${appState.repos.length} repos)`;
+  screen.writeStr(4, y, 'Your Repositories', 'bright');
+  screen.writeStr(Math.max(4, W - headerRight.length - 2), y, headerRight, 'dim');
+  screen.hline(y + 1, '─');
 
   if (!repos || repos.length === 0) {
-    screen.writeStr(4, y + 2, 'No repositories found', 'dim');
+    const msg = appState.repoFilter
+      ? `No repos match "${appState.repoFilter}"  [c] Clear filter  [/] New filter`
+      : 'No repositories found';
+    screen.writeStr(4, y + 2, msg, 'dim');
     return;
   }
 
-  screen.writeStr(4, y, 'Your Repositories', 'bright');
-  screen.hline(y + 1, '─');
-
   const sortInfo = REPO_SORT_OPTIONS.find(o => o.field === appState.repoSort.field);
   const sortDir = appState.repoSort.asc ? '↑' : '↓';
-  screen.writeStr(4, y + 2, `Sort: ${sortInfo.label} ${sortDir}`, 'cyan');
+  const filterTag = appState.repoFilter ? `  •  Filter: "${appState.repoFilter}" [c] clear` : '';
+  screen.writeStr(4, y + 2, `Sort: ${sortInfo.label} ${sortDir}${filterTag}`, 'cyan');
 
-  const sortKeys = REPO_SORT_OPTIONS.map(o => `[${o.key}]${o.label}`).join('  ');
+  const sortKeys = REPO_SORT_OPTIONS.map(o => `[${o.key}]${o.label}`).join('  ') + '  [/] Filter';
   screen.writeStr(4, y + 3, sortKeys, 'dim');
 
   const headerY = y + 4;
@@ -769,7 +1068,31 @@ function renderRepoDetails(y, maxH) {
   const W = screen.width;
 
   screen.writeStr(4, y, `▸ ${repo.full_name}`, 'bright');
+  // Pane tabs — show which sub-view is active.
+  const panes = [
+    ['overview', 'Overview', 'O'],
+    ['issues',   `Issues (${appState.repoIssues.length})`, 'i'],
+    ['prs',      `PRs (${appState.repoPullRequests.length})`, 'P'],
+  ];
+  let px = 4;
+  for (const [id, label, key] of panes) {
+    const sel = appState.detailsPane === id;
+    const text = `[${key}] ${label}`;
+    screen.writeStr(W - (panes.reduce((a, p) => a + p[1].length + p[2].length + 6, 0)) + px - 4, y,
+      text, sel ? 'bright' : 'dim');
+    px += text.length + 2;
+  }
   screen.hline(y + 1, '─');
+
+  // Delegate to a sub-renderer when not on the overview pane.
+  if (appState.detailsPane === 'issues') {
+    renderIssuesPane(y + 2, maxH - 2);
+    return;
+  }
+  if (appState.detailsPane === 'prs') {
+    renderPRsPane(y + 2, maxH - 2);
+    return;
+  }
 
   // Left column: factual metadata.
   const leftWidth = Math.min(48, Math.floor(W / 2));
@@ -852,6 +1175,61 @@ function renderRepoDetails(y, maxH) {
   }
 }
 
+function renderIssuesPane(y, maxH) {
+  const W = screen.width;
+  const items = appState.repoIssues;
+  screen.writeStr(4, y, `Open Issues (${items.length})`, 'bright');
+  if (items.length === 0) {
+    screen.writeStr(4, y + 2, '(no open issues)', 'dim');
+    return;
+  }
+  const start = appState.detailsScroll;
+  const rows = Math.max(1, maxH - 3);
+  for (let i = 0; i < rows && start + i < items.length; i++) {
+    const it = items[start + i];
+    const row = y + 2 + i;
+    const num = `#${it.number}`;
+    const labels = (it.labels || []).map(l => l.name).slice(0, 2).join(', ');
+    screen.writeStr(4, row, num.padEnd(7), 'yellow');
+    screen.writeStr(11, row, (it.title || '?').substring(0, W - 32));
+    screen.writeStr(W - 22, row, (it.user?.login || '').substring(0, 12), 'dim');
+    if (labels) {
+      // Trim too-long label cell to keep alignment.
+      screen.writeStr(W - 9, row, labels.substring(0, 8), 'magenta');
+    }
+  }
+  if (items.length > rows) {
+    screen.writeStr(4, y + 2 + rows, `${start + 1}-${Math.min(start + rows, items.length)} of ${items.length}  [↑↓] scroll`, 'dim');
+  }
+}
+
+function renderPRsPane(y, maxH) {
+  const W = screen.width;
+  const items = appState.repoPullRequests;
+  screen.writeStr(4, y, `Open Pull Requests (${items.length})`, 'bright');
+  if (items.length === 0) {
+    screen.writeStr(4, y + 2, '(no open PRs)', 'dim');
+    return;
+  }
+  const start = appState.detailsScroll;
+  const rows = Math.max(1, maxH - 3);
+  for (let i = 0; i < rows && start + i < items.length; i++) {
+    const pr = items[start + i];
+    const row = y + 2 + i;
+    const num = `#${pr.number}`;
+    const draft = pr.draft ? '[draft] ' : '';
+    screen.writeStr(4, row, num.padEnd(7), 'cyan');
+    screen.writeStr(11, row, (draft + (pr.title || '?')).substring(0, W - 32),
+      pr.draft ? 'dim' : null);
+    screen.writeStr(W - 22, row, (pr.user?.login || '').substring(0, 12), 'dim');
+    const branch = (pr.head?.ref || '').substring(0, 8);
+    screen.writeStr(W - 9, row, branch, 'magenta');
+  }
+  if (items.length > rows) {
+    screen.writeStr(4, y + 2 + rows, `${start + 1}-${Math.min(start + rows, items.length)} of ${items.length}  [↑↓] scroll`, 'dim');
+  }
+}
+
 function renderForks(y, maxH) {
   const W = screen.width;
   const forks = sortForks(appState.forks, appState.forkSort);
@@ -902,9 +1280,14 @@ function renderForks(y, maxH) {
 
   const infoY = headerY + 1 + maxRows + 1;
   if (infoY < y + maxH) {
-    screen.writeStr(4, infoY, `Esc back  [p/s/n] Sort`, 'dim');
+    const more = appState.forksHasMore ? '  [Space] Load more' : '';
+    const range = `${start + 1}-${Math.min(start + maxRows, forks.length)} of ${forks.length}`;
+    screen.writeStr(4, infoY, `${range}${more}  •  Esc back  [p/s/n] Sort`, 'dim');
   }
 }
+
+// Bump alongside meaningful releases.
+const APP_VERSION = '0.2.0';
 
 function renderSettings(y, h) {
   const W = screen.width;
@@ -913,39 +1296,90 @@ function renderSettings(y, h) {
   screen.writeStr(4, y, 'Settings', 'bright');
   screen.hline(y + 1, '─');
 
+  // ── Actions list ─────────────────────────────────────────────
   const items = [
-    { label: 'Login', desc: isLoggedIn ? 'Already logged in' : 'Press Enter to login', enabled: !isLoggedIn },
-    { label: 'Logout', desc: isLoggedIn ? 'Press Enter to logout' : 'Not logged in', enabled: isLoggedIn },
-    { label: 'Token', desc: isLoggedIn ? '••••••••••••' : 'Not set', enabled: false },
+    { label: 'Login',              desc: isLoggedIn ? 'Already logged in' : 'Press Enter to login', enabled: !isLoggedIn },
+    { label: 'Logout',             desc: isLoggedIn ? 'Press Enter to logout' : 'Not logged in',    enabled: isLoggedIn },
+    { label: 'Refresh Dashboard',  desc: 'Re-fetch events, trending, starred',                      enabled: isLoggedIn },
+    { label: 'Refresh User Data',  desc: 'Re-fetch profile and repositories',                       enabled: isLoggedIn },
+    { label: 'Clear Token File',   desc: 'Wipe ~/.github-tui/token (also logs out)',                enabled: isLoggedIn },
+    { label: 'Token (display)',    desc: isLoggedIn ? '•••••••••••• (hidden)' : 'Not set',           enabled: false },
   ];
+  // Sync max cursor with current list size.
+  appState._maxSettingsCursor = items.length - 1;
 
   items.forEach((item, i) => {
     const row = y + 2 + i;
+    if (row >= y + h - 1) return;
     const sel = appState.settingsCursor === i;
     screen.writeStr(4, row, sel ? ' ▶ ' : '   ');
-    screen.writeStr(7, row, item.label, sel ? 'bright' : null);
-    screen.writeStr(24, row, item.desc, item.enabled ? 'dim' : 'dim');
+    screen.writeStr(7, row, item.label, sel ? 'bright' : (item.enabled ? null : 'dim'));
+    screen.writeStr(28, row, item.desc.substring(0, W - 30), 'dim');
   });
 
-  const helpY = y + 7;
-  if (helpY + 3 < y + h) {
-    screen.writeStr(4, helpY, 'Keys:', 'bright');
-    screen.writeStr(4, helpY + 1, '  ↑/↓ or j/k  Navigate', 'dim');
-    screen.writeStr(4, helpY + 2, '  Enter        Select', 'dim');
+  // ── Info box on the right ───────────────────────────────────
+  const infoX = Math.min(W - 38, Math.floor(W * 0.55));
+  if (infoX > 30) {
+    const lines = [
+      ['App version',  APP_VERSION,             'cyan'],
+      ['Config dir',   CONFIG_DIR,              null],
+      ['Token file',   TOKEN_FILE,              null],
+      ['Node',         process.version,         null],
+      ['Platform',     `${process.platform} ${process.arch}`, null],
+      ['Terminal',     `${W}×${screen.height}`, null],
+    ];
+    if (lastRateLimit.remaining !== null) {
+      const resetIn = lastRateLimit.reset
+        ? Math.max(0, Math.floor((lastRateLimit.reset * 1000 - Date.now()) / 60000))
+        : '?';
+      lines.push(['API remaining', `${lastRateLimit.remaining}/${lastRateLimit.limit}`, 'yellow']);
+      lines.push(['API resets in', `${resetIn} min`, 'dim']);
+    }
+    screen.writeStr(infoX, y + 2, 'System', 'bright');
+    lines.forEach(([k, v, color], i) => {
+      const row = y + 3 + i;
+      if (row >= y + h - 1) return;
+      screen.writeStr(infoX, row, `${k}:`, 'dim');
+      screen.writeStr(infoX + 16, row, String(v).substring(0, W - infoX - 17), color || null);
+    });
   }
 
-  if (isLoggedIn && appState.user) {
-    const infoY = helpY + 5;
-    if (infoY + 2 < y + h) {
-      screen.writeStr(4, infoY, `Logged in as: ${appState.user.login}`, 'cyan');
-      screen.writeStr(4, infoY + 1, `Repos: ${appState.repos.length}`, 'dim');
+  // ── Footer help ─────────────────────────────────────────────
+  const helpY = y + 2 + items.length + 1;
+  if (helpY + 2 < y + h) {
+    screen.writeStr(4, helpY, '↑/↓ Navigate   Enter Select   ? Help overlay', 'dim');
+    if (isLoggedIn && appState.user) {
+      screen.writeStr(4, helpY + 1,
+        `Signed in as ${appState.user.login}  •  ${appState.repos.length} repos loaded`, 'cyan');
     }
+  }
+}
+
+// Color-code notification subject types for instant scanning.
+function notifTypeColor(type) {
+  switch (type) {
+    case 'PullRequest':       return 'cyan';
+    case 'Issue':             return 'yellow';
+    case 'Release':           return 'green';
+    case 'Discussion':        return 'magenta';
+    case 'Commit':            return 'blue';
+    case 'CheckSuite':        return 'red';
+    default:                  return 'dim';
   }
 }
 
 function renderInbox(y, h) {
   const W = screen.width;
+  const list = appState.notifications;
+  const unreadCount = list.filter(n => n.unread).length;
+
   screen.writeStr(4, y, 'Notifications', 'bright');
+  // Right side: counts.
+  if (list.length > 0) {
+    const counts = `${unreadCount} unread / ${list.length} total`;
+    screen.writeStr(Math.max(4, W - counts.length - 2), y, counts,
+      unreadCount > 0 ? 'yellow' : 'dim');
+  }
   screen.hline(y + 1, '─');
 
   if (!appState.token) {
@@ -953,22 +1387,44 @@ function renderInbox(y, h) {
     return;
   }
 
-  if (appState.notifications.length === 0) {
+  if (list.length === 0) {
     screen.writeStr(4, y + 2, appState.loading
       ? 'Loading…'
-      : 'Press [r] to refresh — your inbox may simply be empty.', 'dim');
+      : '✨ Inbox zero! Press [r] to refresh.', 'dim');
     return;
   }
 
+  // ── Group-by-repo summary on the right (top 5 noisy repos) ──
+  const repoCounts = {};
+  for (const n of list) {
+    const r = n.repository?.full_name;
+    if (!r) continue;
+    repoCounts[r] = (repoCounts[r] || 0) + 1;
+  }
+  const topRepos = Object.entries(repoCounts).sort((a, b) => b[1] - a[1]).slice(0, 5);
+  const summaryX = Math.max(W - 32, Math.floor(W * 0.65));
+  if (summaryX > 40) {
+    screen.writeStr(summaryX, y + 2, 'By Repo', 'bright');
+    topRepos.forEach(([repo, count], i) => {
+      const row = y + 3 + i;
+      if (row >= y + h - 1) return;
+      const short = repo.substring(0, W - summaryX - 6);
+      screen.writeStr(summaryX, row, short, 'dim');
+      screen.writeStr(W - 4, row, String(count), 'cyan');
+    });
+  }
+
+  // ── Main list ──────────────────────────────────────────────
   const headerY = y + 2;
-  screen.writeStr(4, headerY, 'Repo', 'bright');
-  screen.writeStr(36, headerY, 'Type', 'bright');
-  screen.writeStr(48, headerY, 'Reason', 'bright');
-  screen.writeStr(64, headerY, 'When', 'bright');
+  const listW = summaryX > 40 ? summaryX - 6 : W - 4;
+  // Column widths designed to fit narrower terminals.
+  screen.writeStr(4, headerY, ' Type', 'bright');
+  screen.writeStr(16, headerY, 'Repo / Title', 'bright');
+  screen.writeStr(Math.min(listW - 12, 56), headerY, 'Reason', 'bright');
+  screen.writeStr(Math.min(listW - 4, 68), headerY, 'When', 'bright');
 
   const maxRows = Math.max(1, h - 5);
   const start = appState.inboxScroll;
-  const list = appState.notifications;
 
   for (let i = 0; i < maxRows && start + i < list.length; i++) {
     const n = list[start + i];
@@ -976,19 +1432,31 @@ function renderInbox(y, h) {
     const sel = start + i === appState.selectedNotification;
     const unread = n.unread;
 
-    screen.writeStr(2, row, sel ? '▶' : ' ');
-    screen.writeStr(4, row, (n.repository?.full_name || '?').substring(0, 30),
+    // Selection marker + unread dot.
+    screen.writeStr(2, row, sel ? '▶' : ' ', sel ? 'bright' : null);
+    screen.writeStr(3, row, unread ? '●' : ' ', unread ? 'yellow' : 'dim');
+
+    const type = n.subject?.type || '?';
+    screen.writeStr(5, row, type.substring(0, 10).padEnd(11), notifTypeColor(type));
+
+    // Repo · Title — combined for context.
+    const repo = (n.repository?.full_name || '?').split('/')[1] || n.repository?.full_name || '?';
+    const title = n.subject?.title || '';
+    const combined = `${repo} · ${title}`;
+    const titleW = Math.min(listW - 30, 40);
+    screen.writeStr(16, row, combined.substring(0, titleW),
       sel ? 'bright' : (unread ? null : 'dim'));
-    screen.writeStr(36, row, (n.subject?.type || '?').substring(0, 10), 'dim');
-    screen.writeStr(48, row, (n.reason || '?').substring(0, 14), 'dim');
-    const when = n.updated_at ? new Date(n.updated_at).toLocaleDateString() : '';
-    screen.writeStr(64, row, when, 'dim');
+
+    screen.writeStr(Math.min(listW - 12, 56), row,
+      (n.reason || '?').substring(0, 11), 'dim');
+    const when = n.updated_at ? relTime(n.updated_at) : '';
+    screen.writeStr(Math.min(listW - 4, 68), row, when, 'dim');
   }
 
   const infoY = headerY + 1 + Math.min(maxRows, list.length) + 1;
   if (infoY < y + h) {
     screen.writeStr(4, infoY,
-      `${list.length} total  [r] Refresh  [↑↓jk] Nav  [Enter] Open`, 'dim');
+      `[r] Refresh  [↑↓jk] Nav  [Enter/o] Open in browser`, 'dim');
   }
 }
 
@@ -998,19 +1466,30 @@ function renderHelp() {
   const lines = [
     'Keyboard Shortcuts',
     '',
-    '  1-5 / Tab       Switch tabs',
-    '  ↑↓ or j/k       Navigate lists',
-    '  Enter           Select / drill in',
-    '  Esc / h         Back',
-    '  Space           Load more',
-    '  /               Filter repos (Repos tab)',
-    '  o               Open in browser',
-    '  r               Refresh current view',
-    '  ?               Toggle this help',
-    '  q / Ctrl-C      Quit',
+    '── Global ─────────────────────────────────',
+    '  1-5 / Tab           Switch tabs',
+    '  ↑↓ or j/k           Navigate lists',
+    '  Enter               Select / drill in',
+    '  Esc / h             Back',
+    '  Space               Load more (paginate)',
+    '  o                   Open in browser',
+    '  r                   Refresh current view',
+    '  ?                   Toggle this help',
+    '  q / Ctrl-C          Quit',
     '',
-    '  Repos sort:  n=name s=stars f=forks i=issues u=updated',
-    '  Forks sort:  p=pushed s=stars n=name',
+    '── Repos tab ──────────────────────────────',
+    '  /                   Filter repos',
+    '  c                   Clear active filter',
+    '  n s f i u           Sort: name/stars/forks/issues/updated',
+    '',
+    '── Analyze tab ────────────────────────────',
+    '  i                   Open search / toggle Issues pane',
+    '  P                   Toggle PRs pane (on details)',
+    '  O                   Reset to Overview pane',
+    '  Space               Load more (search / forks)',
+    '',
+    '── Forks view ─────────────────────────────',
+    '  p s n               Sort: pushed/stars/name',
     '',
     'Press any key to close',
   ];
@@ -1046,6 +1525,16 @@ function handleKey(key) {
       const ctx = appState.inputContext;
       if (ctx === 'search') submitSearch();
       else if (ctx === 'login') submitLogin();
+      else if (ctx === 'filter') {
+        appState.repoFilter = appState.inputBuffer.trim();
+        appState.repoScroll = 0;
+        appState.inputMode = null;
+        appState.inputBuffer = '';
+        appState.inputPrompt = '';
+        appState.inputContext = null;
+        showMessage(appState.repoFilter ? `Filtering: "${appState.repoFilter}"` : 'Filter cleared', 'info');
+        render();
+      }
     } else if (key === '\x1b') {
       cancelInput();
     } else if (key === '\x7f' || key === '\b') {
@@ -1075,11 +1564,34 @@ function handleKey(key) {
 
     case 'r':
       // Context-sensitive refresh.
-      if (currentTab === 0 || currentTab === 1) loadUserData();
-      else if (currentTab === 4) loadNotifications();
-      else if (currentTab === 2 && appState.analyzeView === 'details' && appState.repoDetails) {
+      if (currentTab === 0) {
+        // Dashboard: refresh both user data AND all the widget feeds.
+        loadUserData();
+        appState.dashboardLoaded = false;
+        loadDashboardWidgets(true);
+        showMessage('Refreshing dashboard…', 'info');
+      } else if (currentTab === 1) {
+        loadUserData();
+      } else if (currentTab === 4) {
+        loadNotifications();
+      } else if (currentTab === 2 && appState.analyzeView === 'details' && appState.repoDetails) {
         const [o, n] = appState.repoDetails.full_name.split('/');
         loadRepoDetails(o, n);
+      }
+      break;
+
+    case '/':
+      // Filter personal repos by substring (Repos tab only).
+      if (currentTab === 1) startInput('Filter: ', 'filter');
+      break;
+
+    case 'c':
+      // Clear the active repo filter quickly.
+      if (currentTab === 1 && appState.repoFilter) {
+        appState.repoFilter = '';
+        appState.repoScroll = 0;
+        showMessage('Filter cleared', 'info');
+        render();
       }
       break;
 
@@ -1164,6 +1676,14 @@ function handleKey(key) {
     case 'p':
       if (currentTab === 2 && appState.analyzeView === 'forks') toggleForkSort('pushed');
       break;
+    case 'P':
+      // Toggle PRs sub-pane on Analyze details view.
+      if (currentTab === 2) handleAnalyzeKey('P');
+      break;
+    case 'O':
+      // Reset to overview sub-pane on Analyze details view.
+      if (currentTab === 2) handleAnalyzeKey('O');
+      break;
   }
 }
 
@@ -1171,8 +1691,9 @@ function handleAnalyzeKey(key) {
   const v = appState.analyzeView;
   if (key === 'i') {
     if (v === 'details') {
-      appState.repoDetails = null;
-      appState.analyzeView = 'results';
+      // On details: toggle the Issues sub-pane instead of leaving the view.
+      appState.detailsPane = appState.detailsPane === 'issues' ? 'overview' : 'issues';
+      appState.detailsScroll = 0;
       render();
     } else {
       appState.repoDetails = null;
@@ -1180,7 +1701,22 @@ function handleAnalyzeKey(key) {
       appState.searchResults = [];
       appState.searchQuery = '';
       appState.analyzeView = 'search';
+      appState.detailsPane = 'overview';
       startInput('Search repos: ', 'search');
+    }
+  } else if (key === 'P') {
+    // Capital P toggles PRs on details (lowercase p is taken by fork sort).
+    if (v === 'details') {
+      appState.detailsPane = appState.detailsPane === 'prs' ? 'overview' : 'prs';
+      appState.detailsScroll = 0;
+      render();
+    }
+  } else if (key === 'O') {
+    // Capital O resets to overview pane.
+    if (v === 'details') {
+      appState.detailsPane = 'overview';
+      appState.detailsScroll = 0;
+      render();
     }
   }
 }
@@ -1190,6 +1726,8 @@ function handleSpace() {
     loadMoreRepos();
   } else if (currentTab === 2 && appState.analyzeView === 'results') {
     loadMoreSearchResults();
+  } else if (currentTab === 2 && appState.analyzeView === 'forks') {
+    loadMoreForks();
   }
 }
 
@@ -1212,10 +1750,35 @@ function handleEnter() {
     }
     case 3: {
       const isLoggedIn = !!appState.token;
-      if (appState.settingsCursor === 0 && !isLoggedIn) {
-        startInput('PAT token: ', 'login', true);
-      } else if (appState.settingsCursor === 1 && isLoggedIn) {
-        handleLogout();
+      switch (appState.settingsCursor) {
+        case 0: // Login
+          if (!isLoggedIn) startInput('PAT token: ', 'login', true);
+          else showMessage('Already logged in', 'info');
+          break;
+        case 1: // Logout
+          if (isLoggedIn) handleLogout();
+          else showMessage('Not logged in', 'warning');
+          break;
+        case 2: // Refresh Dashboard
+          if (isLoggedIn) {
+            appState.dashboardLoaded = false;
+            loadDashboardWidgets(true);
+            showMessage('Refreshing dashboard…', 'info');
+          }
+          break;
+        case 3: // Refresh User Data
+          if (isLoggedIn) {
+            loadUserData();
+            showMessage('Refreshing user data…', 'info');
+          }
+          break;
+        case 4: // Clear Token File
+          if (isLoggedIn) {
+            handleLogout();
+            showMessage('Token file wiped', 'success');
+          }
+          break;
+        // case 5 (Token display) is intentionally non-interactive.
       }
       break;
     }
@@ -1262,6 +1825,11 @@ function handleUp() {
       break;
     }
     case 2: {
+      if (appState.analyzeView === 'details' && appState.detailsPane !== 'overview') {
+        appState.detailsScroll = Math.max(0, appState.detailsScroll - 1);
+        render();
+        break;
+      }
       if (appState.analyzeView === 'results' && appState.searchResults.length > 0) {
         if (appState.selectedRepo > appState.searchScroll) {
           appState.selectedRepo--;
@@ -1309,6 +1877,14 @@ function handleDown() {
       break;
     }
     case 2: {
+      if (appState.analyzeView === 'details' && appState.detailsPane !== 'overview') {
+        const list = appState.detailsPane === 'issues'
+          ? appState.repoIssues : appState.repoPullRequests;
+        const max = Math.max(0, list.length - 1);
+        appState.detailsScroll = Math.min(max, appState.detailsScroll + 1);
+        render();
+        break;
+      }
       if (appState.analyzeView === 'results') {
         const maxVisible = analyzeListVisibleRows();
         if (appState.searchResults.length > 0) {
@@ -1335,9 +1911,9 @@ function handleDown() {
       break;
     }
     case 3:
-      // 3 settings rows today (Login / Logout / Token). Kept explicit so we
-      // don't depend on global state, but easy to bump when adding new rows.
-      appState.settingsCursor = Math.min(2, appState.settingsCursor + 1);
+      // Dynamic max — renderSettings publishes _maxSettingsCursor each frame.
+      appState.settingsCursor = Math.min(
+        appState._maxSettingsCursor ?? 5, appState.settingsCursor + 1);
       render();
       break;
     case 4: {
