@@ -8,7 +8,7 @@ import { loadTheme } from './tui/theme.mjs';
 import { initScreen, getScreen, render } from './tui/render.mjs';
 import { handleKey, registerCoreActions } from './tui/keys.mjs';
 import { loadUserData } from './tui/tabs/repos.mjs';
-import { loadBookmarks, loadSavedSearches } from './tui/store.mjs';
+import { loadBookmarks, loadSavedSearches, loadPins } from './tui/store.mjs';
 
 async function main() {
   if (!process.stdin.isTTY) {
@@ -29,6 +29,7 @@ async function main() {
   appState.token = loadToken();
   appState.bookmarks = loadBookmarks();
   appState.savedSearches = loadSavedSearches();
+  appState.repoPins = loadPins();
 
   // Initialize screen + register palette actions.
   const screen = initScreen();

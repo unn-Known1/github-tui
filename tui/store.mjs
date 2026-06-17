@@ -1,7 +1,9 @@
 // Persistent on-disk stores for bookmarks and saved searches.
 // Anything that needs to survive a restart goes here.
 
-import { BOOKMARKS_FILE, SAVED_SEARCHES_FILE, readJson, writeJson } from './config.mjs';
+import { BOOKMARKS_FILE, SAVED_SEARCHES_FILE, CONFIG_DIR, readJson, writeJson } from './config.mjs';
+import { join } from 'path';
+const PINS_FILE = join(CONFIG_DIR, 'pins.json');
 
 // ────────────────────────────────────────────────────────────────────────────
 // Bookmarks — "read later" / private starring distinct from GitHub stars.
@@ -74,5 +76,21 @@ export function addSavedSearch(label, query) {
 export function removeSavedSearch(id) {
   const list = loadSavedSearches().filter(s => s.id !== id);
   saveSavedSearches(list);
+  return list;
+}
+
+// ────────────────────────────────────────────────────────────────────────────
+// Pins — sticky favorites that float to the top of the Repos list.
+// Shape: array of full_name strings.
+// ────────────────────────────────────────────────────────────────────────────
+
+export function loadPins() { return readJson(PINS_FILE, []); }
+export function savePins(list) { writeJson(PINS_FILE, list); }
+export function isPinned(fullName) { return loadPins().includes(fullName); }
+export function togglePin(fullName) {
+  const list = loadPins();
+  const i = list.indexOf(fullName);
+  if (i >= 0) list.splice(i, 1); else list.unshift(fullName);
+  savePins(list);
   return list;
 }

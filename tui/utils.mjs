@@ -132,3 +132,52 @@ export function notificationToHtmlUrl(apiUrl) {
 export function makeCacheKey(...parts) {
   return parts.filter(Boolean).join(':').replace(/[^\w:.-]+/g, '_');
 }
+
+// ─── CWD safety + git shell-outs (added in W1 — file explorer) ─────
+
+import { resolve, normalize, join, dirname } from 'path';
+import { mkdirSync, existsSync, writeFileSync, statSync } from 'fs';
+
+// Refuse paths that escape CWD via .. — used before writing any user-named
+// file to disk so a malicious repo can't overwrite ~/.ssh/authorized_keys etc.
+export function safeCwdJoin(relPath) {
+  const cwd = process.cwd();
+  const target = resolve(cwd, normalize(relPath));
+  if (!target.startsWith(cwd + (cwd.endsWith('/') ? '' : '/')) && target !== cwd) {
+    throw new Error('Path escapes CWD: ' + relPath);
+  }
+  return target;
+}
+
+// Write content to a CWD-relative path, creating parent dirs as needed.
+export function writeFileSafe(relPath, content) {
+  const target = safeCwdJoin(relPath);
+  mkdirSync(dirname(target), { recursive: true });
+  if (typeof content === 'string') writeFileSync(target, content, 'utf-8');
+  else writeFileSync(target, content);
+  return target;
+}
+
+export function dirExists(path) {
+  try { return statSync(path).isDirectory(); } catch { return false; }
+}
+
+// Run a command, streaming stdout/stderr to /dev/null (we don't redraw while
+// it runs — TUI raw mode is paused by the caller). Resolves to exit code.
+export function runCommand(cmd, args, opts = {}) {
+  return new Promise(async (resolve, reject) => {
+    try {
+      const { spawn } = await import('child_process');
+      const child = spawn(cmd, args, {
+        stdio: opts.inherit ? 'inherit' : 'ignore',
+        cwd: opts.cwd || process.cwd(),
+      });
+      child.on('error', reject);
+      child.on('exit', (code) => resolve(code ?? 0));
+    } catch (e) { reject(e); }
+  });
+}
+
+export function ghCloneUrl(owner, repo) {
+  return 'https://github.com/' + owner + '/' + repo + '.git';
+}

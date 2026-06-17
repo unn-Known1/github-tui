@@ -12,6 +12,7 @@ import { startInput, registerInputHandler } from '../input.mjs';
 import { shortNum } from '../utils.mjs';
 import { color } from '../theme.mjs';
 import { loadForks, loadMoreForks, renderForks, toggleForkSort } from './forks.mjs';
+import * as files from './files.mjs';
 
 const SEARCH_PER_PAGE = 15;
 
@@ -260,6 +261,7 @@ function renderRepoDetails(screen, y, maxH) {
     ['issues',   'Issues (' + appState.repoIssues.length + ')',         'i'],
     ['prs',      'PRs (' + appState.repoPullRequests.length + ')',      'P'],
     ['readme',   'README',                                    'R'],
+    ['files',    'Files',                                     'F'],
   ];
   let px = 4;
   const right = panes.reduce((a, p) => a + p[1].length + p[2].length + 6, 0);
@@ -274,6 +276,7 @@ function renderRepoDetails(screen, y, maxH) {
   if (appState.detailsPane === 'issues') { renderIssuesPane(screen, y + 2, maxH - 2); return; }
   if (appState.detailsPane === 'prs')    { renderPRsPane(screen, y + 2, maxH - 2); return; }
   if (appState.detailsPane === 'readme') { renderReadmePane(screen, y + 2, maxH - 2); return; }
+  if (appState.detailsPane === 'files')  { files.renderFilesPane(screen, y + 2, maxH - 2); return; }
 
   const leftWidth = Math.min(48, Math.floor(W / 2));
   const details = [
@@ -360,6 +363,17 @@ export function renderAnalyze(screen, y, h) {
 }
 
 export function handleBack() {
+  // Files pane handles its own back logic (up a dir / leave viewer / etc).
+  if (isFilesPane()) {
+    files.backOrLeave().then((handled) => {
+      if (!handled) {
+        appState.detailsPane = 'overview';
+        appState.detailsScroll = 0;
+        render();
+      }
+    });
+    return;
+  }
   const v = appState.analyzeView;
   if (v === 'forks') {
     appState.forks = [];
@@ -410,12 +424,28 @@ export const keys = {
     }
   },
   'R': () => { if (appState.analyzeView === 'details') viewReadme(); },
+  'F': () => { if (appState.analyzeView === 'details') files.openFilesPane(); },
   // Forks sort keys (only when on forks view).
-  's': () => { if (appState.analyzeView === 'forks') toggleForkSort('stars'); },
+  's': () => {
+    if (appState.analyzeView === 'forks') toggleForkSort('stars');
+    else if (isFilesPane()) files.keys.s();
+  },
+  'S': () => { if (isFilesPane()) files.keys.S(); },
+  'Z': () => { if (isFilesPane()) files.keys.Z(); },
+  'C': () => { if (isFilesPane()) files.keys.C(); },
+  'G': () => { if (isFilesPane()) files.keys.G(); },
+  'B': () => { if (isFilesPane()) files.keys.B(); },
+  'Y': () => { if (isFilesPane()) files.keys.Y(); },
+  'g': () => { if (isFilesPane()) files.jumpTop(); },
   'n': () => { if (appState.analyzeView === 'forks') toggleForkSort('name'); },
 };
 
+function isFilesPane() {
+  return appState.analyzeView === 'details' && appState.detailsPane === 'files';
+}
+
 export function up(screen) {
+  if (isFilesPane()) { files.up(); return; }
   if (appState.analyzeView === 'details' && appState.detailsPane !== 'overview') {
     appState.detailsScroll = Math.max(0, appState.detailsScroll - 1); render(); return;
   }
@@ -431,6 +461,7 @@ export function up(screen) {
   }
 }
 export function down(screen) {
+  if (isFilesPane()) { files.down(screen); return; }
   if (appState.analyzeView === 'details' && appState.detailsPane !== 'overview') {
     let listLen;
     if (appState.detailsPane === 'issues') listLen = appState.repoIssues.length;
@@ -466,6 +497,7 @@ export function down(screen) {
   }
 }
 export function enter() {
+  if (isFilesPane()) { files.enter(); return; }
   const v = appState.analyzeView;
   if (v === 'results' && appState.searchResults.length > 0) {
     const repo = appState.searchResults[appState.selectedRepo];

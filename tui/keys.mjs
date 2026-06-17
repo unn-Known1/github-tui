@@ -38,7 +38,7 @@ function currentRepoForAction() {
       return appState.forks[appState.selectedFork];
   }
   if (tabState.current === 1 && appState.repos.length > 0) {
-    return appState.repos[appState.repoScroll] || appState.repos[0];
+    return appState.repos[appState.repoSelected] || appState.repos[appState.repoScroll] || appState.repos[0];
   }
   return null;
 }
@@ -164,6 +164,17 @@ export function handleKey(key) {
       if (tabState.current === 2) analyze.handleBack();
       return;
     case ' ': handleSpace(); return;
+    case 'G': {
+      // 'G' = jump to bottom (vim convention). Tab-aware so it doesn't
+      // collide with the Files-pane 'G' (gh clone) — that one fires only
+      // when we're on the files pane, which is a per-tab key.
+      const screen = getScreen();
+      if (tabState.current === 1 && typeof repos.bottom === 'function') {
+        repos.bottom(screen); return;
+      }
+      // Fall through to per-tab key map so analyze can route to files.
+      break;
+    }
   }
 
   // 5. Per-tab key map.
@@ -184,7 +195,8 @@ function handleSpace() {
 }
 function handleEnter() {
   const t = tabState.current;
-  if (t === 2) analyze.enter();
+  if (t === 1) repos.enter();
+  else if (t === 2) analyze.enter();
   else if (t === 3) settings.enter();
   else if (t === 4) inbox.enter();
 }
@@ -233,8 +245,24 @@ export function registerCoreActions() {
   reg({ id: 'repos.sort.updated', label: 'Sort repos by updated', run: () => { setTab(1); repos.keys.u(); } });
   reg({ id: 'repos.filter',       label: 'Filter your repositories...',
         run: () => { setTab(1); repos.keys['/'](); } });
-  reg({ id: 'repos.clear-filter', label: 'Clear repos filter',
+  reg({ id: 'repos.clear-filter', label: 'Clear all repos filters',
         run: () => { setTab(1); repos.keys.c(); } });
+  reg({ id: 'repos.type', label: 'Cycle repos type filter (all/sources/forks/...)',
+        run: () => { setTab(1); repos.keys.t(); } });
+  reg({ id: 'repos.lang', label: 'Filter repos by language...',
+        run: () => { setTab(1); repos.keys.L(); } });
+  reg({ id: 'repos.stale', label: 'Toggle stale-only filter (no push 6+ months)',
+        run: () => { setTab(1); repos.keys.x(); } });
+  reg({ id: 'repos.density', label: 'Toggle Repos density (compact / comfortable)',
+        run: () => { setTab(1); repos.keys.D(); } });
+  reg({ id: 'repos.pin', label: 'Pin / unpin highlighted repo',
+        run: () => { setTab(1); repos.keys.P(); } });
+  reg({ id: 'analyze.files', label: 'Open File explorer for current repo',
+        run: () => {
+          if (!appState.repoDetails) { showMessage('Open a repo on Analyze first', 'warning'); return; }
+          setTab(2);
+          analyze.keys.F();
+        }});
 
   reg({ id: 'analyze.search', label: 'Search public repositories...',
         run: () => { setTab(2); analyze.keys.i(); } });

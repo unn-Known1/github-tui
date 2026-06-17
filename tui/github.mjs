@@ -228,6 +228,60 @@ export const cancelWorkflowRun = (token, owner, repo, runId) =>
   request('/repos/' + owner + '/' + repo + '/actions/runs/' + runId + '/cancel',
     { token, method: 'POST' });
 
+// ─── Branches, zipball, per-file commits, raw bytes ──────────────────
+export const getBranches = (token, owner, repo, perPage) =>
+  request('/repos/' + owner + '/' + repo + '/branches?per_page=' + (perPage||50), { token });
+
+export const getFileCommits = (token, owner, repo, path, perPage) =>
+  request('/repos/' + owner + '/' + repo + '/commits?path=' +
+    encodeURIComponent(path) + '&per_page=' + (perPage||10), { token });
+
+// Returns the *redirect URL* to the zipball without following it. Used by the
+// file-tree pane to hand the URL to a streaming download routine that writes
+// straight to disk (so we don't buffer a 200 MB zip in memory).
+export function getZipballUrl(owner, repo, ref) {
+  return 'https://codeload.github.com/' + owner + '/' + repo +
+    '/zip/refs/heads/' + (ref || 'main');
+}
+
+// Download an arbitrary URL straight to a local file path, streaming.
+// Used for zipballs. Requires only built-in https.
+export function downloadToFile(url, destPath, token) {
+  return new Promise((resolve, reject) => {
+    import('https').then(httpsMod => import('fs').then(fsMod => {
+      const https = httpsMod.default;
+      const fs = fsMod.default;
+      const out = fs.createWriteStream(destPath);
+      let bytes = 0;
+      function get(u, redirectsLeft) {
+        const u2 = new URL(u);
+        const headers = { 'User-Agent': USER_AGENT };
+        if (token) headers['Authorization'] = 'token ' + token;
+        const req = https.get({
+          hostname: u2.hostname,
+          path: u2.pathname + u2.search,
+          headers,
+        }, (res) => {
+          if (res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) {
+            if (redirectsLeft <= 0) return reject(new Error('Too many redirects'));
+            res.resume();
+            return get(res.headers.location, redirectsLeft - 1);
+          }
+          if (res.statusCode !== 200) {
+            res.resume();
+            return reject(new Error('Download HTTP ' + res.statusCode));
+          }
+          res.on('data', (chunk) => { bytes += chunk.length; });
+          res.pipe(out);
+          out.on('finish', () => out.close(() => resolve({ bytes, path: destPath })));
+        });
+        req.on('error', reject);
+      }
+      get(url, 5);
+    }).catch(reject)).catch(reject);
+  });
+}
+
 // ─── Cache utilities ────────────────────────────────────────────────
 export function clearEtagCache() { etagCache.clear(); }
 export function etagCacheSize() { return etagCache.size; }

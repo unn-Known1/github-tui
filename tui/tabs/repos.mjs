@@ -1,15 +1,20 @@
-// Repos tab — your personal repositories with sort, filter, and pagination.
+// Repos tab — your personal repositories.
+// W2/W3 features: row selection, Enter to drill in, type filter cycle,
+// language facet, stale filter, density toggle, pins, badges, honest counts.
 
-import { appState, render, startAsync, isStale, showMessage } from '../state.mjs';
+import { appState, render, startAsync, isStale, showMessage, setTab } from '../state.mjs';
 import { getAuthenticatedUser, getUserRepositories } from '../github.mjs';
 import { removeToken } from '../config.mjs';
-import { setTab } from '../state.mjs';
 import { startInput, registerInputHandler } from '../input.mjs';
-import { shortNum } from '../utils.mjs';
+import { shortNum, relTime } from '../utils.mjs';
 import { color } from '../theme.mjs';
 import { loadDashboardWidgets } from './dashboard.mjs';
+import { isBookmarked } from '../store.mjs';
+import { isPinned, togglePin, loadPins } from '../store.mjs';
+import { loadRepoDetails } from './analyze.mjs';
 
 const REPOS_PER_PAGE = 30;
+const STALE_DAYS = 180;
 
 export const REPO_SORT_OPTIONS = [
   { field: 'name',    label: 'Name',    key: 'n' },
@@ -19,15 +24,17 @@ export const REPO_SORT_OPTIONS = [
   { field: 'updated', label: 'Updated', key: 'u' },
 ];
 
+const TYPE_FILTERS = ['all', 'sources', 'forks', 'archived', 'private', 'public', 'templates'];
+
 export function sortRepos(repos, sort) {
   const sorted = [...repos];
   sorted.sort((a, b) => {
     let va, vb;
     switch (sort.field) {
-      case 'name': va = (a.name||'').toLowerCase(); vb = (b.name||'').toLowerCase(); break;
-      case 'stars': va = a.stargazers_count || 0; vb = b.stargazers_count || 0; break;
-      case 'forks': va = a.forks_count || 0; vb = b.forks_count || 0; break;
-      case 'issues': va = a.open_issues_count || 0; vb = b.open_issues_count || 0; break;
+      case 'name':    va = (a.name||'').toLowerCase(); vb = (b.name||'').toLowerCase(); break;
+      case 'stars':   va = a.stargazers_count || 0; vb = b.stargazers_count || 0; break;
+      case 'forks':   va = a.forks_count || 0; vb = b.forks_count || 0; break;
+      case 'issues':  va = a.open_issues_count || 0; vb = b.open_issues_count || 0; break;
       case 'updated': va = new Date(a.updated_at).getTime(); vb = new Date(b.updated_at).getTime(); break;
       default: va = 0; vb = 0;
     }
@@ -42,8 +49,60 @@ export function toggleRepoSort(field) {
   if (appState.repoSort.field === field) appState.repoSort.asc = !appState.repoSort.asc;
   else { appState.repoSort.field = field; appState.repoSort.asc = field === 'name'; }
   appState.repoScroll = 0;
+  appState.repoSelected = 0;
   render();
 }
+
+function applyAllFilters(repos) {
+  let out = [...repos];
+
+  // Type filter cycle.
+  switch (appState.repoTypeFilter) {
+    case 'sources':   out = out.filter(r => !r.fork); break;
+    case 'forks':     out = out.filter(r => r.fork); break;
+    case 'archived':  out = out.filter(r => r.archived); break;
+    case 'private':   out = out.filter(r => r.private); break;
+    case 'public':    out = out.filter(r => !r.private); break;
+    case 'templates': out = out.filter(r => r.is_template); break;
+  }
+
+  // Language facet.
+  if (appState.reposLangFilter) {
+    out = out.filter(r => (r.language || '') === appState.reposLangFilter);
+  }
+
+  // Stale-only toggle.
+  if (appState.repoStaleOnly) {
+    const cutoff = Date.now() - STALE_DAYS * 86400000;
+    out = out.filter(r => new Date(r.pushed_at || r.updated_at).getTime() < cutoff);
+  }
+
+  // Substring filter.
+  if (appState.repoFilter) {
+    const q = appState.repoFilter.toLowerCase();
+    out = out.filter(r =>
+      (r.name||'').toLowerCase().includes(q) ||
+      (r.description||'').toLowerCase().includes(q) ||
+      (r.language||'').toLowerCase().includes(q)
+    );
+  }
+
+  return out;
+}
+
+function floatPinsToTop(repos) {
+  if (appState.repoPins.length === 0) return repos;
+  const pins = new Set(appState.repoPins);
+  const pinned = [];
+  const rest = [];
+  for (const r of repos) (pins.has(r.full_name) ? pinned : rest).push(r);
+  // Preserve pin order from the on-disk list.
+  pinned.sort((a, b) =>
+    appState.repoPins.indexOf(a.full_name) - appState.repoPins.indexOf(b.full_name));
+  return [...pinned, ...rest];
+}
+
+// ─── Loaders ──────────────────────────────────────────────────────
 
 export async function loadUserData() {
   if (!appState.token) return;
@@ -99,114 +158,254 @@ export async function loadMoreRepos() {
   if (!isStale(gen)) render();
 }
 
-// Register the filter input handler so Enter on '/' modal applies the filter.
 registerInputHandler('filter', (value) => {
   appState.repoFilter = (value || '').trim();
   appState.repoScroll = 0;
+  appState.repoSelected = 0;
   showMessage(appState.repoFilter
     ? 'Filtering: "' + appState.repoFilter + '"'
     : 'Filter cleared', 'info');
 });
 
+registerInputHandler('lang-filter', (value) => {
+  const v = (value || '').trim();
+  appState.reposLangFilter = v || null;
+  appState.repoScroll = 0;
+  appState.repoSelected = 0;
+  showMessage(v ? 'Language: ' + v : 'Language filter cleared', 'info');
+});
+
+// ─── Action helpers ───────────────────────────────────────────────
 export function visibleRows(screen) {
-  return Math.max(1, screen.height - 18);
+  // density toggle: comfortable density = 2 lines per row, half the rows fit.
+  const compact = appState.repoDensity === 'compact';
+  return Math.max(1, Math.floor((screen.height - 18) / (compact ? 1 : 2)));
 }
+
+function badgesFor(r) {
+  const out = [];
+  if (r.private)      out.push(['🔒', color('warning')]);
+  if (r.fork)         out.push(['🔱', color('accent')]);
+  if (r.archived)     out.push(['📦', 'dim']);
+  if (r.is_template)  out.push(['🗄', color('trending')]);
+  if (isPinned(r.full_name)) out.push(['📌', color('star')]);
+  if (isBookmarked(r.full_name)) out.push(['★', color('star')]);
+  return out;
+}
+
+function filterTagsLine() {
+  const tags = [];
+  if (appState.repoTypeFilter !== 'all') tags.push('type=' + appState.repoTypeFilter);
+  if (appState.reposLangFilter)          tags.push('lang=' + appState.reposLangFilter);
+  if (appState.repoStaleOnly)            tags.push('stale-only');
+  if (appState.repoFilter)               tags.push('"' + appState.repoFilter + '"');
+  return tags.join('  •  ');
+}
+
+// ─── Render ───────────────────────────────────────────────────────
 
 export function renderRepos(screen, y, h) {
   const W = screen.width;
   let repos = sortRepos(appState.repos, appState.repoSort);
+  repos = applyAllFilters(repos);
+  repos = floatPinsToTop(repos);
 
-  if (appState.repoFilter) {
-    const q = appState.repoFilter.toLowerCase();
-    repos = repos.filter(r =>
-      (r.name||'').toLowerCase().includes(q) ||
-      (r.description||'').toLowerCase().includes(q) ||
-      (r.language||'').toLowerCase().includes(q)
-    );
-  }
-
+  // Aggregate over the unfiltered list — gives an account-wide picture.
   const totalStars = appState.repos.reduce((a, r) => a + (r.stargazers_count || 0), 0);
   const totalForks = appState.repos.reduce((a, r) => a + (r.forks_count || 0), 0);
   const totalIssues = appState.repos.reduce((a, r) => a + (r.open_issues_count || 0), 0);
+  const totalArch = appState.repos.filter(r => r.archived).length;
   const headerRight = '★' + shortNum(totalStars) + '  ⑂' + shortNum(totalForks) +
-    '  ⚡' + shortNum(totalIssues) + '  (' + appState.repos.length + ' repos)';
+    '  ⚡' + shortNum(totalIssues) + '  (' + appState.repos.length + ' repos' +
+    (totalArch ? ', ' + totalArch + ' archived' : '') + ')';
   screen.writeStr(4, y, 'Your Repositories', 'bright');
   screen.writeStr(Math.max(4, W - headerRight.length - 2), y, headerRight, 'dim');
   screen.hline(y + 1, '─');
 
+  // Sort + density + filter summary lines.
+  const sortInfo = REPO_SORT_OPTIONS.find(o => o.field === appState.repoSort.field);
+  const sortDir = appState.repoSort.asc ? '↑' : '↓';
+  const densityLabel = appState.repoDensity === 'compact' ? 'compact' : 'comfy';
+  const tags = filterTagsLine();
+  screen.writeStr(4, y + 2,
+    'Sort: ' + sortInfo.label + ' ' + sortDir + '  •  Density: ' + densityLabel +
+    (tags ? '  •  ' + tags : ''), color('accent'));
+
+  const keysHint =
+    REPO_SORT_OPTIONS.map(o => '[' + o.key + ']' + o.label).join(' ') +
+    '  [/] Filter  [t] Type  [L] Lang  [x] Stale  [D] Density  [P] Pin  [Enter] Open';
+  screen.writeStr(4, y + 3, keysHint, 'dim');
+
   if (!repos || repos.length === 0) {
-    const msg = appState.repoFilter
-      ? 'No repos match "' + appState.repoFilter + '"  [c] Clear  [/] New filter'
+    const msg = (appState.repoFilter || appState.reposLangFilter ||
+      appState.repoStaleOnly || appState.repoTypeFilter !== 'all')
+      ? 'No repos match current filters  [c] Clear all  [t] Type  [L] Lang'
       : 'No repositories found';
-    screen.writeStr(4, y + 2, msg, 'dim');
+    screen.writeStr(4, y + 5, msg, 'dim');
     return;
   }
 
-  const sortInfo = REPO_SORT_OPTIONS.find(o => o.field === appState.repoSort.field);
-  const sortDir = appState.repoSort.asc ? '↑' : '↓';
-  const filterTag = appState.repoFilter
-    ? '  •  Filter: "' + appState.repoFilter + '" [c] clear' : '';
-  screen.writeStr(4, y + 2,
-    'Sort: ' + sortInfo.label + ' ' + sortDir + filterTag, color('accent'));
-
-  const sortKeys = REPO_SORT_OPTIONS.map(o => '[' + o.key + ']' + o.label).join('  ') +
-    '  [/] Filter';
-  screen.writeStr(4, y + 3, sortKeys, 'dim');
-
+  // Column headers.
   const headerY = y + 4;
-  screen.writeStr(4, headerY, 'Name', 'bright');
-  screen.writeStr(28, headerY, '★ Stars', 'bright');
-  screen.writeStr(38, headerY, '⑂ Forks', 'bright');
-  screen.writeStr(48, headerY, 'Issues', 'bright');
-  screen.writeStr(58, headerY, 'Updated', 'bright');
+  screen.writeStr(4,  headerY, 'Repo', 'bright');
+  screen.writeStr(34, headerY, 'Lang', 'bright');
+  screen.writeStr(46, headerY, '★', 'bright');
+  screen.writeStr(53, headerY, '⑂', 'bright');
+  screen.writeStr(60, headerY, 'Issues', 'bright');
+  screen.writeStr(70, headerY, 'Pushed', 'bright');
 
-  const maxRows = Math.min(repos.length, h - 8);
+  const compact = appState.repoDensity === 'compact';
+  const rowH = compact ? 1 : 2;
+  const maxRows = Math.max(1, Math.floor((h - 8) / rowH));
   const start = appState.repoScroll;
-  for (let i = 0; i < maxRows && start + i < repos.length; i++) {
+  const rowsToShow = Math.min(maxRows, Math.max(0, repos.length - start));
+
+  for (let i = 0; i < rowsToShow; i++) {
     const repo = repos[start + i];
-    const row = headerY + 1 + i;
-    screen.writeStr(4, row, (repo.name || 'N/A').substring(0, 23));
-    screen.writeStr(28, row, String(repo.stargazers_count || 0));
-    screen.writeStr(38, row, String(repo.forks_count || 0));
-    screen.writeStr(48, row, String(repo.open_issues_count || 0));
-    screen.writeStr(58, row, new Date(repo.updated_at).toLocaleDateString());
+    if (!repo) break;
+    const row = headerY + 1 + i * rowH;
+    const sel = start + i === appState.repoSelected;
+
+    screen.writeStr(2, row, sel ? '▶' : ' ', sel ? 'bright' : null);
+
+    // Badges before the name.
+    const badges = badgesFor(repo);
+    let nx = 4;
+    for (const [icon, c] of badges.slice(0, 3)) {
+      screen.writeStr(nx, row, icon, c);
+      nx += 2;
+    }
+    const nameMaxLen = 30 - (nx - 4);
+    screen.writeStr(nx, row, (repo.name || 'N/A').substring(0, nameMaxLen),
+      sel ? 'bright' : null);
+
+    // Issues vs PRs split — best-effort using open_issues_count and the
+    // (rare) pulls_url presence. Today we just show total in brown until
+    // the per-repo enrichment lands.
+    screen.writeStr(34, row, (repo.language || '—').substring(0, 11), 'dim');
+    screen.writeStr(46, row, shortNum(repo.stargazers_count || 0));
+    screen.writeStr(53, row, shortNum(repo.forks_count || 0));
+    screen.writeStr(60, row, shortNum(repo.open_issues_count || 0));
+    screen.writeStr(70, row, relTime(repo.pushed_at || repo.updated_at), 'dim');
+
+    if (!compact && repo.description) {
+      screen.writeStr(6, row + 1,
+        repo.description.substring(0, W - 10), 'dim');
+    }
   }
 
-  const infoY = headerY + 1 + maxRows + 1;
-  if (infoY < y + h) {
-    const range = (start + 1) + '-' + Math.min(start + maxRows, repos.length) +
-      ' of ' + repos.length;
-    const more = appState.reposHasMore ? '  [Space] Load more' : '';
-    screen.writeStr(4, infoY, range + more, 'dim');
+  // Footer.
+  const footerY = headerY + 1 + rowsToShow * rowH + 1;
+  if (footerY < y + h) {
+    const range = (start + 1) + '-' + Math.min(start + rowsToShow, repos.length) +
+      ' of ' + repos.length + ' shown';
+    const more = appState.reposHasMore ? '  [Space] Load more from GitHub' : '';
+    screen.writeStr(4, footerY, range + more, 'dim');
   }
 }
 
-// Tab-local keys. Global keys (q, ?, r, o, tab nav) are handled by keys.mjs.
+// ─── Key handlers ─────────────────────────────────────────────────
+
+function currentRepo() {
+  let list = sortRepos(appState.repos, appState.repoSort);
+  list = applyAllFilters(list);
+  list = floatPinsToTop(list);
+  return list[appState.repoSelected] || null;
+}
+
+function openCurrentInAnalyze() {
+  const r = currentRepo();
+  if (!r) return;
+  const [owner, name] = r.full_name.split('/');
+  setTab(2);
+  appState.analyzeView = 'details';
+  loadRepoDetails(owner, name);
+}
+
+function cycleTypeFilter() {
+  const i = TYPE_FILTERS.indexOf(appState.repoTypeFilter);
+  appState.repoTypeFilter = TYPE_FILTERS[(i + 1) % TYPE_FILTERS.length];
+  appState.repoScroll = 0;
+  appState.repoSelected = 0;
+  showMessage('Type: ' + appState.repoTypeFilter, 'info');
+  render();
+}
+
+function toggleStale() {
+  appState.repoStaleOnly = !appState.repoStaleOnly;
+  appState.repoScroll = 0;
+  appState.repoSelected = 0;
+  showMessage(appState.repoStaleOnly
+    ? 'Showing repos with no push in 6+ months'
+    : 'Stale-only filter cleared', 'info');
+  render();
+}
+
+function toggleDensity() {
+  appState.repoDensity = appState.repoDensity === 'compact' ? 'comfortable' : 'compact';
+  appState.repoScroll = 0;
+  showMessage('Density: ' + appState.repoDensity, 'info');
+  render();
+}
+
+function togglePinCurrent() {
+  const r = currentRepo();
+  if (!r) return;
+  const list = togglePin(r.full_name);
+  appState.repoPins = list;
+  showMessage(list.includes(r.full_name)
+    ? '📌 Pinned ' + r.full_name
+    : 'Unpinned ' + r.full_name, 'success');
+  render();
+}
+
+function clearAllFilters() {
+  appState.repoFilter = '';
+  appState.repoTypeFilter = 'all';
+  appState.reposLangFilter = null;
+  appState.repoStaleOnly = false;
+  appState.repoScroll = 0;
+  appState.repoSelected = 0;
+  showMessage('All filters cleared', 'info');
+  render();
+}
+
 export const keys = {
   '/': () => startInput('Filter: ', 'filter'),
-  'c': () => {
-    if (appState.repoFilter) {
-      appState.repoFilter = '';
-      appState.repoScroll = 0;
-      showMessage('Filter cleared', 'info');
-      render();
-    }
-  },
+  'c': clearAllFilters,
   'n': () => toggleRepoSort('name'),
   's': () => toggleRepoSort('stars'),
   'f': () => toggleRepoSort('forks'),
   'i': () => toggleRepoSort('issues'),
   'u': () => toggleRepoSort('updated'),
+  't': cycleTypeFilter,
+  'L': () => startInput('Language: ', 'lang-filter'),
+  'x': toggleStale,
+  'D': toggleDensity,
+  'P': togglePinCurrent,
+  'g': () => { appState.repoSelected = 0; appState.repoScroll = 0; render(); },
 };
 
 export function up(screen) {
-  appState.repoScroll = Math.max(0, appState.repoScroll - 1);
+  if (appState.repoSelected > 0) appState.repoSelected--;
+  if (appState.repoSelected < appState.repoScroll) appState.repoScroll = appState.repoSelected;
   render();
 }
 export function down(screen) {
-  const maxRows = Math.min(appState.repos.length, visibleRows(screen));
-  const maxScroll = Math.max(0, appState.repos.length - maxRows);
-  appState.repoScroll = Math.min(maxScroll, appState.repoScroll + 1);
+  const total = applyAllFilters(sortRepos(appState.repos, appState.repoSort)).length;
+  appState.repoSelected = Math.min(total - 1, appState.repoSelected + 1);
+  const v = visibleRows(screen);
+  if (appState.repoSelected >= appState.repoScroll + v) appState.repoScroll = appState.repoSelected - v + 1;
   render();
 }
 export const space = loadMoreRepos;
+export const enter = openCurrentInAnalyze;
+
+// Capital G = jump to bottom (paired with lowercase 'g' jump-to-top).
+export function bottom(screen) {
+  const total = applyAllFilters(sortRepos(appState.repos, appState.repoSort)).length;
+  appState.repoSelected = Math.max(0, total - 1);
+  const v = visibleRows(screen);
+  appState.repoScroll = Math.max(0, total - v);
+  render();
+}

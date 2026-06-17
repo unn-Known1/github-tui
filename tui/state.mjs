@@ -49,7 +49,27 @@ export const appState = {
   reposHasMore: true,
   repoSort: { field: 'updated', asc: false },
   repoScroll: 0,
+  repoSelected: 0,                  // highlighted row (different from scroll!)
   repoFilter: '',
+  repoTypeFilter: 'all',            // all|sources|forks|archived|private|public|templates
+  repoDensity: 'compact',           // compact|comfortable (description on 2nd line)
+  repoStaleOnly: false,             // hide repos pushed within last 6 months
+  repoPins: [],                     // [full_name] — sticky at top of list
+  reposShowLangFacet: false,        // toggle the language facet sidebar
+  reposLangFilter: null,            // null = no language filter
+
+  // ── File explorer (analyze details → Files pane) ──
+  filesPath: '',
+  filesRef: 'main',
+  filesEntries: [],
+  filesSelected: 0,
+  filesScroll: 0,
+  fileViewing: null,
+  fileText: '',
+  fileScroll: 0,
+  filesBranches: [],
+  filesBranchPicker: false,
+  filesBranchCursor: 0,
 
   // ── Analyze tab ──
   searchQuery: '',
