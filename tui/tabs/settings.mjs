@@ -1,6 +1,6 @@
 // Settings tab — login/logout, refresh actions, system info panel.
 
-import { appState, render, startAsync, isStale, showMessage } from '../state.mjs';
+import { appState, render, startAsync, isStale, showMessage, confirm } from '../state.mjs';
 import {
   APP_VERSION, CONFIG_DIR, TOKEN_FILE, saveToken, removeToken,
 } from '../config.mjs';
@@ -70,30 +70,88 @@ export function renderSettings(screen, y, h) {
   const W = screen.width;
   const isLoggedIn = !!appState.token;
 
-  screen.writeStr(4, y, 'Settings', 'bright');
-  screen.hline(y + 1, '─');
+  screen.writeStr(4, y, 'Settings', color('title'));
+  screen.hline(y + 1, '─', color('dim'));
+
+  // Section: Authentication.
+  let row = y + 2;
+  screen.writeStr(4, row++, 'AUTHENTICATION', color('header'));
 
   const items = [
     { label: 'Login',              desc: isLoggedIn ? 'Already logged in' : 'Press Enter to login',  enabled: !isLoggedIn },
     { label: 'Logout',             desc: isLoggedIn ? 'Press Enter to logout' : 'Not logged in',     enabled: isLoggedIn },
-    { label: 'Refresh Dashboard',  desc: 'Re-fetch events, trending, starred',                       enabled: isLoggedIn },
-    { label: 'Refresh User Data',  desc: 'Re-fetch profile and repositories',                        enabled: isLoggedIn },
-    { label: 'Change Theme',       desc: 'Active: ' + getThemeName() + ' — ' + listThemes().join('/'), enabled: true },
-    { label: 'Clear Token File',   desc: 'Wipe ' + TOKEN_FILE + ' (also logs out)',                  enabled: isLoggedIn },
-    { label: 'Token (display)',    desc: isLoggedIn ? '•••••••••••• (hidden)' : 'Not set',           enabled: false },
   ];
-  appState._maxSettingsCursor = items.length - 1;
 
-  items.forEach((item, i) => {
-    const row = y + 2 + i;
-    if (row >= y + h - 1) return;
-    const sel = appState.settingsCursor === i;
-    screen.writeStr(4, row, sel ? ' ▶ ' : '   ');
-    screen.writeStr(7, row, item.label, sel ? 'bright' : (item.enabled ? null : 'dim'));
-    screen.writeStr(28, row, item.desc.substring(0, W - 30), 'dim');
-  });
+  for (const item of items) {
+    if (row >= y + h - 1) break;
+    const sel = appState.settingsCursor === row - (y + 2);
+    if (sel) {
+      for (let x = 0; x < W; x++) screen.styleBuf[row][x] = color('selection');
+    }
+    screen.writeStr(4, row, sel ? '> ' : '  ', sel ? color('selection') : null);
+    screen.writeStr(6, row, item.label, sel ? color('selection') : (item.enabled ? null : color('dim')));
+    screen.writeStr(24, row, item.desc.substring(0, W - 26), color('dim'));
+    row++;
+  }
 
-  // System panel.
+  row++;
+
+  // Section: Data.
+  screen.writeStr(4, row++, 'DATA', color('header'));
+  const dataItems = [
+    { label: 'Refresh Dashboard',  desc: 'Re-fetch events, trending, starred',  enabled: isLoggedIn },
+    { label: 'Refresh User Data',  desc: 'Re-fetch profile and repositories',   enabled: isLoggedIn },
+  ];
+  for (const item of dataItems) {
+    if (row >= y + h - 1) break;
+    const sel = appState.settingsCursor === row - (y + 2);
+    if (sel) {
+      for (let x = 0; x < W; x++) screen.styleBuf[row][x] = color('selection');
+    }
+    screen.writeStr(4, row, sel ? '> ' : '  ', sel ? color('selection') : null);
+    screen.writeStr(6, row, item.label, sel ? color('selection') : (item.enabled ? null : color('dim')));
+    screen.writeStr(24, row, item.desc.substring(0, W - 26), color('dim'));
+    row++;
+  }
+
+  row++;
+
+  // Section: Appearance.
+  screen.writeStr(4, row++, 'APPEARANCE', color('header'));
+  const themeItem = { label: 'Change Theme', desc: 'Active: ' + getThemeName() + ' (' + listThemes().join(', ') + ')', enabled: true };
+  if (row < y + h - 1) {
+    const sel = appState.settingsCursor === row - (y + 2);
+    if (sel) {
+      for (let x = 0; x < W; x++) screen.styleBuf[row][x] = color('selection');
+    }
+    screen.writeStr(4, row, sel ? '> ' : '  ', sel ? color('selection') : null);
+    screen.writeStr(6, row, themeItem.label, sel ? color('selection') : null);
+    screen.writeStr(24, row, themeItem.desc.substring(0, W - 26), color('dim'));
+    row++;
+  }
+
+  row++;
+
+  // Section: Danger Zone.
+  screen.writeStr(4, row++, 'DANGER ZONE', { fg: 'red', bold: true });
+  const dangerItems = [
+    { label: 'Clear Token File', desc: 'Wipe ' + TOKEN_FILE + ' (also logs out)', enabled: isLoggedIn },
+  ];
+  for (const item of dangerItems) {
+    if (row >= y + h - 1) break;
+    const sel = appState.settingsCursor === row - (y + 2);
+    if (sel) {
+      for (let x = 0; x < W; x++) screen.styleBuf[row][x] = color('selection');
+    }
+    screen.writeStr(4, row, sel ? '> ' : '  ', sel ? color('selection') : null);
+    screen.writeStr(6, row, item.label, sel ? color('selection') : (item.enabled ? color('error') : color('dim')));
+    screen.writeStr(24, row, item.desc.substring(0, W - 26), color('dim'));
+    row++;
+  }
+
+  appState._maxSettingsCursor = row - (y + 2) - 1;
+
+  // System panel with box.
   const infoX = Math.min(W - 38, Math.floor(W * 0.55));
   if (infoX > 30) {
     const lines = [
@@ -102,7 +160,7 @@ export function renderSettings(screen, y, h) {
       ['Token file',   TOKEN_FILE,                 null],
       ['Node',         process.version,            null],
       ['Platform',     process.platform + ' ' + process.arch, null],
-      ['Terminal',     W + '×' + screen.height,    null],
+      ['Terminal',     W + 'x' + screen.height,    null],
     ];
     if (lastRateLimit.remaining !== null) {
       const resetIn = lastRateLimit.reset
@@ -114,21 +172,23 @@ export function renderSettings(screen, y, h) {
     if (lastScopes.scopes && lastScopes.scopes.length) {
       lines.push(['Token scopes', lastScopes.scopes.join(', '), 'dim']);
     }
-    screen.writeStr(infoX, y + 2, 'System', 'bright');
+
+    // Draw system panel box.
+    const boxH = lines.length + 3;
+    screen.box(infoX, y + 2, W - infoX - 2, boxH, 'System');
     lines.forEach(([k, v, c], i) => {
       const row = y + 3 + i;
-      if (row >= y + h - 1) return;
-      screen.writeStr(infoX, row, k + ':', 'dim');
-      screen.writeStr(infoX + 16, row, String(v).substring(0, W - infoX - 17), c || null);
+      if (row >= y + 2 + boxH - 1) return;
+      screen.writeStr(infoX + 2, row, k + ':', color('dim'));
+      screen.writeStr(infoX + 18, row, String(v).substring(0, W - infoX - 20), c || null);
     });
   }
 
   const helpY = y + 2 + items.length + 1;
   if (helpY + 2 < y + h) {
-    screen.writeStr(4, helpY, '↑/↓ Navigate   Enter Select   ? Help overlay', 'dim');
     if (isLoggedIn && appState.user) {
-      screen.writeStr(4, helpY + 1,
-        'Signed in as ' + appState.user.login + '  •  ' + appState.repos.length + ' repos loaded',
+      screen.writeStr(4, y + h - 1,
+        'Signed in as ' + appState.user.login + '  |  ' + appState.repos.length + ' repos loaded',
         color('accent'));
     }
   }
@@ -153,24 +213,27 @@ export function enter() {
       else showMessage('Already logged in', 'info');
       break;
     case 1:
-      if (isLoggedIn) handleLogout();
+      if (isLoggedIn) confirm('Log out of GitHub?', handleLogout);
       else showMessage('Not logged in', 'warning');
       break;
     case 2:
       if (isLoggedIn) {
         appState.dashboardLoaded = false;
         loadDashboardWidgets(true);
-        showMessage('Refreshing dashboard…', 'info');
+        showMessage('Refreshing dashboard...', 'info');
       }
       break;
     case 3:
-      if (isLoggedIn) { loadUserData(); showMessage('Refreshing user data…', 'info'); }
+      if (isLoggedIn) { loadUserData(); showMessage('Refreshing user data...', 'info'); }
       break;
     case 4:
       startInput('Theme (' + listThemes().join('/') + '): ', 'theme');
       break;
     case 5:
-      if (isLoggedIn) { handleLogout(); showMessage('Token file wiped', 'success'); }
+      if (isLoggedIn) confirm('Wipe token file and log out?', () => {
+        handleLogout();
+        showMessage('Token file wiped', 'success');
+      });
       break;
   }
 }

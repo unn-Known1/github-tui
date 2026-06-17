@@ -127,6 +127,10 @@ export const appState = {
   paletteQuery: '',
   paletteCursor: 0,
 
+  // ── Confirmation dialog ──
+  confirmAction: null,   // function to call on 'y'
+  confirmMessage: '',    // message to display
+
   // ── Input modal ──
   inputMode: null,       // null | 'input'
   inputBuffer: '',
@@ -159,4 +163,19 @@ export function showMessage(text, type = 'info', durationMs = 3000) {
 export function clearMessage() {
   appState.message = null;
   if (appState.messageTimer) { clearTimeout(appState.messageTimer); appState.messageTimer = null; }
+}
+
+// ────────────────────────────────────────────────────────────────────────────
+// Confirmation dialog for destructive actions.
+// ────────────────────────────────────────────────────────────────────────────
+export function confirm(message, action) {
+  appState.confirmMessage = message;
+  appState.confirmAction = action;
+  render();
+}
+
+export function dismissConfirm() {
+  appState.confirmAction = null;
+  appState.confirmMessage = '';
+  render();
 }

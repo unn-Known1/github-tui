@@ -1,13 +1,14 @@
 // Inbox tab — GitHub notifications.
 // v0.3 features: mark-as-read (per-thread + all), unsubscribe, filter cycle.
 
-import { appState, render, startAsync, isStale, showMessage } from '../state.mjs';
+import { appState, render, startAsync, isStale, showMessage, confirm } from '../state.mjs';
 import {
   getNotifications, markNotificationRead,
   markAllNotificationsRead, unsubscribeNotification,
 } from '../github.mjs';
-import { relTime, notifTypeColor, notificationToHtmlUrl, openUrl } from '../utils.mjs';
+import { relTime, notifTypeColor, notificationToHtmlUrl, openUrl, truncate } from '../utils.mjs';
 import { color } from '../theme.mjs';
+import { emptyState } from '../render.mjs';
 
 const FILTERS = ['all', 'unread', 'mentions', 'review'];
 
@@ -47,7 +48,6 @@ function selected() {
   return filtered()[appState.selectedNotification];
 }
 
-// Actions used by keys + command palette.
 export async function markCurrentRead() {
   const n = selected();
   if (!n) return;
@@ -59,14 +59,16 @@ export async function markCurrentRead() {
   } catch (e) { showMessage('Failed: ' + e.message, 'error'); }
 }
 
-export async function markAllRead() {
-  if (!appState.token) return;
-  try {
-    await markAllNotificationsRead(appState.token);
-    for (const n of appState.notifications) n.unread = false;
-    showMessage('All notifications marked as read', 'success');
-    render();
-  } catch (e) { showMessage('Failed: ' + e.message, 'error'); }
+export function markAllRead() {
+  confirm('Mark ALL notifications as read?', async () => {
+    if (!appState.token) return;
+    try {
+      await markAllNotificationsRead(appState.token);
+      for (const n of appState.notifications) n.unread = false;
+      showMessage('All notifications marked as read', 'success');
+      render();
+    } catch (e) { showMessage('Failed: ' + e.message, 'error'); }
+  });
 }
 
 export async function unsubscribeCurrent() {
@@ -104,29 +106,44 @@ export function renderInbox(screen, y, h) {
   const allList = appState.notifications;
   const unreadCount = allList.filter(n => n.unread).length;
 
-  screen.writeStr(4, y, 'Notifications', 'bright');
-  const filterLabel = '[' + appState.inboxFilter + ']';
-  screen.writeStr(20, y, filterLabel, color('accent'));
+  screen.writeStr(4, y, 'Notifications', color('title'));
+
+  // Filter as a chip.
+  const filterChip = ' ' + appState.inboxFilter + ' ';
+  screen.writeStr(20, y, filterChip, color('chipActive'));
 
   if (allList.length > 0) {
     const counts = unreadCount + ' unread / ' + allList.length + ' total';
     screen.writeStr(Math.max(4, W - counts.length - 2), y, counts,
-      unreadCount > 0 ? color('warning') : 'dim');
+      unreadCount > 0 ? color('warning') : color('dim'));
   }
-  screen.hline(y + 1, '─');
+  screen.hline(y + 1, '─', color('dim'));
 
   if (!appState.token) {
-    screen.writeStr(4, y + 2, 'Login required. Go to Settings [4].', 'dim');
+    emptyState(screen, y + 2, h - 2, {
+      icon: '---',
+      title: 'Login required',
+      message: 'Go to Settings [4] to log in',
+      hint: '',
+    });
     return;
   }
   if (allList.length === 0) {
-    screen.writeStr(4, y + 2, appState.loading
-      ? 'Loading…' : '✨ Inbox zero! Press [r] to refresh.', 'dim');
+    emptyState(screen, y + 2, h - 2, {
+      icon: '---',
+      title: appState.loading ? 'Loading...' : 'Inbox zero!',
+      message: appState.loading ? 'Fetching notifications...' : 'No notifications yet',
+      hint: appState.loading ? '' : '[r] Refresh',
+    });
     return;
   }
   if (list.length === 0) {
-    screen.writeStr(4, y + 2,
-      'No notifications match filter [' + appState.inboxFilter + ']  [f] cycle', 'dim');
+    emptyState(screen, y + 2, h - 2, {
+      icon: '---',
+      title: 'No matches',
+      message: 'No notifications match filter [' + appState.inboxFilter + ']',
+      hint: '[f] Cycle filter',
+    });
     return;
   }
 
@@ -140,22 +157,22 @@ export function renderInbox(screen, y, h) {
   const topRepos = Object.entries(repoCounts).sort((a, b) => b[1] - a[1]).slice(0, 5);
   const summaryX = Math.max(W - 32, Math.floor(W * 0.65));
   if (summaryX > 40) {
-    screen.writeStr(summaryX, y + 2, 'By Repo', 'bright');
+    screen.writeStr(summaryX, y + 2, 'By Repo', color('header'));
     topRepos.forEach(([repo, count], i) => {
       const row = y + 3 + i;
       if (row >= y + h - 1) return;
-      const short = repo.substring(0, W - summaryX - 6);
-      screen.writeStr(summaryX, row, short, 'dim');
+      const short = truncate(repo, W - summaryX - 6);
+      screen.writeStr(summaryX, row, short, color('dim'));
       screen.writeStr(W - 4, row, String(count), color('accent'));
     });
   }
 
   const headerY = y + 2;
   const listW = summaryX > 40 ? summaryX - 6 : W - 4;
-  screen.writeStr(4, headerY, ' Type', 'bright');
-  screen.writeStr(16, headerY, 'Repo / Title', 'bright');
-  screen.writeStr(Math.min(listW - 12, 56), headerY, 'Reason', 'bright');
-  screen.writeStr(Math.min(listW - 4, 68), headerY, 'When', 'bright');
+  screen.writeStr(4, headerY, 'Type', color('header'));
+  screen.writeStr(16, headerY, 'Repo / Title', color('header'));
+  screen.writeStr(Math.min(listW - 12, 56), headerY, 'Reason', color('header'));
+  screen.writeStr(Math.min(listW - 4, 68), headerY, 'When', color('header'));
 
   const maxRows = Math.max(1, h - 5);
   const start = appState.inboxScroll;
@@ -165,31 +182,35 @@ export function renderInbox(screen, y, h) {
     const sel = start + i === appState.selectedNotification;
     const unread = n.unread;
 
-    screen.writeStr(2, row, sel ? '▶' : ' ', sel ? 'bright' : null);
-    screen.writeStr(3, row, unread ? '●' : ' ', unread ? color('unread') : 'dim');
+    // Full-row selection highlight.
+    if (sel) {
+      for (let x = 0; x < W; x++) screen.styleBuf[row][x] = color('selection');
+    }
+
+    screen.writeStr(2, row, sel ? '>' : ' ', sel ? color('selection') : null);
+    screen.writeStr(3, row, unread ? '●' : ' ', unread ? color('unread') : color('dim'));
 
     const type = (n.subject && n.subject.type) || '?';
-    screen.writeStr(5, row, type.substring(0, 10).padEnd(11), notifTypeColor(type));
+    screen.writeStr(4, row, type.substring(0, 10).padEnd(11), notifTypeColor(type));
 
     const repoName = (n.repository && n.repository.full_name || '?').split('/')[1] ||
       (n.repository && n.repository.full_name) || '?';
     const title = (n.subject && n.subject.title) || '';
-    const combined = repoName + ' · ' + title;
+    const combined = repoName + ' / ' + title;
     const titleW = Math.min(listW - 30, 40);
-    screen.writeStr(16, row, combined.substring(0, titleW),
-      sel ? 'bright' : (unread ? null : 'dim'));
+    screen.writeStr(16, row, truncate(combined, titleW),
+      sel ? color('selection') : (unread ? null : color('dim')));
 
     screen.writeStr(Math.min(listW - 12, 56), row,
-      (n.reason || '?').substring(0, 11), 'dim');
+      truncate(n.reason || '?', 11), color('dim'));
     const when = n.updated_at ? relTime(n.updated_at) : '';
-    screen.writeStr(Math.min(listW - 4, 68), row, when, 'dim');
+    screen.writeStr(Math.min(listW - 4, 68), row, when, color('dim'));
   }
 
   const infoY = headerY + 1 + Math.min(maxRows, list.length) + 1;
   if (infoY < y + h) {
     screen.writeStr(4, infoY,
-      '[r] Refresh  [m] Mark read  [M] Mark all  [u] Unsubscribe  [f] Filter  [Enter/o] Open',
-      'dim');
+      '[r] Refresh  [m] Mark read  [M] Mark all  [f] Filter  [Enter] Open', color('dim'));
   }
 }
 

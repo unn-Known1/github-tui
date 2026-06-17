@@ -4,13 +4,14 @@
 import { appState, render, startAsync, isStale, showMessage } from '../state.mjs';
 import { getRepositoryForks, getCompare } from '../github.mjs';
 import { color } from '../theme.mjs';
+import { truncate } from '../utils.mjs';
 
 const FORKS_PER_PAGE = 30;
 const COMPARE_CONCURRENCY = 5;
 
 export const FORK_SORT_OPTIONS = [
   { field: 'pushed', label: 'Last Push', key: 'p' },
-  { field: 'stars',  label: '★ Stars',   key: 's' },
+  { field: 'stars',  label: 'Stars',   key: 's' },
   { field: 'name',   label: 'Name',      key: 'n' },
 ];
 
@@ -38,7 +39,6 @@ export function toggleForkSort(field) {
   render();
 }
 
-// Run compares concurrently (worker pool).
 async function runCompares(owner, name, defaultBranch, range, gen) {
   let cursor = range.from;
   let completed = 0;
@@ -123,44 +123,62 @@ export function renderForks(screen, y, maxH) {
   const forks = sortForks(appState.forks, appState.forkSort);
 
   const ref = (appState.repoDetails && appState.repoDetails.full_name) || 'repo';
-  screen.writeStr(4, y, 'Forks of ' + ref, 'bright');
-  screen.hline(y + 1, '─');
+  screen.writeStr(4, y, 'Forks of ' + ref, color('title'));
+  screen.hline(y + 1, '─', color('dim'));
 
   const sortInfo = FORK_SORT_OPTIONS.find(o => o.field === appState.forkSort.field);
-  const sortDir = appState.forkSort.asc ? '↑' : '↓';
-  screen.writeStr(4, y + 2, 'Sort: ' + sortInfo.label + ' ' + sortDir, color('accent'));
-  screen.writeStr(4, y + 3,
-    FORK_SORT_OPTIONS.map(o => '[' + o.key + ']' + o.label).join('  '), 'dim');
+  const sortDir = appState.forkSort.asc ? ' ↑' : ' ↓';
+  screen.writeStr(4, y + 2, 'Sort: ' + sortInfo.label + sortDir, color('accent'));
 
-  const headerY = y + 4;
-  screen.writeStr(4, headerY, 'Fork Owner', 'bright');
-  screen.writeStr(28, headerY, '★ Stars', 'bright');
-  screen.writeStr(38, headerY, '⑂ Forks', 'bright');
-  screen.writeStr(48, headerY, 'Last Push', 'bright');
-  screen.writeStr(62, headerY, 'Ahead', 'bright');
+  // Responsive column positions.
+  const nameCol = 4;
+  const starsCol = Math.max(30, Math.floor(W * 0.35));
+  const forksCol = starsCol + 10;
+  const pushedCol = forksCol + 10;
+  const aheadCol = pushedCol + 14;
+
+  const headerY = y + 3;
+  screen.writeStr(nameCol, headerY, 'Fork Owner', color('header'));
+  screen.writeStr(starsCol, headerY, 'Stars', color('header'));
+  screen.writeStr(forksCol, headerY, 'Forks', color('header'));
+  if (pushedCol + 12 < W) {
+    screen.writeStr(pushedCol, headerY, 'Last Push', color('header'));
+  }
+  if (aheadCol + 8 < W) {
+    screen.writeStr(aheadCol, headerY, 'Ahead', color('header'));
+  }
 
   if (forks.length === 0 && !appState.loading) {
-    screen.writeStr(4, headerY + 1, 'No forks found', 'dim');
+    screen.writeStr(4, headerY + 1, 'No forks found', color('dim'));
     return;
   }
 
-  const maxRows = Math.min(forks.length, maxH - 7);
+  const maxRows = Math.min(forks.length, maxH - 6);
   const start = appState.forkScroll;
   for (let i = 0; i < maxRows && start + i < forks.length; i++) {
     const fork = forks[start + i];
     const row = headerY + 1 + i;
     const sel = start + i === appState.selectedFork;
-    screen.writeStr(4, row, sel ? ' ▶' : '  ');
+
+    // Selection highlight.
+    if (sel) {
+      for (let x = 0; x < W; x++) screen.styleBuf[row][x] = color('selection');
+    }
+
+    screen.writeStr(nameCol, row, sel ? '> ' : '  ', sel ? color('selection') : null);
     const ownerName = (fork.owner && fork.owner.login) || fork.full_name.split('/')[0];
-    screen.writeStr(7, row, ownerName.substring(0, 20), sel ? 'bright' : null);
-    screen.writeStr(28, row, String(fork.stargazers_count || 0));
-    screen.writeStr(38, row, String(fork.forks_count || 0));
-    screen.writeStr(48, row, new Date(fork.pushed_at).toLocaleDateString(), 'dim');
-    if (fork._aheadBehind) {
-      screen.writeStr(62, row, '+' + fork._aheadBehind.ahead, color('success'));
-      if (fork._aheadBehind.behind > 0) {
-        screen.writeStr(68, row, '-' + fork._aheadBehind.behind, color('error'));
-      }
+    screen.writeStr(nameCol + 2, row, truncate(ownerName, starsCol - nameCol - 4), sel ? color('selection') : null);
+    const statStyle = sel ? color('selection') : color('dim');
+    screen.writeStr(starsCol, row, String(fork.stargazers_count || 0), statStyle);
+    screen.writeStr(forksCol, row, String(fork.forks_count || 0), statStyle);
+    if (pushedCol + 12 < W) {
+      screen.writeStr(pushedCol, row, new Date(fork.pushed_at).toLocaleDateString(), statStyle);
+    }
+    if (fork._aheadBehind && aheadCol + 8 < W) {
+      const ahead = '+' + fork._aheadBehind.ahead;
+      const behind = fork._aheadBehind.behind > 0 ? ' -' + fork._aheadBehind.behind : '';
+      screen.writeStr(aheadCol, row, ahead, color('success'));
+      if (behind) screen.writeStr(aheadCol + ahead.length, row, behind, color('error'));
     }
   }
 
@@ -169,11 +187,10 @@ export function renderForks(screen, y, maxH) {
     const more = appState.forksHasMore ? '  [Space] Load more' : '';
     const range = (start + 1) + '-' + Math.min(start + maxRows, forks.length) +
       ' of ' + forks.length;
-    screen.writeStr(4, infoY, range + more + '  •  Esc back  [p/s/n] Sort', 'dim');
+    screen.writeStr(4, infoY, range + more, color('dim'));
   }
 }
 
 export const keys = {
   'p': () => toggleForkSort('pushed'),
-  // 's' and 'n' are handled by the analyze tab's key map (which delegates).
 };

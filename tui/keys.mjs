@@ -7,7 +7,7 @@
 //   5. Per-tab key handlers from tab modules' keys map.
 //   6. Per-tab arrow / enter / space dispatchers.
 
-import { appState, tabState, setTab, showMessage, render, TABS } from './state.mjs';
+import { appState, tabState, setTab, showMessage, render, TABS, dismissConfirm, confirm } from './state.mjs';
 import * as palette from './palette.mjs';
 import { handleInputKey } from './input.mjs';
 import { copyToClipboard, openUrl, notificationToHtmlUrl } from './utils.mjs';
@@ -132,6 +132,19 @@ export function handleKey(key) {
     return;
   }
 
+  // 2b. Confirmation dialog — 'y' executes, anything else dismisses.
+  if (appState.confirmAction) {
+    if (key === 'y' || key === 'Y') {
+      const action = appState.confirmAction;
+      appState.confirmAction = null;
+      appState.confirmMessage = '';
+      action();
+    } else {
+      dismissConfirm();
+    }
+    return;
+  }
+
   // 3. Input modal.
   if (handleInputKey(key)) return;
 
@@ -177,9 +190,9 @@ export function handleKey(key) {
     }
   }
 
-  // 5. Global star toggle — must run before per-tab keys so 's' stars
-  //    even when repos tab maps 's' to sort-by-stars.
-  if (key === 's' && currentRepoForAction()) { toggleStar(); return; }
+  // 5. Global star toggle — '*' so it doesn't conflict with per-tab 's' keys
+  //    (forks sort-by-stars, repos sort-by-stars).
+  if (key === '*' && currentRepoForAction()) { toggleStar(); return; }
 
   // 6. Per-tab key map.
   const mod = tabModules[tabState.current];
@@ -253,7 +266,7 @@ export function registerCoreActions() {
         run: () => { appState.showHelp = true; render(); } });
   reg({ id: 'quit',    label: 'Quit application',             hint: 'q', run: quit });
 
-  reg({ id: 'star.toggle',     label: 'Star / unstar current repo',         hint: 's', run: toggleStar });
+  reg({ id: 'star.toggle',     label: 'Star / unstar current repo',         hint: '*', run: toggleStar });
   reg({ id: 'bookmark.toggle', label: 'Bookmark / unbookmark current repo', hint: 'b', run: toggleBookmark });
 
   reg({ id: 'repos.sort.name',    label: 'Sort repos by name',    run: () => { setTab(1); repos.keys.n(); } });
@@ -293,7 +306,7 @@ export function registerCoreActions() {
 
   reg({ id: 'settings.theme',  label: 'Change theme...',
         run: () => { setTab(3); appState.settingsCursor = 4; render(); settings.enter(); } });
-  reg({ id: 'settings.logout', label: 'Log out',                            run: settings.handleLogout });
+  reg({ id: 'settings.logout', label: 'Log out', run: () => confirm('Log out of GitHub?', settings.handleLogout) });
   reg({ id: 'dashboard.refresh', label: 'Refresh dashboard widgets',
         run: () => dashboard.loadDashboardWidgets(true) });
   reg({ id: 'dashboard.new-issue', label: 'Dashboard: Create new issue',

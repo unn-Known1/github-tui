@@ -341,11 +341,11 @@ export function copyRawUrl() {
 
 function renderBreadcrumb(screen, y, owner, name) {
   const W = screen.width;
-  const parts = ['🌳 ' + owner + '/' + name + '@' + appState.filesRef];
+  const parts = [owner + '/' + name + '@' + appState.filesRef];
   if (appState.filesPath) {
     for (const p of appState.filesPath.split('/')) parts.push(p);
   }
-  const crumb = parts.join(' › ');
+  const crumb = parts.join(' > ');
   screen.writeStr(4, y, crumb.substring(0, W - 6), color('accent'));
 }
 
@@ -361,10 +361,8 @@ export function renderFilesPane(screen, y, maxH) {
 
   const entries = appState.filesEntries || [];
   const headerY = y + 2;
-  screen.writeStr(4, headerY, ' Type', 'bright');
-  screen.writeStr(11, headerY, 'Name', 'bright');
-  screen.writeStr(W - 22, headerY, 'Size', 'bright');
-  screen.writeStr(W - 10, headerY, 'Action', 'bright');
+  screen.writeStr(4, headerY, ' Name', color('header'));
+  if (W > 40) screen.writeStr(W - 22, headerY, 'Size', color('header'));
 
   const rows = Math.max(1, maxH - 5);
   const start = appState.filesScroll || 0;
@@ -376,30 +374,36 @@ export function renderFilesPane(screen, y, maxH) {
     const ent = allEntries[start + i];
     const row = headerY + 1 + i;
     const sel = start + i === appState.filesSelected;
-    screen.writeStr(2, row, sel ? '▶' : ' ', sel ? 'bright' : null);
+
+    // Selection highlight.
+    if (sel) {
+      for (let x = 0; x < W; x++) screen.styleBuf[row][x] = color('selection');
+    }
+
+    screen.writeStr(2, row, sel ? '>' : ' ', sel ? color('selection') : null);
 
     let icon, c;
-    if (ent.type === 'up')         { icon = '↩'; c = 'dim'; }
-    else if (ent.type === 'dir')   { icon = '📁'; c = color('accent'); }
-    else if (ent.type === 'file')  { icon = '📄'; c = null; }
-    else                            { icon = '?';  c = 'dim'; }
+    if (ent.type === 'up')         { icon = '..'; c = color('dim'); }
+    else if (ent.type === 'dir')   { icon = '> '; c = color('accent'); }
+    else if (ent.type === 'file')  { icon = '  '; c = null; }
+    else                            { icon = '? '; c = color('dim'); }
     screen.writeStr(4, row, icon, c);
 
-    screen.writeStr(11, row, ent.name.substring(0, W - 36), sel ? 'bright' : null);
+    const nameStyle = sel ? color('selection') : null;
+    screen.writeStr(11, row, ent.name.substring(0, W - 36), nameStyle);
 
     if (ent.type === 'file') {
-      screen.writeStr(W - 22, row, formatBytes(ent.size || 0), 'dim');
+      screen.writeStr(W - 22, row, formatBytes(ent.size || 0), color('dim'));
     } else if (ent.type === 'dir') {
-      screen.writeStr(W - 22, row, '<dir>', 'dim');
+      screen.writeStr(W - 22, row, '<dir>', color('dim'));
     }
   }
 
-  // Footer hint.
+  // Footer hint (grouped by category).
   const footerY = headerY + 1 + Math.min(rows, allEntries.length) + 1;
   if (footerY < y + maxH) {
-    screen.writeStr(4, footerY,
-      '[Enter] Open  [s] Save file  [S] Save folder  [Z] Zipball  [C] git clone  [G] gh clone  [B] Branch  [y] Copy raw URL  [Esc] Back',
-      'dim');
+    const hints = '[Enter] Open  Save: [s/S]  Download: [Z/C/G]  [B] Branch  [y] URL  [Esc] Back';
+    screen.writeStr(4, footerY, hints, color('dim'));
   }
 
   if (appState.filesBranchPicker) renderBranchPicker(screen);
@@ -407,11 +411,10 @@ export function renderFilesPane(screen, y, maxH) {
 
 function renderFileViewer(screen, y, maxH) {
   const W = screen.width;
-  screen.writeStr(4, y, '📄 ' + appState.fileViewing,
-    color('accent'));
+  screen.writeStr(4, y, appState.fileViewing, color('title'));
   screen.writeStr(W - 12, y, '[' +
-    formatBytes(Buffer.byteLength(appState.fileText || '')) + ']', 'dim');
-  screen.hline(y + 1, '─');
+    formatBytes(Buffer.byteLength(appState.fileText || '')) + ']', color('dim'));
+  screen.hline(y + 1, '─', color('dim'));
 
   const lines = (appState.fileText || '').split(/\r?\n/);
   const rows = Math.max(1, maxH - 4);
@@ -430,11 +433,9 @@ function renderFileViewer(screen, y, maxH) {
 
   const footerY = y + 2 + Math.min(rows, lines.length) + 1;
   if (footerY < y + maxH) {
-    screen.writeStr(4, footerY,
-      'Line ' + (start + 1) + '-' + Math.min(start + rows, lines.length) +
-      ' of ' + lines.length +
-      '  [↑↓] scroll  [s] Save  [y] Copy URL  [Y] Copy contents  [Esc] Back',
-      'dim');
+    const hints = 'Line ' + (start + 1) + '-' + Math.min(start + rows, lines.length) +
+      ' of ' + lines.length + '  [↑↓] scroll  [s] Save  [y] URL  [Esc] Back';
+    screen.writeStr(4, footerY, hints, color('dim'));
   }
 }
 
@@ -456,6 +457,13 @@ function decorateLine(ln, path) {
 
 function renderBranchPicker(screen) {
   const W = screen.width, H = screen.height;
+
+  // Modal backdrop.
+  const backdropStyle = color('modalBackdrop');
+  for (let yy = 0; yy < H; yy++) {
+    for (let xx = 0; xx < W; xx++) screen.styleBuf[yy][xx] = backdropStyle;
+  }
+
   const boxW = Math.min(50, W - 4);
   const boxH = Math.min(appState.filesBranches.length + 4, H - 4);
   const x0 = Math.floor((W - boxW) / 2);
@@ -467,10 +475,17 @@ function renderBranchPicker(screen) {
   for (let i = 0; i < appState.filesBranches.length && i < boxH - 3; i++) {
     const b = appState.filesBranches[i];
     const sel = i === appState.filesBranchCursor;
-    screen.writeStr(x0 + 1, y0 + 1 + i, sel ? '▶' : ' ', sel ? 'bright' : null);
+
+    if (sel) {
+      for (let xx = x0 + 1; xx < x0 + boxW - 1; xx++) {
+        screen.styleBuf[y0 + 1 + i][xx] = color('selection');
+      }
+    }
+
+    const label = b.name + (b.name === appState.filesRef ? ' (current)' : '');
+    screen.writeStr(x0 + 1, y0 + 1 + i, sel ? '>' : ' ', sel ? color('selection') : null);
     screen.writeStr(x0 + 3, y0 + 1 + i,
-      (b.name + (b.name === appState.filesRef ? ' (current)' : '')).substring(0, boxW - 5),
-      sel ? 'bright' : null);
+      label.substring(0, boxW - 5), sel ? color('selection') : null);
   }
 }
 

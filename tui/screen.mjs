@@ -2,16 +2,47 @@ const ESC = '\x1b';
 const RESET = `${ESC}[0m`;
 
 const FG = {
-  bright: `${ESC}[1m`,
-  dim: `${ESC}[2m`,
-  red: `${ESC}[31m`,
-  green: `${ESC}[32m`,
-  yellow: `${ESC}[33m`,
-  blue: `${ESC}[34m`,
-  magenta: `${ESC}[35m`,
-  cyan: `${ESC}[36m`,
+  red: `${ESC}[31m`, green: `${ESC}[32m`, yellow: `${ESC}[33m`,
+  blue: `${ESC}[34m`, magenta: `${ESC}[35m`, cyan: `${ESC}[36m`,
+  white: `${ESC}[37m`, gray: `${ESC}[90m`,
+};
+
+const BG = {
+  red: `${ESC}[41m`, green: `${ESC}[42m`, yellow: `${ESC}[43m`,
+  blue: `${ESC}[44m`, magenta: `${ESC}[45m`, cyan: `${ESC}[46m`,
+  white: `${ESC}[47m`, gray: `${ESC}[100m`,
+  darkGray: `${ESC}[48;5;235m`, darkBlue: `${ESC}[48;5;236m`,
+};
+
+const ATTR = {
+  bold: `${ESC}[1m`, dim: `${ESC}[2m`, italic: `${ESC}[3m`,
+  underline: `${ESC}[4m`, inverse: `${ESC}[7m`, strikethrough: `${ESC}[9m`,
+};
+
+// Legacy string style → escape code (backward compat for old callers).
+const LEGACY = {
+  bright: `${ESC}[1m`, dim: `${ESC}[2m`,
+  red: `${ESC}[31m`, green: `${ESC}[32m`, yellow: `${ESC}[33m`,
+  blue: `${ESC}[34m`, magenta: `${ESC}[35m`, cyan: `${ESC}[36m`,
   white: `${ESC}[37m`,
 };
+
+// Resolve a style value to a compiled escape sequence.
+// Accepts: null, string (legacy), or { fg?, bg?, bold?, dim?, italic?, underline?, inverse?, strikethrough? }.
+function compileStyle(s) {
+  if (!s) return null;
+  if (typeof s === 'string') return LEGACY[s] || null;
+  const parts = [];
+  if (s.bold)      parts.push(ATTR.bold);
+  if (s.dim)       parts.push(ATTR.dim);
+  if (s.italic)    parts.push(ATTR.italic);
+  if (s.underline) parts.push(ATTR.underline);
+  if (s.inverse)   parts.push(ATTR.inverse);
+  if (s.strikethrough) parts.push(ATTR.strikethrough);
+  if (s.fg)        parts.push(FG[s.fg] || '');
+  if (s.bg)        parts.push(BG[s.bg] || '');
+  return parts.length > 0 ? parts.join('') : null;
+}
 
 export class Screen {
   constructor() {
@@ -71,43 +102,62 @@ export class Screen {
     this.styleBuf[y][x] = style;
   }
 
-  fillRow(y, ch) {
+  fillRow(y, ch, style = null) {
     if (y < 0 || y >= this.height) return;
     for (let x = 0; x < this.width; x++) {
       this.charBuf[y][x] = ch;
-      this.styleBuf[y][x] = null;
+      this.styleBuf[y][x] = style;
     }
   }
 
-  hline(y, ch = '─') {
-    this.fillRow(y, ch);
+  fillRect(x, y, w, h, ch = ' ', style = null) {
+    for (let dy = 0; dy < h; dy++) {
+      const row = y + dy;
+      if (row < 0 || row >= this.height) continue;
+      for (let dx = 0; dx < w; dx++) {
+        const col = x + dx;
+        if (col < 0 || col >= this.width) continue;
+        this.charBuf[row][col] = ch;
+        this.styleBuf[row][col] = style;
+      }
+    }
   }
 
-  box(x, y, w, h, title = '') {
+  hline(y, ch = '─', style = null) {
+    this.fillRow(y, ch, style);
+  }
+
+  vline(x, y, h, ch = '│', style = null) {
+    for (let dy = 0; dy < h; dy++) {
+      this.setCell(x, y + dy, ch, style);
+    }
+  }
+
+  box(x, y, w, h, title = '', style = 'bright') {
     if (h < 2 || w < 4 || y < 0 || y >= this.height) return;
 
     if (title) {
       const pad = Math.max(0, Math.floor((w - title.length - 4) / 2));
       const rightPad = Math.max(0, w - 2 - pad - title.length - 2);
       const top = '┌' + '─'.repeat(pad) + ' ' + title + ' ' + '─'.repeat(rightPad) + '┐';
-      this.writeStr(x, y, top.substring(0, w), 'bright');
+      this.writeStr(x, y, top.substring(0, w), style);
     } else {
-      this.writeStr(x, y, '┌' + '─'.repeat(w - 2) + '┐', 'bright');
+      this.writeStr(x, y, '┌' + '─'.repeat(w - 2) + '┐', style);
     }
 
     for (let i = 1; i < h - 1; i++) {
       if (y + i >= this.height) break;
-      this.setCell(x, y + i, '│', 'bright');
-      this.setCell(x + w - 1, y + i, '│', 'bright');
+      this.setCell(x, y + i, '│', style);
+      this.setCell(x + w - 1, y + i, '│', style);
     }
     if (y + h - 1 < this.height) {
-      this.writeStr(x, y + h - 1, '└' + '─'.repeat(w - 2) + '┘', 'bright');
+      this.writeStr(x, y + h - 1, '└' + '─'.repeat(w - 2) + '┘', style);
     }
   }
 
   render() {
     const out = [];
-    let curStyle = null;
+    let curCompiled = null;
 
     for (let y = 0; y < this.height; y++) {
       for (let x = 0; x < this.width; x++) {
@@ -120,17 +170,18 @@ export class Screen {
 
         out.push(`${ESC}[${y + 1};${x + 1}H`);
 
-        if (st !== curStyle) {
-          if (curStyle) out.push(RESET);
-          if (st) out.push(FG[st] || '');
-          curStyle = st;
+        const compiled = compileStyle(st);
+        if (compiled !== curCompiled) {
+          if (curCompiled) out.push(RESET);
+          if (compiled) out.push(compiled);
+          curCompiled = compiled;
         }
 
         out.push(ch);
       }
     }
 
-    if (curStyle) out.push(RESET);
+    if (curCompiled) out.push(RESET);
 
     if (out.length > 0) {
       process.stdout.write(out.join(''));

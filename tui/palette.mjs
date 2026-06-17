@@ -1,9 +1,8 @@
 // Command palette — Ctrl-P / ':' to fuzzy-search every action.
-// Each entry: { id, label, hint?, run() }.
-// Tab modules can register actions via `register()` so the palette stays
-// dynamic without us needing a giant central table.
 
 import { appState, render, showMessage } from './state.mjs';
+import { color } from './theme.mjs';
+import { truncate } from './utils.mjs';
 
 const actions = [];
 const seen = new Set();
@@ -16,9 +15,6 @@ export function register(action) {
 
 export function listActions() { return actions.slice(); }
 
-// Lightweight fuzzy scoring: every query char must appear in order; closer
-// matches score higher; prefix matches score highest. Returns a non-negative
-// score, or -1 for no match.
 function score(query, label) {
   if (!query) return 0;
   const q = query.toLowerCase();
@@ -91,33 +87,55 @@ export function handleKey(key) {
 
 export function renderPalette(screen) {
   const W = screen.width, H = screen.height;
-  const boxW = Math.min(70, W - 4);
+
+  // Modal backdrop: dim everything.
+  const backdropStyle = color('modalBackdrop');
+  for (let yy = 0; yy < H; yy++) {
+    for (let xx = 0; xx < W; xx++) {
+      screen.styleBuf[yy][xx] = backdropStyle;
+    }
+  }
+
+  const boxW = Math.min(80, W - 4);
   const boxH = Math.min(18, H - 4);
   const x = Math.floor((W - boxW) / 2);
   const y = Math.floor((H - boxH) / 2);
 
-  // Clear behind.
+  // Clear the box area.
   for (let yy = y; yy < y + boxH; yy++) {
     for (let xx = x; xx < x + boxW; xx++) screen.setCell(xx, yy, ' ', null);
   }
   screen.box(x, y, boxW, boxH, 'Command Palette');
 
-  // Query line.
+  // Query line with input box styling.
   const q = appState.paletteQuery;
-  screen.writeStr(x + 2, y + 1, '> ' + q + '█', 'cyan');
+  const inputStyle = color('inputBox');
+  screen.writeStr(x + 2, y + 1, '> ', inputStyle);
+  screen.writeStr(x + 4, y + 1, truncate(q, boxW - 6) + '_', inputStyle);
 
   const list = filter(q);
   if (list.length === 0) {
-    screen.writeStr(x + 2, y + 3, '(no matching actions — try a different query)', 'dim');
+    screen.writeStr(x + 2, y + 3, 'No matching actions', color('dim'));
     return;
   }
+
+  screen.hline(y + 2, '─', color('dim'));
+
   for (let i = 0; i < list.length && i < boxH - 4; i++) {
     const a = list[i];
+    const row = y + 3 + i;
     const sel = i === appState.paletteCursor;
-    screen.writeStr(x + 1, y + 3 + i, sel ? '▶' : ' ', sel ? 'bright' : null);
-    screen.writeStr(x + 3, y + 3 + i, a.label.substring(0, boxW - 30),
-      sel ? 'bright' : null);
-    if (a.hint) screen.writeStr(x + boxW - a.hint.length - 3, y + 3 + i,
-      a.hint.substring(0, 25), 'dim');
+
+    // Selection highlight.
+    if (sel) {
+      for (let xx = x + 1; xx < x + boxW - 1; xx++) {
+        screen.styleBuf[row][xx] = color('selection');
+      }
+    }
+
+    screen.writeStr(x + 1, row, sel ? '>' : ' ', sel ? color('selection') : null);
+    screen.writeStr(x + 3, row, truncate(a.label, boxW - 30), sel ? color('selection') : null);
+    if (a.hint) screen.writeStr(x + boxW - a.hint.length - 3, row,
+      truncate(a.hint, 25), sel ? color('selection') : color('dim'));
   }
 }
