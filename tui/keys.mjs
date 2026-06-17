@@ -177,15 +177,16 @@ export function handleKey(key) {
     }
   }
 
-  // 5. Per-tab key map.
+  // 5. Global star toggle — must run before per-tab keys so 's' stars
+  //    even when repos tab maps 's' to sort-by-stars.
+  if (key === 's' && currentRepoForAction()) { toggleStar(); return; }
+
+  // 6. Per-tab key map.
   const mod = tabModules[tabState.current];
   if (mod && mod.keys && typeof mod.keys[key] === 'function') {
     mod.keys[key]();
     return;
   }
-
-  // 6. Special: 's' globally toggles star when a repo is selected.
-  if (key === 's' && currentRepoForAction()) { toggleStar(); return; }
 
   // 7. Dashboard quick actions: 'n' opens new issue page.
   if (tabState.current === 0 && key === 'n') {
@@ -256,7 +257,7 @@ export function registerCoreActions() {
   reg({ id: 'bookmark.toggle', label: 'Bookmark / unbookmark current repo', hint: 'b', run: toggleBookmark });
 
   reg({ id: 'repos.sort.name',    label: 'Sort repos by name',    run: () => { setTab(1); repos.keys.n(); } });
-  reg({ id: 'repos.sort.stars',   label: 'Sort repos by stars',   run: () => { setTab(1); repos.keys.s(); } });
+  reg({ id: 'repos.sort.stars',   label: 'Sort repos by stars',   run: () => { setTab(1); repos.keys.S(); } });
   reg({ id: 'repos.sort.updated', label: 'Sort repos by updated', run: () => { setTab(1); repos.keys.u(); } });
   reg({ id: 'repos.filter',       label: 'Filter your repositories...',
         run: () => { setTab(1); repos.keys['/'](); } });

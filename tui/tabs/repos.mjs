@@ -18,7 +18,7 @@ const STALE_DAYS = 180;
 
 export const REPO_SORT_OPTIONS = [
   { field: 'name',    label: 'Name',    key: 'n' },
-  { field: 'stars',   label: '★ Stars', key: 's' },
+  { field: 'stars',   label: '★ Stars', key: 'S' },
   { field: 'forks',   label: '⑂ Forks', key: 'f' },
   { field: 'issues',  label: 'Issues',  key: 'i' },
   { field: 'updated', label: 'Updated', key: 'u' },
@@ -233,7 +233,7 @@ export function renderRepos(screen, y, h) {
 
   const keysHint =
     REPO_SORT_OPTIONS.map(o => '[' + o.key + ']' + o.label).join(' ') +
-    '  [/] Filter  [t] Type  [L] Lang  [x] Stale  [D] Density  [P] Pin  [Enter] Open';
+    '  [/] Filter  [t] Type  [L] Lang  [x] Stale  [D] Density  [P] Pin  [s] Star  [Enter] Open';
   screen.writeStr(4, y + 3, keysHint, 'dim');
 
   if (!repos || repos.length === 0) {
@@ -374,7 +374,7 @@ export const keys = {
   '/': () => startInput('Filter: ', 'filter'),
   'c': clearAllFilters,
   'n': () => toggleRepoSort('name'),
-  's': () => toggleRepoSort('stars'),
+  'S': () => toggleRepoSort('stars'),
   'f': () => toggleRepoSort('forks'),
   'i': () => toggleRepoSort('issues'),
   'u': () => toggleRepoSort('updated'),
