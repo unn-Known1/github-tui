@@ -2,7 +2,7 @@
 
 import { homedir } from 'os';
 import { join } from 'path';
-import { existsSync, readFileSync, writeFileSync, mkdirSync, unlinkSync } from 'fs';
+import { existsSync, readFileSync, writeFileSync, mkdirSync, unlinkSync, chmodSync } from 'fs';
 import {
   getAuthenticatedUser,
   searchRepositories,
@@ -10,6 +10,13 @@ import {
   getUserRepositories,
   getRepositoryForks,
   getCompare,
+  getRepositoryIssues,
+  getRepositoryPullRequests,
+  getRepositoryContributors,
+  getRepositoryLanguages,
+  getRepositoryReleases,
+  getNotifications,
+  lastRateLimit,
 } from './tui/github.mjs';
 import { Screen } from './tui/screen.mjs';
 
@@ -21,6 +28,7 @@ const TABS = [
   { key: '2', label: 'Repos' },
   { key: '3', label: 'Analyze' },
   { key: '4', label: 'Settings' },
+  { key: '5', label: 'Inbox' },
 ];
 
 const REPO_SORT_OPTIONS = [
@@ -66,9 +74,23 @@ let appState = {
   inputBuffer: '',
   inputPrompt: '',
   inputContext: null,
+  inputMask: false,
   settingsCursor: 0,
   repoScroll: 0,
   searchScroll: 0,
+  // Phase B additions — extra repo data for the details view.
+  repoLanguages: null,      // { JavaScript: 12345, CSS: 678, ... } bytes per lang
+  repoContributors: [],     // top contributors
+  repoReleases: [],         // recent releases
+  repoIssues: [],           // open issues (excluding PRs)
+  repoPullRequests: [],     // open PRs
+  // Phase C additions — Inbox tab + rate limit display.
+  notifications: [],
+  inboxScroll: 0,
+  selectedNotification: 0,
+  rateLimit: { remaining: null, limit: null, reset: null },
+  // Phase D additions — help overlay.
+  showHelp: false,
 };
 
 function loadToken() {
@@ -81,6 +103,14 @@ function loadToken() {
 function saveToken(token) {
   if (!existsSync(CONFIG_DIR)) mkdirSync(CONFIG_DIR, { recursive: true });
   writeFileSync(TOKEN_FILE, token);
+  // Lock down permissions so other users on a shared machine can't read the PAT.
+  // chmod is a no-op on Windows but harmless.
+  try {
+    chmodSync(CONFIG_DIR, 0o700);
+    chmodSync(TOKEN_FILE, 0o600);
+  } catch {
+    // Best-effort; ignore on platforms that don't support POSIX modes.
+  }
 }
 
 function removeToken() {
@@ -105,19 +135,23 @@ function isStale(gen) {
   return gen !== asyncGeneration;
 }
 
-function startInput(prompt, context) {
+function startInput(prompt, context, mask = false) {
   appState.inputMode = 'input';
   appState.inputBuffer = '';
   appState.inputPrompt = prompt;
   appState.inputContext = context;
+  appState.inputMask = mask;
   render();
 }
 
 function cancelInput() {
+  const wasActive = appState.inputMode === 'input';
   appState.inputMode = null;
   appState.inputBuffer = '';
   appState.inputPrompt = '';
   appState.inputContext = null;
+  appState.inputMask = false;
+  if (wasActive) showMessage('Cancelled', 'info');
   render();
 }
 
@@ -182,6 +216,17 @@ function toggleForkSort(field) {
 const REPOS_PER_PAGE = 30;
 const SEARCH_PER_PAGE = 15;
 
+// Visible-row helpers — single source of truth so renderers and key handlers
+// can't drift apart (which previously caused scroll-past-end bugs).
+function reposVisibleRows() {
+  // renderRepos uses (h - 8) where h = H - 10 → H - 18
+  return Math.max(1, screen.height - 18);
+}
+function analyzeListVisibleRows() {
+  // renderAnalyze caps at 6 rows by design.
+  return Math.max(1, Math.min(6, screen.height - 16));
+}
+
 async function loadUserData() {
   if (!appState.token) return;
   const gen = startAsync();
@@ -197,7 +242,20 @@ async function loadUserData() {
       if (isStale(gen)) return;
     }
   } catch (e) {
-    if (!isStale(gen)) showMessage('Failed to load user data', 'error');
+    if (!isStale(gen)) {
+      const msg = (e && e.message) || '';
+      // Auto-clear stored token on auth failure so user isn't stuck
+      if (/401|Bad credentials|Unauthorized/i.test(msg)) {
+        removeToken();
+        appState.token = null;
+        appState.user = null;
+        appState.repos = [];
+        currentTab = 3; // Jump to Settings so user can re-login
+        showMessage('Stored token rejected by GitHub — please log in again', 'error');
+      } else {
+        showMessage(`Failed to load user data: ${msg || 'unknown error'}`, 'error');
+      }
+    }
   }
   appState.loading = false;
   if (!isStale(gen)) render();
@@ -313,12 +371,40 @@ async function submitLogin() {
 async function loadRepoDetails(owner, name) {
   const gen = startAsync();
   appState.loading = true;
+  // Reset any stale enriched data from a previous repo so old contributors
+  // don't briefly render under a new repo's name.
+  appState.repoLanguages = null;
+  appState.repoContributors = [];
+  appState.repoReleases = [];
+  appState.repoIssues = [];
+  appState.repoPullRequests = [];
   render();
   try {
     const details = await getRepositoryDetails(appState.token, owner, name);
     if (isStale(gen)) return;
     appState.repoDetails = details;
     appState.analyzeView = 'details';
+    render();
+
+    // Fan-out the enrichment calls in parallel. Each one is best-effort — a
+    // single 404 (e.g. disabled issues) must not blow up the details view.
+    const safe = (p) => p.catch(() => null);
+    const [langs, contribs, releases, issues, prs] = await Promise.all([
+      safe(getRepositoryLanguages(appState.token, owner, name)),
+      safe(getRepositoryContributors(appState.token, owner, name, 1, 10)),
+      safe(getRepositoryReleases(appState.token, owner, name, 1, 5)),
+      safe(getRepositoryIssues(appState.token, owner, name, 1, 10)),
+      safe(getRepositoryPullRequests(appState.token, owner, name, 1, 10)),
+    ]);
+    if (isStale(gen)) return;
+
+    appState.repoLanguages = langs || null;
+    appState.repoContributors = Array.isArray(contribs) ? contribs : [];
+    appState.repoReleases = Array.isArray(releases) ? releases : [];
+    // The /issues endpoint returns PRs too; filter them out so the counts are honest.
+    appState.repoIssues = Array.isArray(issues) ? issues.filter(i => !i.pull_request) : [];
+    appState.repoPullRequests = Array.isArray(prs) ? prs : [];
+
     showMessage(`Loaded ${owner}/${name}`, 'success');
   } catch (e) {
     if (!isStale(gen)) showMessage(e.message || 'Failed to load repository', 'error');
@@ -346,26 +432,85 @@ async function loadForks() {
     appState.forks = forks;
 
     const defaultBranch = repo.default_branch || 'main';
-    for (let i = 0; i < forks.length; i++) {
-      if (isStale(gen)) return;
-      const forkOwner = forks[i].owner?.login;
-      if (!forkOwner) continue;
-      try {
-        const compare = await getCompare(appState.token, owner, name, defaultBranch, `${forkOwner}:${defaultBranch}`);
+
+    // Run compares in parallel with a small concurrency cap so we don't
+    // hammer the API (and don't get throttled). Previously this loop was
+    // serial: 30 forks → 30 round-trips back-to-back.
+    const CONCURRENCY = 5;
+    let cursor = 0;
+    let completed = 0;
+    const worker = async () => {
+      while (true) {
+        const i = cursor++;
+        if (i >= forks.length) return;
         if (isStale(gen)) return;
-        if (compare) {
-          appState.forks[i]._aheadBehind = { ahead: compare.ahead_by || 0, behind: compare.behind_by || 0 };
+        const forkOwner = forks[i].owner?.login;
+        if (!forkOwner) { completed++; continue; }
+        try {
+          const compare = await getCompare(
+            appState.token, owner, name, defaultBranch, `${forkOwner}:${defaultBranch}`
+          );
+          if (isStale(gen)) return;
+          appState.forks[i]._aheadBehind = compare
+            ? { ahead: compare.ahead_by || 0, behind: compare.behind_by || 0 }
+            : { ahead: 0, behind: 0 };
+        } catch {
+          appState.forks[i]._aheadBehind = { ahead: 0, behind: 0 };
         }
-      } catch {
-        appState.forks[i]._aheadBehind = { ahead: 0, behind: 0 };
+        completed++;
+        // Progressive render every few completions for a live progress feel.
+        if (completed % 5 === 0 && !isStale(gen)) render();
       }
-    }
+    };
+    await Promise.all(Array.from({ length: CONCURRENCY }, worker));
     if (!isStale(gen)) showMessage(`Loaded ${forks.length} forks`, 'success');
   } catch (e) {
     if (!isStale(gen)) showMessage(e.message || 'Failed to load forks', 'error');
   }
   appState.loading = false;
   if (!isStale(gen)) render();
+}
+
+async function loadNotifications() {
+  if (!appState.token) {
+    showMessage('Login required to view notifications', 'warning');
+    return;
+  }
+  const gen = startAsync();
+  appState.loading = true;
+  render();
+  try {
+    const notes = await getNotifications(appState.token);
+    if (isStale(gen)) return;
+    appState.notifications = Array.isArray(notes) ? notes : [];
+    appState.inboxScroll = 0;
+    appState.selectedNotification = 0;
+    showMessage(`Loaded ${appState.notifications.length} notifications`, 'success');
+  } catch (e) {
+    if (!isStale(gen)) showMessage(e.message || 'Failed to load notifications', 'error');
+  }
+  appState.loading = false;
+  if (!isStale(gen)) render();
+}
+
+// Cross-platform browser open. Uses spawn instead of exec so a URL containing
+// shell metacharacters can't trigger a command injection.
+async function openInBrowser(url) {
+  if (!url) { showMessage('No URL to open', 'warning'); return; }
+  try {
+    const { spawn } = await import('child_process');
+    const platform = process.platform;
+    let cmd, args;
+    if (platform === 'darwin')      { cmd = 'open';     args = [url]; }
+    else if (platform === 'win32')  { cmd = 'cmd';      args = ['/c', 'start', '""', url]; }
+    else                            { cmd = 'xdg-open'; args = [url]; }
+    const child = spawn(cmd, args, { detached: true, stdio: 'ignore' });
+    child.on('error', () => showMessage('Could not open browser', 'error'));
+    child.unref();
+    showMessage(`Opened ${url}`, 'success');
+  } catch (e) {
+    showMessage(`Open failed: ${e.message}`, 'error');
+  }
 }
 
 async function handleLogout() {
@@ -388,11 +533,18 @@ function render() {
   screen.box(0, 0, W, 3, 'GitHub TUI');
   if (appState.user) {
     screen.writeStr(2, 1, `Welcome, ${appState.user.login}`);
-    if (appState.user.plan) {
-      screen.writeStr(W - 15, 1, `Plan: ${appState.user.plan.name}`, 'dim');
-    }
   } else {
     screen.writeStr(2, 1, 'Not authenticated', 'dim');
+  }
+
+  // Rate-limit indicator, top-right. Colored by severity so the user sees
+  // problems before they hit them.
+  if (lastRateLimit.remaining !== null && lastRateLimit.limit !== null) {
+    const r = lastRateLimit.remaining;
+    const lim = lastRateLimit.limit;
+    const txt = `API ${r}/${lim}`;
+    const color = r === 0 ? 'red' : (r < lim * 0.1 ? 'yellow' : 'dim');
+    screen.writeStr(Math.max(2, W - txt.length - 2), 1, txt, color);
   }
 
   screen.hline(3, '─');
@@ -417,9 +569,21 @@ function render() {
     case 1: renderRepos(contentY, contentH); break;
     case 2: renderAnalyze(contentY, contentH); break;
     case 3: renderSettings(contentY, contentH); break;
+    case 4: renderInbox(contentY, contentH); break;
   }
 
+  // Help overlay sits on top of everything so it's always reachable.
+  if (appState.showHelp) renderHelp();
+
   screen.hline(H - 3, '─');
+
+  // Global input overlay — shown above the status bar regardless of active tab.
+  // Without this, login input (which lives on the Settings tab) was invisible.
+  if (appState.inputMode === 'input') {
+    const shown = appState.inputMask ? '•'.repeat(appState.inputBuffer.length) : appState.inputBuffer;
+    const line = `${appState.inputPrompt}${shown}█`;
+    screen.writeStr(1, H - 4, line.substring(0, W - 2), 'cyan');
+  }
 
   if (appState.message) {
     const colors = { info: 'cyan', success: 'green', error: 'red', warning: 'yellow' };
@@ -436,8 +600,10 @@ function render() {
       else if (v === 'results') statusLeft = `[↑↓jk] Nav  [Enter] View  [Space] More  [Esc/i] Back  [q] Quit`;
       else if (v === 'details') statusLeft = `[Enter] Forks  [Esc/h] Back  [1-4] Tabs  [q] Quit`;
       else if (v === 'forks') statusLeft = `[↑↓jk] Nav  [p/s/n] Sort  [Esc/h] Back  [q] Quit`;
+    } else if (currentTab === 4) {
+      statusLeft = `[↑↓jk] Nav  [Enter] Open  [r] Refresh  [o] Browser  [?] Help  [q] Quit`;
     } else {
-      statusLeft = `[1-4] Tabs  [↑↓jk] Nav  [Enter] Select  [q] Quit`;
+      statusLeft = `[1-5] Tabs  [↑↓jk] Nav  [Enter] Select  [?] Help  [q] Quit`;
     }
     screen.writeStr(1, H - 2, statusLeft.substring(0, W - 2), 'dim');
   }
@@ -549,7 +715,8 @@ function renderAnalyze(y, h) {
   if (view === 'search') {
     screen.writeStr(4, y + 2, 'Search:', 'bright');
     if (appState.inputMode) {
-      screen.writeStr(12, y + 2, `${appState.inputPrompt}${appState.inputBuffer}█`.substring(0, W - 16));
+      const shown = appState.inputMask ? '•'.repeat(appState.inputBuffer.length) : appState.inputBuffer;
+      screen.writeStr(12, y + 2, `${appState.inputPrompt}${shown}█`.substring(0, W - 16));
     } else {
       screen.writeStr(12, y + 2, '(press Enter or i to search)', 'dim');
     }
@@ -604,15 +771,19 @@ function renderRepoDetails(y, maxH) {
   screen.writeStr(4, y, `▸ ${repo.full_name}`, 'bright');
   screen.hline(y + 1, '─');
 
+  // Left column: factual metadata.
+  const leftWidth = Math.min(48, Math.floor(W / 2));
   const details = [
     ['Description:', repo.description || 'N/A'],
     ['Language:', repo.language || 'N/A'],
     ['Stars:', String(repo.stargazers_count || 0)],
     ['Forks:', String(repo.forks_count || 0)],
-    ['Open Issues:', String(repo.open_issues_count || 0)],
+    ['Open Issues:', String(appState.repoIssues.length || repo.open_issues_count || 0)],
+    ['Open PRs:', String(appState.repoPullRequests.length || 0)],
     ['Watchers:', String(repo.watchers_count || 0)],
     ['Size:', `${Math.round((repo.size || 0) / 1024)} MB`],
     ['License:', repo.license?.name || 'N/A'],
+    ['Default:', repo.default_branch || 'main'],
     ['Created:', new Date(repo.created_at).toLocaleDateString()],
     ['Updated:', new Date(repo.updated_at).toLocaleDateString()],
     ['URL:', repo.html_url],
@@ -622,12 +793,62 @@ function renderRepoDetails(y, maxH) {
   for (let i = 0; i < rows; i++) {
     const [key, val] = details[i];
     screen.writeStr(4, y + 2 + i, key, 'bright');
-    screen.writeStr(18, y + 2 + i, String(val).substring(0, W - 22));
+    screen.writeStr(18, y + 2 + i, String(val).substring(0, leftWidth - 14));
+  }
+
+  // Right column: enriched data (languages bar, top contributors, latest releases).
+  const rightX = leftWidth + 6;
+  if (rightX + 20 < W) {
+    let ry = y + 2;
+
+    // --- Languages bar ---
+    if (appState.repoLanguages && Object.keys(appState.repoLanguages).length > 0) {
+      screen.writeStr(rightX, ry++, 'Languages', 'bright');
+      const total = Object.values(appState.repoLanguages).reduce((a, b) => a + b, 0);
+      const sorted = Object.entries(appState.repoLanguages).sort((a, b) => b[1] - a[1]);
+      const barWidth = Math.min(30, W - rightX - 18);
+      for (const [lang, bytes] of sorted.slice(0, 5)) {
+        if (ry >= y + maxH - 1) break;
+        const pct = total ? bytes / total : 0;
+        const filled = Math.max(1, Math.round(pct * barWidth));
+        const bar = '█'.repeat(filled) + '░'.repeat(Math.max(0, barWidth - filled));
+        screen.writeStr(rightX, ry, lang.substring(0, 12).padEnd(13), null);
+        screen.writeStr(rightX + 13, ry, bar, 'cyan');
+        screen.writeStr(rightX + 14 + barWidth, ry, `${(pct * 100).toFixed(1)}%`, 'dim');
+        ry++;
+      }
+      ry++;
+    }
+
+    // --- Top contributors ---
+    if (appState.repoContributors.length > 0 && ry < y + maxH - 2) {
+      screen.writeStr(rightX, ry++, 'Top Contributors', 'bright');
+      for (const c of appState.repoContributors.slice(0, 5)) {
+        if (ry >= y + maxH - 1) break;
+        screen.writeStr(rightX, ry, `● ${c.login || '?'}`.substring(0, 24));
+        screen.writeStr(rightX + 26, ry, `${c.contributions || 0} commits`, 'dim');
+        ry++;
+      }
+      ry++;
+    }
+
+    // --- Latest releases ---
+    if (appState.repoReleases.length > 0 && ry < y + maxH - 2) {
+      screen.writeStr(rightX, ry++, 'Latest Releases', 'bright');
+      for (const rel of appState.repoReleases.slice(0, 3)) {
+        if (ry >= y + maxH - 1) break;
+        const tag = (rel.tag_name || rel.name || '?').substring(0, 18);
+        const when = rel.published_at ? new Date(rel.published_at).toLocaleDateString() : '';
+        screen.writeStr(rightX, ry, `▸ ${tag}`);
+        screen.writeStr(rightX + 22, ry, when, 'dim');
+        ry++;
+      }
+    }
   }
 
   const forkRow = y + 2 + rows + 1;
   if (forkRow < y + maxH) {
-    screen.writeStr(4, forkRow, '▶ [Enter] View Forks', 'cyan');
+    screen.writeStr(4, forkRow, '▶ [Enter] View Forks  [o] Open in browser  [r] Refresh', 'cyan');
   }
 }
 
@@ -722,7 +943,104 @@ function renderSettings(y, h) {
   }
 }
 
+function renderInbox(y, h) {
+  const W = screen.width;
+  screen.writeStr(4, y, 'Notifications', 'bright');
+  screen.hline(y + 1, '─');
+
+  if (!appState.token) {
+    screen.writeStr(4, y + 2, 'Login required. Go to Settings [4].', 'dim');
+    return;
+  }
+
+  if (appState.notifications.length === 0) {
+    screen.writeStr(4, y + 2, appState.loading
+      ? 'Loading…'
+      : 'Press [r] to refresh — your inbox may simply be empty.', 'dim');
+    return;
+  }
+
+  const headerY = y + 2;
+  screen.writeStr(4, headerY, 'Repo', 'bright');
+  screen.writeStr(36, headerY, 'Type', 'bright');
+  screen.writeStr(48, headerY, 'Reason', 'bright');
+  screen.writeStr(64, headerY, 'When', 'bright');
+
+  const maxRows = Math.max(1, h - 5);
+  const start = appState.inboxScroll;
+  const list = appState.notifications;
+
+  for (let i = 0; i < maxRows && start + i < list.length; i++) {
+    const n = list[start + i];
+    const row = headerY + 1 + i;
+    const sel = start + i === appState.selectedNotification;
+    const unread = n.unread;
+
+    screen.writeStr(2, row, sel ? '▶' : ' ');
+    screen.writeStr(4, row, (n.repository?.full_name || '?').substring(0, 30),
+      sel ? 'bright' : (unread ? null : 'dim'));
+    screen.writeStr(36, row, (n.subject?.type || '?').substring(0, 10), 'dim');
+    screen.writeStr(48, row, (n.reason || '?').substring(0, 14), 'dim');
+    const when = n.updated_at ? new Date(n.updated_at).toLocaleDateString() : '';
+    screen.writeStr(64, row, when, 'dim');
+  }
+
+  const infoY = headerY + 1 + Math.min(maxRows, list.length) + 1;
+  if (infoY < y + h) {
+    screen.writeStr(4, infoY,
+      `${list.length} total  [r] Refresh  [↑↓jk] Nav  [Enter] Open`, 'dim');
+  }
+}
+
+function renderHelp() {
+  const W = screen.width;
+  const H = screen.height;
+  const lines = [
+    'Keyboard Shortcuts',
+    '',
+    '  1-5 / Tab       Switch tabs',
+    '  ↑↓ or j/k       Navigate lists',
+    '  Enter           Select / drill in',
+    '  Esc / h         Back',
+    '  Space           Load more',
+    '  /               Filter repos (Repos tab)',
+    '  o               Open in browser',
+    '  r               Refresh current view',
+    '  ?               Toggle this help',
+    '  q / Ctrl-C      Quit',
+    '',
+    '  Repos sort:  n=name s=stars f=forks i=issues u=updated',
+    '  Forks sort:  p=pushed s=stars n=name',
+    '',
+    'Press any key to close',
+  ];
+  // Centered modal box.
+  const boxW = Math.min(60, W - 4);
+  const boxH = Math.min(lines.length + 4, H - 4);
+  const x0 = Math.floor((W - boxW) / 2);
+  const y0 = Math.floor((H - boxH) / 2);
+
+  // Clear the area behind the modal so it actually looks like an overlay.
+  for (let yy = y0; yy < y0 + boxH; yy++) {
+    for (let xx = x0; xx < x0 + boxW; xx++) {
+      screen.setCell(xx, yy, ' ', null);
+    }
+  }
+  screen.box(x0, y0, boxW, boxH, 'Help');
+  for (let i = 0; i < lines.length && i < boxH - 3; i++) {
+    const style = i === 0 ? 'bright' : (lines[i].startsWith('  ') ? null : 'cyan');
+    screen.writeStr(x0 + 2, y0 + 1 + i, lines[i].substring(0, boxW - 4), style);
+  }
+}
+
 function handleKey(key) {
+  // Help overlay swallows the next key, whatever it is.
+  if (appState.showHelp) {
+    appState.showHelp = false;
+    render();
+    return;
+  }
+
   if (appState.inputMode === 'input') {
     if (key === '\r' || key === '\n') {
       const ctx = appState.inputContext;
@@ -741,10 +1059,53 @@ function handleKey(key) {
   }
 
   switch (key) {
-    case '1': case '2': case '3': case '4':
+    case '1': case '2': case '3': case '4': case '5':
       currentTab = parseInt(key) - 1;
+      // Auto-load notifications the first time the user lands on Inbox.
+      if (currentTab === 4 && appState.notifications.length === 0 && appState.token) {
+        loadNotifications();
+      }
       render();
       break;
+
+    case '?':
+      appState.showHelp = true;
+      render();
+      break;
+
+    case 'r':
+      // Context-sensitive refresh.
+      if (currentTab === 0 || currentTab === 1) loadUserData();
+      else if (currentTab === 4) loadNotifications();
+      else if (currentTab === 2 && appState.analyzeView === 'details' && appState.repoDetails) {
+        const [o, n] = appState.repoDetails.full_name.split('/');
+        loadRepoDetails(o, n);
+      }
+      break;
+
+    case 'o': {
+      // Open whatever the cursor points at in the browser.
+      let url = null;
+      if (currentTab === 2) {
+        const v = appState.analyzeView;
+        if (v === 'results' && appState.searchResults[appState.selectedRepo]) {
+          url = appState.searchResults[appState.selectedRepo].html_url;
+        } else if (v === 'details' && appState.repoDetails) {
+          url = appState.repoDetails.html_url;
+        } else if (v === 'forks' && appState.forks[appState.selectedFork]) {
+          url = appState.forks[appState.selectedFork].html_url;
+        }
+      } else if (currentTab === 4 && appState.notifications[appState.selectedNotification]) {
+        const n = appState.notifications[appState.selectedNotification];
+        // The API gives an api.github.com URL; convert to a browseable one.
+        const apiUrl = n.subject?.url || '';
+        url = apiUrl
+          .replace('api.github.com/repos', 'github.com')
+          .replace('/pulls/', '/pull/');
+      }
+      openInBrowser(url);
+      break;
+    }
 
     case 'q': case '\x03':
       process.stdout.write('\x1b[2J\x1b[H');
@@ -795,7 +1156,7 @@ function handleKey(key) {
     case 'i':
       if (currentTab === 1) toggleRepoSort('issues');
       else if (currentTab === 2) handleAnalyzeKey('i');
-      else if (currentTab === 3 && !appState.token) startInput('PAT token: ', 'login');
+      else if (currentTab === 3 && !appState.token) startInput('PAT token: ', 'login', true);
       break;
     case 'u':
       if (currentTab === 1) toggleRepoSort('updated');
@@ -852,10 +1213,20 @@ function handleEnter() {
     case 3: {
       const isLoggedIn = !!appState.token;
       if (appState.settingsCursor === 0 && !isLoggedIn) {
-        startInput('PAT token: ', 'login');
+        startInput('PAT token: ', 'login', true);
       } else if (appState.settingsCursor === 1 && isLoggedIn) {
         handleLogout();
       }
+      break;
+    }
+    case 4: {
+      const n = appState.notifications[appState.selectedNotification];
+      if (!n) break;
+      const apiUrl = n.subject?.url || '';
+      const url = apiUrl
+        .replace('api.github.com/repos', 'github.com')
+        .replace('/pulls/', '/pull/');
+      openInBrowser(url);
       break;
     }
   }
@@ -914,13 +1285,24 @@ function handleUp() {
       appState.settingsCursor = Math.max(0, appState.settingsCursor - 1);
       render();
       break;
+    case 4: {
+      if (appState.notifications.length === 0) break;
+      if (appState.selectedNotification > appState.inboxScroll) {
+        appState.selectedNotification--;
+      } else if (appState.inboxScroll > 0) {
+        appState.inboxScroll--;
+        appState.selectedNotification--;
+      }
+      render();
+      break;
+    }
   }
 }
 
 function handleDown() {
   switch (currentTab) {
     case 1: {
-      const maxRows = Math.min(appState.repos.length, screen.height - 12);
+      const maxRows = Math.min(appState.repos.length, reposVisibleRows());
       const maxScroll = Math.max(0, appState.repos.length - maxRows);
       appState.repoScroll = Math.min(maxScroll, appState.repoScroll + 1);
       render();
@@ -928,7 +1310,7 @@ function handleDown() {
     }
     case 2: {
       if (appState.analyzeView === 'results') {
-        const maxVisible = Math.min(6, screen.height - 16);
+        const maxVisible = analyzeListVisibleRows();
         if (appState.searchResults.length > 0) {
           if (appState.selectedRepo < appState.searchScroll + maxVisible - 1) {
             appState.selectedRepo = Math.min(appState.searchResults.length - 1, appState.selectedRepo + 1);
@@ -939,7 +1321,7 @@ function handleDown() {
           render();
         }
       } else if (appState.analyzeView === 'forks') {
-        const maxVisible = Math.min(6, screen.height - 16);
+        const maxVisible = analyzeListVisibleRows();
         if (appState.forks.length > 0) {
           if (appState.selectedFork < appState.forkScroll + maxVisible - 1) {
             appState.selectedFork = Math.min(appState.forks.length - 1, appState.selectedFork + 1);
@@ -953,9 +1335,25 @@ function handleDown() {
       break;
     }
     case 3:
+      // 3 settings rows today (Login / Logout / Token). Kept explicit so we
+      // don't depend on global state, but easy to bump when adding new rows.
       appState.settingsCursor = Math.min(2, appState.settingsCursor + 1);
       render();
       break;
+    case 4: {
+      if (appState.notifications.length === 0) break;
+      const maxVisible = Math.max(1, screen.height - 15);
+      if (appState.selectedNotification < appState.inboxScroll + maxVisible - 1) {
+        appState.selectedNotification = Math.min(
+          appState.notifications.length - 1, appState.selectedNotification + 1);
+      } else if (appState.inboxScroll + maxVisible < appState.notifications.length) {
+        appState.inboxScroll++;
+        appState.selectedNotification = Math.min(
+          appState.notifications.length - 1, appState.selectedNotification + 1);
+      }
+      render();
+      break;
+    }
   }
 }
 

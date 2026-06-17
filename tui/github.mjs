@@ -2,6 +2,10 @@ import https from 'https';
 
 const GITHUB_API = 'api.github.com';
 
+// Last known rate-limit state. Updated on every successful response so the UI
+// can show the user how many API calls remain. Importers read this directly.
+export const lastRateLimit = { remaining: null, limit: null, reset: null };
+
 function makeRequest(path, token, method = 'GET', timeoutMs = 15000) {
   return new Promise((resolve, reject) => {
     let settled = false;
@@ -28,6 +32,13 @@ function makeRequest(path, token, method = 'GET', timeoutMs = 15000) {
     const req = https.request(options, (res) => {
       const rateRemaining = res.headers['x-ratelimit-remaining'];
       const rateReset = res.headers['x-ratelimit-reset'];
+      const rateLimit = res.headers['x-ratelimit-limit'];
+
+      // Mirror the rate-limit headers into a module-level object so the UI
+      // can display them without us having to thread them through every call.
+      if (rateRemaining !== undefined) lastRateLimit.remaining = parseInt(rateRemaining, 10);
+      if (rateLimit !== undefined) lastRateLimit.limit = parseInt(rateLimit, 10);
+      if (rateReset !== undefined) lastRateLimit.reset = parseInt(rateReset, 10);
 
       let data = '';
       res.on('data', (chunk) => { data += chunk; });
