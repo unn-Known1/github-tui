@@ -1,0 +1,255 @@
+// Global key router.
+// Order of resolution:
+//   1. Palette open  -> palette handles everything.
+//   2. Help overlay  -> any key closes it.
+//   3. Input modal   -> input subsystem handles everything.
+//   4. Tab-switch / global keys.
+//   5. Per-tab key handlers from tab modules' keys map.
+//   6. Per-tab arrow / enter / space dispatchers.
+
+import { appState, tabState, setTab, showMessage, render, TABS } from './state.mjs';
+import * as palette from './palette.mjs';
+import { handleInputKey } from './input.mjs';
+import { copyToClipboard, openUrl, notificationToHtmlUrl } from './utils.mjs';
+
+import * as dashboard from './tabs/dashboard.mjs';
+import * as repos     from './tabs/repos.mjs';
+import * as analyze   from './tabs/analyze.mjs';
+import * as settings  from './tabs/settings.mjs';
+import * as inbox     from './tabs/inbox.mjs';
+import { addBookmark, removeBookmark, isBookmarked } from './store.mjs';
+import { starRepo, unstarRepo, isStarred } from './github.mjs';
+import { getScreen } from './render.mjs';
+
+// Map tab index -> module. Used for keys lookup and arrow dispatchers.
+const tabModules = [dashboard, repos, analyze, settings, inbox];
+
+// ──────────────────────────────────────────────────────────────────
+// Context helpers — figure out what the user is pointing at.
+// ──────────────────────────────────────────────────────────────────
+function currentRepoForAction() {
+  if (tabState.current === 2) {
+    const v = appState.analyzeView;
+    if (v === 'results' && appState.searchResults[appState.selectedRepo])
+      return appState.searchResults[appState.selectedRepo];
+    if (v === 'details' && appState.repoDetails)
+      return appState.repoDetails;
+    if (v === 'forks' && appState.forks[appState.selectedFork])
+      return appState.forks[appState.selectedFork];
+  }
+  if (tabState.current === 1 && appState.repos.length > 0) {
+    return appState.repos[appState.repoScroll] || appState.repos[0];
+  }
+  return null;
+}
+
+function currentUrl() {
+  if (tabState.current === 4 && appState.notifications[appState.selectedNotification]) {
+    const n = appState.notifications[appState.selectedNotification];
+    return notificationToHtmlUrl(n.subject && n.subject.url);
+  }
+  const r = currentRepoForAction();
+  return r ? r.html_url : null;
+}
+
+async function openCurrent() {
+  const url = currentUrl();
+  if (!url) { showMessage('Nothing to open', 'warning'); return; }
+  const res = await openUrl(url);
+  if (res.ok) showMessage('Opened ' + url, 'success');
+  else showMessage(res.error || 'Open failed', 'error');
+}
+
+function copyCurrentUrl() {
+  const url = currentUrl();
+  if (!url) { showMessage('Nothing to copy', 'warning'); return; }
+  if (copyToClipboard(url)) showMessage('Copied to clipboard (OSC-52)', 'success');
+  else showMessage('Clipboard copy failed', 'error');
+}
+
+async function toggleStar() {
+  const r = currentRepoForAction();
+  if (!r || !appState.token) { showMessage('Login + select a repo first', 'warning'); return; }
+  const [owner, name] = r.full_name.split('/');
+  try {
+    const already = await isStarred(appState.token, owner, name);
+    if (already) {
+      await unstarRepo(appState.token, owner, name);
+      showMessage('Unstarred ' + r.full_name, 'success');
+    } else {
+      await starRepo(appState.token, owner, name);
+      showMessage('Starred ' + r.full_name, 'success');
+    }
+  } catch (e) { showMessage(e.message || 'Star failed', 'error'); }
+}
+
+function toggleBookmark() {
+  const r = currentRepoForAction();
+  if (!r) { showMessage('Select a repo first', 'warning'); return; }
+  if (isBookmarked(r.full_name)) {
+    removeBookmark(r.full_name);
+    showMessage('Removed bookmark for ' + r.full_name, 'info');
+  } else {
+    addBookmark(r);
+    showMessage('Bookmarked ' + r.full_name, 'success');
+  }
+  render();
+}
+
+function refreshCurrent() {
+  const t = tabState.current;
+  if (t === 0) {
+    appState.dashboardLoaded = false;
+    dashboard.loadDashboardWidgets(true);
+    repos.loadUserData();
+    showMessage('Refreshing dashboard...', 'info');
+  } else if (t === 1) {
+    repos.loadUserData();
+  } else if (t === 2 && appState.analyzeView === 'details' && appState.repoDetails) {
+    const [o, n] = appState.repoDetails.full_name.split('/');
+    analyze.loadRepoDetails(o, n);
+  } else if (t === 4) {
+    inbox.loadNotifications();
+  }
+}
+
+function quit() {
+  process.stdout.write('\x1b[2J\x1b[H');
+  process.exit(0);
+}
+
+// ──────────────────────────────────────────────────────────────────
+// Main entry — process.stdin pipes every keystroke through here.
+// ──────────────────────────────────────────────────────────────────
+export function handleKey(key) {
+  // 1. Palette captures all keys first.
+  if (palette.handleKey(key)) return;
+
+  // 2. Help overlay swallows the next key, whatever it is.
+  if (appState.showHelp) {
+    appState.showHelp = false;
+    render();
+    return;
+  }
+
+  // 3. Input modal.
+  if (handleInputKey(key)) return;
+
+  // 4. Tab-switch + globals.
+  switch (key) {
+    case '1': case '2': case '3': case '4': case '5': {
+      const i = parseInt(key, 10) - 1;
+      setTab(i);
+      // Auto-load Inbox on first visit.
+      if (i === 4 && appState.notifications.length === 0 && appState.token) {
+        inbox.loadNotifications();
+      }
+      return;
+    }
+    case 'q': case '\x03': quit(); return;
+    case '\t': setTab((tabState.current + 1) % TABS.length); return;
+    case '\x1b[Z': setTab((tabState.current - 1 + TABS.length) % TABS.length); return;
+    case '?': appState.showHelp = true; render(); return;
+    case '\x10':  // Ctrl-P
+    case ':':
+      palette.open(); return;
+    case 'r': refreshCurrent(); return;
+    case 'o': openCurrent(); return;
+    case 'y': copyCurrentUrl(); return;
+    case 'b': toggleBookmark(); return;
+    case '\r': case '\n': handleEnter(); return;
+    case '\x1b[A': case 'k': handleUp(); return;
+    case '\x1b[B': case 'j': handleDown(); return;
+    case '\x1b[D': case 'h': case '\x7f':
+      if (tabState.current === 2) analyze.handleBack();
+      return;
+    case ' ': handleSpace(); return;
+  }
+
+  // 5. Per-tab key map.
+  const mod = tabModules[tabState.current];
+  if (mod && mod.keys && typeof mod.keys[key] === 'function') {
+    mod.keys[key]();
+    return;
+  }
+
+  // 6. Special: 's' globally toggles star when a repo is selected.
+  if (key === 's' && currentRepoForAction()) { toggleStar(); return; }
+}
+
+function handleSpace() {
+  const t = tabState.current;
+  if (t === 1) repos.space();
+  else if (t === 2) analyze.space();
+}
+function handleEnter() {
+  const t = tabState.current;
+  if (t === 2) analyze.enter();
+  else if (t === 3) settings.enter();
+  else if (t === 4) inbox.enter();
+}
+function handleUp() {
+  const t = tabState.current;
+  const screen = getScreen();
+  if (t === 1) repos.up(screen);
+  else if (t === 2) analyze.up(screen);
+  else if (t === 3) settings.up();
+  else if (t === 4) inbox.up();
+}
+function handleDown() {
+  const t = tabState.current;
+  const screen = getScreen();
+  if (t === 1) repos.down(screen);
+  else if (t === 2) analyze.down(screen);
+  else if (t === 3) settings.down();
+  else if (t === 4) inbox.down(screen);
+}
+
+// ──────────────────────────────────────────────────────────────────
+// Palette action registry.
+// ──────────────────────────────────────────────────────────────────
+export function registerCoreActions() {
+  const reg = palette.register;
+
+  TABS.forEach((t, i) => reg({
+    id: 'tab.' + t.label.toLowerCase(),
+    label: 'Go to ' + t.label,
+    hint: 'tab ' + (i + 1),
+    run: () => setTab(i),
+  }));
+
+  reg({ id: 'refresh', label: 'Refresh current view',         hint: 'r', run: refreshCurrent });
+  reg({ id: 'open',    label: 'Open current item in browser', hint: 'o', run: openCurrent });
+  reg({ id: 'copy',    label: 'Copy current URL to clipboard', hint: 'y', run: copyCurrentUrl });
+  reg({ id: 'help',    label: 'Show help overlay',            hint: '?',
+        run: () => { appState.showHelp = true; render(); } });
+  reg({ id: 'quit',    label: 'Quit application',             hint: 'q', run: quit });
+
+  reg({ id: 'star.toggle',     label: 'Star / unstar current repo',         hint: 's', run: toggleStar });
+  reg({ id: 'bookmark.toggle', label: 'Bookmark / unbookmark current repo', hint: 'b', run: toggleBookmark });
+
+  reg({ id: 'repos.sort.name',    label: 'Sort repos by name',    run: () => { setTab(1); repos.keys.n(); } });
+  reg({ id: 'repos.sort.stars',   label: 'Sort repos by stars',   run: () => { setTab(1); repos.keys.s(); } });
+  reg({ id: 'repos.sort.updated', label: 'Sort repos by updated', run: () => { setTab(1); repos.keys.u(); } });
+  reg({ id: 'repos.filter',       label: 'Filter your repositories...',
+        run: () => { setTab(1); repos.keys['/'](); } });
+  reg({ id: 'repos.clear-filter', label: 'Clear repos filter',
+        run: () => { setTab(1); repos.keys.c(); } });
+
+  reg({ id: 'analyze.search', label: 'Search public repositories...',
+        run: () => { setTab(2); analyze.keys.i(); } });
+  reg({ id: 'analyze.readme', label: 'View README of current repo',
+        run: () => { if (appState.repoDetails) analyze.keys.R(); } });
+
+  reg({ id: 'inbox.refresh',     label: 'Inbox: refresh notifications',       run: inbox.loadNotifications });
+  reg({ id: 'inbox.mark.read',   label: 'Inbox: mark current thread as read', run: inbox.markCurrentRead });
+  reg({ id: 'inbox.mark.all',    label: 'Inbox: mark all as read',            run: inbox.markAllRead });
+  reg({ id: 'inbox.unsubscribe', label: 'Inbox: unsubscribe from thread',     run: inbox.unsubscribeCurrent });
+  reg({ id: 'inbox.cycle',       label: 'Inbox: cycle filter',                run: inbox.cycleFilter });
+
+  reg({ id: 'settings.theme',  label: 'Change theme...',
+        run: () => { setTab(3); appState.settingsCursor = 4; render(); settings.enter(); } });
+  reg({ id: 'settings.logout', label: 'Log out',                            run: settings.handleLogout });
+  reg({ id: 'dashboard.refresh', label: 'Refresh dashboard widgets',
+        run: () => dashboard.loadDashboardWidgets(true) });
+}

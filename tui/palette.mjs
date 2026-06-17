@@ -1,0 +1,123 @@
+// Command palette — Ctrl-P / ':' to fuzzy-search every action.
+// Each entry: { id, label, hint?, run() }.
+// Tab modules can register actions via `register()` so the palette stays
+// dynamic without us needing a giant central table.
+
+import { appState, render, showMessage } from './state.mjs';
+
+const actions = [];
+const seen = new Set();
+
+export function register(action) {
+  if (!action || !action.id || seen.has(action.id)) return;
+  seen.add(action.id);
+  actions.push(action);
+}
+
+export function listActions() { return actions.slice(); }
+
+// Lightweight fuzzy scoring: every query char must appear in order; closer
+// matches score higher; prefix matches score highest. Returns a non-negative
+// score, or -1 for no match.
+function score(query, label) {
+  if (!query) return 0;
+  const q = query.toLowerCase();
+  const s = label.toLowerCase();
+  if (s.startsWith(q)) return 1000 - (s.length - q.length);
+  let qi = 0, si = 0, hits = 0;
+  while (qi < q.length && si < s.length) {
+    if (q[qi] === s[si]) { hits++; qi++; }
+    si++;
+  }
+  if (qi < q.length) return -1;
+  return 500 - (s.length - hits);
+}
+
+export function filter(query) {
+  return actions
+    .map(a => ({ a, s: score(query, a.label) }))
+    .filter(x => x.s >= 0)
+    .sort((a, b) => b.s - a.s)
+    .slice(0, 12)
+    .map(x => x.a);
+}
+
+export function open() {
+  appState.showPalette = true;
+  appState.paletteQuery = '';
+  appState.paletteCursor = 0;
+  render();
+}
+export function close() {
+  appState.showPalette = false;
+  appState.paletteQuery = '';
+  appState.paletteCursor = 0;
+  render();
+}
+export function execSelected() {
+  const matches = filter(appState.paletteQuery);
+  const a = matches[appState.paletteCursor];
+  if (!a) { close(); return; }
+  close();
+  try { Promise.resolve(a.run()).catch(e => showMessage(e.message, 'error')); }
+  catch (e) { showMessage(e.message, 'error'); }
+}
+
+export function handleKey(key) {
+  if (!appState.showPalette) return false;
+  if (key === '\r' || key === '\n') { execSelected(); return true; }
+  if (key === '\x1b') { close(); return true; }
+  if (key === '\x7f' || key === '\b') {
+    appState.paletteQuery = appState.paletteQuery.slice(0, -1);
+    appState.paletteCursor = 0;
+    render(); return true;
+  }
+  if (key === '\x1b[A') {
+    appState.paletteCursor = Math.max(0, appState.paletteCursor - 1);
+    render(); return true;
+  }
+  if (key === '\x1b[B') {
+    const max = Math.max(0, filter(appState.paletteQuery).length - 1);
+    appState.paletteCursor = Math.min(max, appState.paletteCursor + 1);
+    render(); return true;
+  }
+  if (key.length === 1 && key.charCodeAt(0) >= 32) {
+    appState.paletteQuery += key;
+    appState.paletteCursor = 0;
+    render(); return true;
+  }
+  return true;
+}
+
+export function renderPalette(screen) {
+  const W = screen.width, H = screen.height;
+  const boxW = Math.min(70, W - 4);
+  const boxH = Math.min(18, H - 4);
+  const x = Math.floor((W - boxW) / 2);
+  const y = Math.floor((H - boxH) / 2);
+
+  // Clear behind.
+  for (let yy = y; yy < y + boxH; yy++) {
+    for (let xx = x; xx < x + boxW; xx++) screen.setCell(xx, yy, ' ', null);
+  }
+  screen.box(x, y, boxW, boxH, 'Command Palette');
+
+  // Query line.
+  const q = appState.paletteQuery;
+  screen.writeStr(x + 2, y + 1, '> ' + q + '█', 'cyan');
+
+  const list = filter(q);
+  if (list.length === 0) {
+    screen.writeStr(x + 2, y + 3, '(no matching actions — try a different query)', 'dim');
+    return;
+  }
+  for (let i = 0; i < list.length && i < boxH - 4; i++) {
+    const a = list[i];
+    const sel = i === appState.paletteCursor;
+    screen.writeStr(x + 1, y + 3 + i, sel ? '▶' : ' ', sel ? 'bright' : null);
+    screen.writeStr(x + 3, y + 3 + i, a.label.substring(0, boxW - 30),
+      sel ? 'bright' : null);
+    if (a.hint) screen.writeStr(x + boxW - a.hint.length - 3, y + 3 + i,
+      a.hint.substring(0, 25), 'dim');
+  }
+}

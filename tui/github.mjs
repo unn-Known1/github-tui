@@ -1,44 +1,66 @@
+// GitHub REST API client. Zero external deps - pure node https.
+// Supports any HTTP method, optional body, ETag caching, live rate-limit mirror.
+
 import https from 'https';
 
 const GITHUB_API = 'api.github.com';
+const USER_AGENT = 'GitHub-TUI';
 
-// Last known rate-limit state. Updated on every successful response so the UI
-// can show the user how many API calls remain. Importers read this directly.
 export const lastRateLimit = { remaining: null, limit: null, reset: null };
+export const lastScopes = { scopes: [], accepted: [] };
+const etagCache = new Map();
 
-function makeRequest(path, token, method = 'GET', timeoutMs = 15000) {
+function buildOptions(path, token, method, body) {
+  const headers = {
+    'User-Agent': USER_AGENT,
+    'Accept': 'application/vnd.github.v3+json',
+  };
+  if (token) headers['Authorization'] = `token ${token}`;
+  if (body != null) {
+    headers['Content-Type'] = 'application/json';
+    headers['Content-Length'] = Buffer.byteLength(body);
+  }
+  if (method === 'GET') {
+    const cached = etagCache.get(`${method}:${path}`);
+    if (cached && cached.etag) headers['If-None-Match'] = cached.etag;
+  }
+  return { hostname: GITHUB_API, path, method, headers };
+}
+
+export function request(path, opts) {
+  const o = opts || {};
+  const token = o.token || null;
+  const method = o.method || 'GET';
+  const body = o.body == null ? null : o.body;
+  const accept = o.accept || null;
+  const timeoutMs = o.timeoutMs || 15000;
+  const raw = !!o.raw;
+  const bodyStr = body == null ? null : JSON.stringify(body);
+
   return new Promise((resolve, reject) => {
     let settled = false;
-
+    let req;
     const timer = setTimeout(() => {
-      if (!settled) {
-        settled = true;
-        req.destroy();
-        reject(new Error('Request timed out'));
-      }
+      if (settled) return;
+      settled = true;
+      try { if (req) req.destroy(); } catch (e) {}
+      reject(new Error('Request timed out'));
     }, timeoutMs);
 
-    const options = {
-      hostname: GITHUB_API,
-      path,
-      method,
-      headers: {
-        'User-Agent': 'GitHub-TUI',
-        'Accept': 'application/vnd.github.v3+json',
-        ...(token && { 'Authorization': `token ${token}` }),
-      },
-    };
+    const options = buildOptions(path, token, method, bodyStr);
+    if (accept) options.headers['Accept'] = accept;
 
-    const req = https.request(options, (res) => {
-      const rateRemaining = res.headers['x-ratelimit-remaining'];
-      const rateReset = res.headers['x-ratelimit-reset'];
-      const rateLimit = res.headers['x-ratelimit-limit'];
-
-      // Mirror the rate-limit headers into a module-level object so the UI
-      // can display them without us having to thread them through every call.
-      if (rateRemaining !== undefined) lastRateLimit.remaining = parseInt(rateRemaining, 10);
-      if (rateLimit !== undefined) lastRateLimit.limit = parseInt(rateLimit, 10);
-      if (rateReset !== undefined) lastRateLimit.reset = parseInt(rateReset, 10);
+    req = https.request(options, (res) => {
+      const rr = res.headers['x-ratelimit-remaining'];
+      const rl = res.headers['x-ratelimit-limit'];
+      const rs = res.headers['x-ratelimit-reset'];
+      if (rr !== undefined) lastRateLimit.remaining = parseInt(rr, 10);
+      if (rl !== undefined) lastRateLimit.limit = parseInt(rl, 10);
+      if (rs !== undefined) lastRateLimit.reset = parseInt(rs, 10);
+      const sc = res.headers['x-oauth-scopes'];
+      const ac = res.headers['x-accepted-oauth-scopes'];
+      if (sc !== undefined) lastScopes.scopes = sc.split(',').map(s => s.trim()).filter(Boolean);
+      if (ac !== undefined) lastScopes.accepted = ac.split(',').map(s => s.trim()).filter(Boolean);
 
       let data = '';
       res.on('data', (chunk) => { data += chunk; });
@@ -47,145 +69,165 @@ function makeRequest(path, token, method = 'GET', timeoutMs = 15000) {
         settled = true;
         clearTimeout(timer);
 
-        if (res.statusCode === 403 && rateRemaining === '0') {
-          const resetDate = new Date(parseInt(rateReset) * 1000);
-          reject(new Error(`Rate limited. Try again at ${resetDate.toLocaleTimeString()}`));
-          return;
+        if (res.statusCode === 304) {
+          const cached = etagCache.get(`${method}:${path}`);
+          if (cached) return resolve(cached.body);
         }
-
+        if (res.statusCode === 403 && rr === '0') {
+          const resetDate = new Date(parseInt(rs, 10) * 1000);
+          return reject(new Error('Rate limited. Try again at ' + resetDate.toLocaleTimeString()));
+        }
         if (res.statusCode >= 200 && res.statusCode < 300) {
-          try {
-            resolve(JSON.parse(data));
-          } catch {
-            reject(new Error('Invalid JSON response'));
+          let payload;
+          if (raw) payload = data;
+          else if (res.statusCode === 204 || !data) payload = null;
+          else {
+            try { payload = JSON.parse(data); }
+            catch (e) { return reject(new Error('Invalid JSON response')); }
           }
-        } else {
-          let msg = `GitHub API error: ${res.statusCode}`;
-          try {
-            const body = JSON.parse(data);
-            if (body.message) msg += ` - ${body.message}`;
-          } catch {}
-          reject(new Error(msg));
+          if (method === 'GET' && res.headers.etag) {
+            etagCache.set(`${method}:${path}`, { etag: res.headers.etag, body: payload });
+          }
+          return resolve(payload);
         }
+        let msg = 'GitHub API error: ' + res.statusCode;
+        try {
+          const errBody = JSON.parse(data);
+          if (errBody.message) msg += ' - ' + errBody.message;
+        } catch (e) {}
+        reject(new Error(msg));
       });
     });
 
     req.on('error', (err) => {
-      if (!settled) {
-        settled = true;
-        clearTimeout(timer);
-        reject(err);
-      }
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      reject(err);
     });
-
     req.on('close', () => {
-      if (!settled) {
-        settled = true;
-        clearTimeout(timer);
-        reject(new Error('Connection closed'));
-      }
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      reject(new Error('Connection closed'));
     });
 
+    if (bodyStr) req.write(bodyStr);
     req.end();
   });
 }
 
-export async function getAuthenticatedUser(token) {
-  return makeRequest('/user', token);
-}
+// ─── User & repos ───────────────────────────────────────────────────
+export const getAuthenticatedUser = (token) => request('/user', { token });
+export const getUserRepositories = (token, page, perPage) =>
+  request('/user/repos?page=' + (page||1) + '&per_page=' + (perPage||50) + '&sort=updated', { token });
+export const getUser = (token, username) => request('/users/' + username, { token });
+export const searchRepositories = async (token, query, page, perPage) => {
+  const r = await request('/search/repositories?q=' + encodeURIComponent(query) +
+    '&page=' + (page||1) + '&per_page=' + (perPage||10), { token });
+  return r.items || [];
+};
+export const getRepositoryDetails = (token, owner, repo) =>
+  request('/repos/' + owner + '/' + repo, { token });
+export const getRepositoryForks = (token, owner, repo, page, perPage) =>
+  request('/repos/' + owner + '/' + repo + '/forks?page=' + (page||1) +
+    '&per_page=' + (perPage||30) + '&sort=stargazers', { token });
+export const getCompare = (token, owner, repo, base, head) =>
+  request('/repos/' + owner + '/' + repo + '/compare/' + base + '...' + head, { token });
+export const getRepositoryIssues = (token, owner, repo, page, perPage) =>
+  request('/repos/' + owner + '/' + repo + '/issues?page=' + (page||1) +
+    '&per_page=' + (perPage||10), { token });
+export const getRepositoryPullRequests = (token, owner, repo, page, perPage) =>
+  request('/repos/' + owner + '/' + repo + '/pulls?page=' + (page||1) +
+    '&per_page=' + (perPage||10), { token });
+export const getRepositoryContributors = (token, owner, repo, page, perPage) =>
+  request('/repos/' + owner + '/' + repo + '/contributors?page=' + (page||1) +
+    '&per_page=' + (perPage||10), { token });
+export const getRepositoryLanguages = (token, owner, repo) =>
+  request('/repos/' + owner + '/' + repo + '/languages', { token });
+export const getRepositoryReleases = (token, owner, repo, page, perPage) =>
+  request('/repos/' + owner + '/' + repo + '/releases?page=' + (page||1) +
+    '&per_page=' + (perPage||5), { token });
 
-export async function getUserRepositories(token, page = 1, perPage = 50) {
-  return makeRequest(
-    `/user/repos?page=${page}&per_page=${perPage}&sort=updated`,
-    token
-  );
-}
+// ─── Notifications ──────────────────────────────────────────────────
+export const getNotifications = (token) => request('/notifications', { token });
+export const markNotificationRead = (token, threadId) =>
+  request('/notifications/threads/' + threadId, { token, method: 'PATCH' });
+export const markAllNotificationsRead = (token) =>
+  request('/notifications', { token, method: 'PUT', body: { read: true } });
+export const unsubscribeNotification = (token, threadId) =>
+  request('/notifications/threads/' + threadId + '/subscription', {
+    token, method: 'PUT', body: { ignored: true },
+  });
 
-export async function searchRepositories(token, query, page = 1, perPage = 10) {
-  const results = await makeRequest(
-    `/search/repositories?q=${encodeURIComponent(query)}&page=${page}&per_page=${perPage}`,
-    token
-  );
-  return results.items || [];
-}
+// ─── Activity, trending, starred ────────────────────────────────────
+export const getUserEvents = (token, username, perPage) =>
+  request('/users/' + username + '/events?per_page=' + (perPage||15), { token });
+export const getTrendingRepos = async (token, days, perPage) => {
+  const d = days || 7;
+  const pp = perPage || 5;
+  const since = new Date(Date.now() - d * 86400000).toISOString().split('T')[0];
+  const q = encodeURIComponent('created:>' + since);
+  const r = await request('/search/repositories?q=' + q +
+    '&sort=stars&order=desc&per_page=' + pp, { token });
+  return r.items || [];
+};
+export const getStarredRepos = (token, page, perPage) =>
+  request('/user/starred?page=' + (page||1) + '&per_page=' + (perPage||30), { token });
+export const isStarred = async (token, owner, repo) => {
+  try { await request('/user/starred/' + owner + '/' + repo, { token }); return true; }
+  catch (e) { return false; }
+};
+export const starRepo = (token, owner, repo) =>
+  request('/user/starred/' + owner + '/' + repo, { token, method: 'PUT' });
+export const unstarRepo = (token, owner, repo) =>
+  request('/user/starred/' + owner + '/' + repo, { token, method: 'DELETE' });
 
-export async function getRepositoryDetails(token, owner, repo) {
-  return makeRequest(`/repos/${owner}/${repo}`, token);
-}
+// ─── Code, READMEs, file browser ────────────────────────────────────
+export const getReadme = (token, owner, repo) =>
+  request('/repos/' + owner + '/' + repo + '/readme', {
+    token, accept: 'application/vnd.github.raw', raw: true,
+  });
+export const getRepoContents = (token, owner, repo, path, ref) =>
+  request('/repos/' + owner + '/' + repo + '/contents/' + (path||'') +
+    (ref ? '?ref=' + ref : ''), { token });
+export const getRepoFile = (token, owner, repo, path, ref) =>
+  request('/repos/' + owner + '/' + repo + '/contents/' + path +
+    (ref ? '?ref=' + ref : ''), {
+    token, accept: 'application/vnd.github.raw', raw: true,
+  });
+export const getRepoCommits = (token, owner, repo, perPage) =>
+  request('/repos/' + owner + '/' + repo + '/commits?per_page=' + (perPage||10), { token });
 
-export async function getRepositoryForks(token, owner, repo, page = 1, perPage = 30) {
-  return makeRequest(
-    `/repos/${owner}/${repo}/forks?page=${page}&per_page=${perPage}&sort=stargazers`,
-    token
-  );
-}
+// ─── Searches ───────────────────────────────────────────────────────
+export const searchCode = async (token, query, page, perPage) => {
+  const r = await request('/search/code?q=' + encodeURIComponent(query) +
+    '&page=' + (page||1) + '&per_page=' + (perPage||20), { token });
+  return r.items || [];
+};
+export const searchUsers = async (token, query, page, perPage) => {
+  const r = await request('/search/users?q=' + encodeURIComponent(query) +
+    '&page=' + (page||1) + '&per_page=' + (perPage||15), { token });
+  return r.items || [];
+};
+export const searchIssues = async (token, query, page, perPage) => {
+  const r = await request('/search/issues?q=' + encodeURIComponent(query) +
+    '&page=' + (page||1) + '&per_page=' + (perPage||20), { token });
+  return r.items || [];
+};
 
-export async function getCompare(token, owner, repo, base, head) {
-  return makeRequest(
-    `/repos/${owner}/${repo}/compare/${base}...${head}`,
-    token
-  );
-}
+// ─── Actions / Workflows  (CI cockpit foundation) ──────────────────
+export const getWorkflows = (token, owner, repo) =>
+  request('/repos/' + owner + '/' + repo + '/actions/workflows', { token });
+export const getWorkflowRuns = (token, owner, repo, perPage) =>
+  request('/repos/' + owner + '/' + repo + '/actions/runs?per_page=' + (perPage||20), { token });
+export const rerunWorkflow = (token, owner, repo, runId) =>
+  request('/repos/' + owner + '/' + repo + '/actions/runs/' + runId + '/rerun',
+    { token, method: 'POST' });
+export const cancelWorkflowRun = (token, owner, repo, runId) =>
+  request('/repos/' + owner + '/' + repo + '/actions/runs/' + runId + '/cancel',
+    { token, method: 'POST' });
 
-export async function getRepositoryIssues(token, owner, repo, page = 1, perPage = 10) {
-  return makeRequest(
-    `/repos/${owner}/${repo}/issues?page=${page}&per_page=${perPage}`,
-    token
-  );
-}
-
-export async function getRepositoryPullRequests(token, owner, repo, page = 1, perPage = 10) {
-  return makeRequest(
-    `/repos/${owner}/${repo}/pulls?page=${page}&per_page=${perPage}`,
-    token
-  );
-}
-
-export async function getRepositoryContributors(token, owner, repo, page = 1, perPage = 10) {
-  return makeRequest(
-    `/repos/${owner}/${repo}/contributors?page=${page}&per_page=${perPage}`,
-    token
-  );
-}
-
-export async function getRepositoryLanguages(token, owner, repo) {
-  return makeRequest(`/repos/${owner}/${repo}/languages`, token);
-}
-
-export async function getRepositoryReleases(token, owner, repo, page = 1, perPage = 5) {
-  return makeRequest(
-    `/repos/${owner}/${repo}/releases?page=${page}&per_page=${perPage}`,
-    token
-  );
-}
-
-export async function getNotifications(token) {
-  return makeRequest('/notifications', token);
-}
-
-// Recent public activity for a user — pushes, PRs, issues, stars, etc.
-export async function getUserEvents(token, username, perPage = 15) {
-  return makeRequest(`/users/${username}/events?per_page=${perPage}`, token);
-}
-
-// Trending: repos created in the last `days` days, sorted by stars.
-export async function getTrendingRepos(token, days = 7, perPage = 5) {
-  const since = new Date(Date.now() - days * 24 * 60 * 60 * 1000)
-    .toISOString().split('T')[0];
-  const q = encodeURIComponent(`created:>${since}`);
-  const data = await makeRequest(
-    `/search/repositories?q=${q}&sort=stars&order=desc&per_page=${perPage}`,
-    token
-  );
-  return data.items || [];
-}
-
-// Repos the authenticated user has starred.
-export async function getStarredRepos(token, page = 1, perPage = 30) {
-  return makeRequest(`/user/starred?page=${page}&per_page=${perPage}`, token);
-}
-
-// Recent commits on a repo's default branch.
-export async function getRepoCommits(token, owner, repo, perPage = 10) {
-  return makeRequest(`/repos/${owner}/${repo}/commits?per_page=${perPage}`, token);
-}
+// ─── Cache utilities ────────────────────────────────────────────────
+export function clearEtagCache() { etagCache.clear(); }
+export function etagCacheSize() { return etagCache.size; }
