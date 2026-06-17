@@ -19,7 +19,7 @@ export async function loadDashboardWidgets(force = false) {
   try {
     const safe = (p) => p.catch(() => null);
     const [events, trending, starred, issues, prs] = await Promise.all([
-      safe(getUserEvents(appState.token, username, 15)),
+      safe(getUserEvents(appState.token, username, 100)),
       safe(getTrendingRepos(appState.token, 7, 5)),
       safe(getStarredRepos(appState.token, 1, 30)),
       safe(getUserIssues(appState.token, 1, 10)),
@@ -51,22 +51,33 @@ export async function loadDashboardWidgets(force = false) {
 }
 
 // ─── Heatmap builder ──────────────────────────────────────────────────
-// Build a 7-row × 15-column grid from PushEvent timestamps.
+// Build a 7-row × 15-column grid from event timestamps.
+// Uses PushEvent + IssuesEvent + PullRequestEvent + CreateEvent for activity.
 function buildHeatmap(events) {
   const now = Date.now();
   const dayMs = 86400000;
   const weeks = 15;
   const grid = Array.from({ length: 7 }, () => new Array(weeks).fill(0));
 
-  // Find the Sunday that starts the grid (15 weeks ago).
-  const startDate = new Date(now - (weeks * 7 - 1) * dayMs);
-  const startDay = startDate.getDay();
-  const startOffset = startDate.getTime() - startDay * dayMs;
+  // Count any activity event, not just PushEvent.
+  const activityTypes = new Set([
+    'PushEvent', 'IssuesEvent', 'PullRequestEvent', 'CreateEvent',
+    'PullRequestReviewEvent', 'ReleaseEvent', 'ForkEvent',
+  ]);
+
+  // Find the Sunday that starts the grid.
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  const todayDay = today.getDay(); // 0=Sun
+  const gridStartMs = today.getTime() - (weeks * 7 - 1 + todayDay) * dayMs;
 
   for (const ev of events) {
-    if (ev.type !== 'PushEvent' || !ev.created_at) continue;
-    const evTime = new Date(ev.created_at).getTime();
-    const diffDays = Math.floor((evTime - startOffset) / dayMs);
+    if (!activityTypes.has(ev.type) || !ev.created_at) continue;
+    const evDate = new Date(ev.created_at);
+    evDate.setHours(0, 0, 0, 0);
+    const diffMs = evDate.getTime() - gridStartMs;
+    if (diffMs < 0) continue;
+    const diffDays = Math.floor(diffMs / dayMs);
     if (diffDays < 0 || diffDays >= weeks * 7) continue;
     const col = Math.floor(diffDays / 7);
     const row = diffDays % 7;
@@ -74,7 +85,7 @@ function buildHeatmap(events) {
       grid[row][col]++;
     }
   }
-  return { weeks, grid, startDate: new Date(startOffset) };
+  return { weeks, grid };
 }
 
 // ─── Stale repos finder ───────────────────────────────────────────────
@@ -212,17 +223,19 @@ export function renderDashboard(screen, y, h) {
 
   // ─── Contribution Heatmap ───
   if (ly < y + h - 8 && appState.dashboardContributions) {
-    screen.writeStr(leftX, ly++, '📊 Contributions (15 weeks)', 'bright');
+    screen.writeStr(leftX, ly++, '📊 Activity (15 weeks)', 'bright');
     const hm = appState.dashboardContributions;
     const dayLabels = ['S', 'M', 'T', 'W', 'T', 'F', 'S'];
     const cellW = Math.min(2, Math.floor((splitX - leftX - 4) / hm.weeks));
     const heatChars = [' ', '░', '▒', '▓', '█'];
+    let totalContribs = 0;
     for (let row = 0; row < 7; row++) {
       if (ly >= y + h - 1) break;
       screen.writeStr(leftX, ly, dayLabels[row], 'dim');
       for (let col = 0; col < hm.weeks; col++) {
         if (leftX + 2 + col * cellW >= splitX - 1) break;
         const val = hm.grid[row][col];
+        totalContribs += val;
         const level = val === 0 ? 0 : val === 1 ? 1 : val <= 3 ? 2 : val <= 5 ? 3 : 4;
         const ch = heatChars[level].repeat(cellW);
         const clr = level === 0 ? 'dim' : color('success');
@@ -230,7 +243,8 @@ export function renderDashboard(screen, y, h) {
       }
       ly++;
     }
-    ly++;
+    screen.writeStr(leftX, ly, totalContribs + ' events', 'dim');
+    ly += 2;
   }
 
   // ─── Star History Sparkline ───
