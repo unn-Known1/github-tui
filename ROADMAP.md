@@ -1,9 +1,9 @@
 # GitHub TUI — Feature Roadmap
 
-> 📊 **Status audit 2026-06-18**: completion ~80% of promised features.
+> 📊 **Status audit 2026-06-18**: completion ~90% of promised features.
 > 
-> **Implemented:** 10/14 features (UX foundations + Rate Limit, Traffic, Milestones, Labels, Collapsible sections, Mouse support, Checks/CI)
-> **Partially implemented:** 1/14 features
+> **Implemented:** 11/14 features (UX foundations + Rate Limit, Traffic, Milestones, Labels, Collapsible sections, Mouse support, Checks/CI, Review Comments)
+> **Partially implemented:** 0/14 features
 > **Not implemented:** 3/14 features
 > **Documentation drift bugs:** 3 fixed
 > 
@@ -882,7 +882,7 @@ Update help.mjs with new keybindings:
 - [x] Shipped panes keyboard navigable
 - [x] Loading states for all API calls
 - [x] Error handling for all failure cases
-- [ ] All 14 features implemented (10/14 = 71%)
+- [ ] All 14 features implemented (11/14 = 79%)
 - [ ] Mouse navigable (0%)
 - [ ] Help text updated for new keys (partial — current OK, future missing)
 - [ ] Theme roles added for new features (traffic/milestone/label/check/security/hover missing)

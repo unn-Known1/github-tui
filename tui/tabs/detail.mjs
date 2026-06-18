@@ -268,6 +268,7 @@ export function renderDetail(screen) {
     ['comments', 'Comments (' + appState.detailComments.length + ')'],
   ];
   if (appState.detailType === 'pull_request') {
+    tabs.push(['reviews', 'Reviews (' + appState.detailReviews.length + ')']);
     tabs.push(['files', 'Files (' + appState.detailFiles.length + ')']);
   }
   let tx = innerX;
@@ -301,6 +302,8 @@ export function renderDetail(screen) {
     renderBody(screen, data, innerX, contentY, innerW, contentH, scroll);
   } else if (appState.detailTab === 'comments') {
     renderComments(screen, innerX, contentY, innerW, contentH, scroll);
+  } else if (appState.detailTab === 'reviews') {
+    renderReviews(screen, innerX, contentY, innerW, contentH, scroll);
   } else if (appState.detailTab === 'files') {
     if (appState.detailDiffView) {
       renderDiffView(screen, innerX, contentY, innerW, contentH);
@@ -371,6 +374,48 @@ function renderComments(screen, x, y, w, h, scroll) {
         if (row >= y + h) break;
       }
       lineIdx++;
+    }
+    if (lineIdx >= scroll + h) break;
+    if (lineIdx >= scroll) {
+      screen.hline(row, '─', color('dim'));
+      row++;
+      if (row >= y + h) break;
+    }
+    lineIdx++;
+  }
+}
+
+function renderReviews(screen, x, y, w, h, scroll) {
+  const reviews = appState.detailReviews;
+  if (reviews.length === 0) {
+    screen.writeStr(x, y, '(no reviews yet)', color('dim'));
+    return;
+  }
+  let row = y;
+  let lineIdx = 0;
+  for (const r of reviews) {
+    if (lineIdx >= scroll + h) break;
+    if (lineIdx >= scroll) {
+      const author = (r.user && r.user.login) || '?';
+      const state = r.state || '?';
+      const stateIcon = state === 'APPROVED' ? '✅' : state === 'CHANGES_REQUESTED' ? '❌' : state === 'COMMENTED' ? '💬' : '❓';
+      const header = stateIcon + ' ' + author + ' ' + state;
+      screen.writeStr(x, row, truncate(header, w), color('accent'));
+      row++;
+      if (row >= y + h) break;
+    }
+    lineIdx++;
+    if (r.body) {
+      const bodyLines = r.body.split(/\r?\n/);
+      for (const bl of bodyLines) {
+        if (lineIdx >= scroll + h) break;
+        if (lineIdx >= scroll) {
+          screen.writeStr(x + 2, row, truncate(bl, w - 2));
+          row++;
+          if (row >= y + h) break;
+        }
+        lineIdx++;
+      }
     }
     if (lineIdx >= scroll + h) break;
     if (lineIdx >= scroll) {
@@ -538,7 +583,10 @@ export function enter() {
   }
   // Cycle tabs
   const tabs = ['body', 'comments'];
-  if (appState.detailType === 'pull_request') tabs.push('files');
+  if (appState.detailType === 'pull_request') {
+    tabs.push('reviews');
+    tabs.push('files');
+  }
   const idx = tabs.indexOf(appState.detailTab);
   appState.detailTab = tabs[(idx + 1) % tabs.length];
   appState.detailScroll = 0;
@@ -553,6 +601,12 @@ function getBodyLines() {
     let count = 0;
     for (const c of appState.detailComments) {
       count += 1 + (c.body || '').split(/\r?\n/).length + 1;
+    }
+    return count;
+  } else if (appState.detailTab === 'reviews') {
+    let count = 0;
+    for (const r of appState.detailReviews) {
+      count += 1 + (r.body || '').split(/\r?\n/).length + 1;
     }
     return count;
   } else if (appState.detailTab === 'files') {
