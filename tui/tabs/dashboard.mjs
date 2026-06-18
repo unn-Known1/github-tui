@@ -442,9 +442,8 @@ export function renderDashboard(screen, y, h) {
   }
 
   // Scroll indicator at bottom of content area.
-  const contentBot = (HEADER_HEIGHT || 7) + h - 1;
   if (scroll > 0) {
-    screen.writeStr(W - 16, contentBot, '↑ more above', color('dim'));
+    screen.writeStr(W - 16, y + h - 1, '↑ more above', color('dim'));
   }
 }
 
