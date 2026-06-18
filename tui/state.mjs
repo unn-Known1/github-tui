@@ -100,6 +100,8 @@ export const appState = {
   repoLabels: [],
   repoCheckRuns: [],
   repoCheckSuites: [],
+  userFollowers: [],
+  userFollowing: [],
 
   // ── Forks sub-view ──
   forks: [],

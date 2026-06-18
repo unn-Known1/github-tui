@@ -5,6 +5,7 @@ import { appState, render, startAsync, isStale, showMessage, setTab, confirm } f
 import {
   getUserEvents, getTrendingRepos, getStarredRepos,
   getUserIssues, getUserPullRequests, searchRepositories,
+  getUserFollowers,
 } from '../github.mjs';
 import { relTime, eventGlyph, greeting, shortNum, truncate, openUrl } from '../utils.mjs';
 import { color } from '../theme.mjs';
@@ -18,12 +19,13 @@ export async function loadDashboardWidgets(force = false) {
   const username = appState.user.login;
   try {
     const safe = (p) => p.catch(() => null);
-    const [events, trending, starred, issues, prs] = await Promise.all([
+    const [events, trending, starred, issues, prs, followers] = await Promise.all([
       safe(getUserEvents(appState.token, username, 100)),
       safe(getTrendingRepos(appState.token, 7, 10)),
       safe(getStarredRepos(appState.token, 1, 30)),
       safe(getUserIssues(appState.token, 1, 10)),
       safe(getUserPullRequests(appState.token, 1, 10)),
+      safe(getUserFollowers(appState.token, 1, 10)),
     ]);
     if (isStale(gen)) return;
     appState.events = Array.isArray(events) ? events : [];
@@ -32,6 +34,7 @@ export async function loadDashboardWidgets(force = false) {
     appState.starred = Array.isArray(starred) ? starred : [];
     appState.dashboardRecentIssues = Array.isArray(issues) ? issues : [];
     appState.dashboardRecentPRs = Array.isArray(prs) ? (prs.items || prs) : [];
+    appState.userFollowers = Array.isArray(followers) ? followers : [];
     appState.dashboardContributions = buildHeatmap(appState.events);
     const staleResult = findStaleRepos(appState.repos);
     appState.dashboardStaleCount = staleResult.count;
@@ -277,6 +280,19 @@ export function renderDashboard(screen, y, h) {
       screen.writeStr(leftX, ly++, p.text.substring(0, leftW), p.style);
     }
     ly++;
+
+    // Show recent followers if available
+    if (appState.userFollowers.length > 0 && ly < y + h - 2) {
+      screen.writeStr(leftX, ly, 'Recent followers:', { dim: true });
+      ly++;
+      const maxFollowers = Math.min(5, appState.userFollowers.length);
+      for (let i = 0; i < maxFollowers; i++) {
+        if (ly >= y + h - 1) break;
+        const f = appState.userFollowers[i];
+        const login = (f.login || '?').substring(0, leftW - 2);
+        screen.writeStr(leftX + 2, ly++, '@' + login, { fg: 'cyan' });
+      }
+    }
   }
 
   if (ly < y + h - 4 && appState.dashboardStarHistory.length > 0) {

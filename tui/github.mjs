@@ -352,4 +352,11 @@ export const getRepoCheckRuns = (token, owner, repo, ref) =>
 export const getRepoCheckSuites = (token, owner, repo, ref) =>
   request('/repos/' + owner + '/' + repo + '/commits/' + (ref || 'HEAD') + '/check-suites', { token });
 
+// ─── Followers ─────────────────────────────────────────────────────
+export const getUserFollowers = (token, page, perPage) =>
+  request('/user/followers?page=' + (page||1) + '&per_page=' + (perPage||30), { token });
+
+export const getUserFollowing = (token, page, perPage) =>
+  request('/user/following?page=' + (page||1) + '&per_page=' + (perPage||30), { token });
+
 
