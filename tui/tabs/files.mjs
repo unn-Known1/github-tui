@@ -24,7 +24,7 @@ import {
   ghCloneUrl, copyToClipboard, dirExists,
 } from '../utils.mjs';
 import { color } from '../theme.mjs';
-import { join } from 'path';
+import { join, resolve } from 'path';
 
 // Limit how big a single file we'll fetch into memory (the API caps at 1MB).
 const MAX_VIEW_BYTES = 1_000_000;
@@ -282,14 +282,15 @@ export async function downloadZipball() {
   }
 }
 
-// git clone into CWD. Shells out to the user's `git` binary so history,
-// hooks, submodules etc. all behave correctly.
+// git clone one level above CWD. Shells out to the user's `git` binary so
+// history, hooks, submodules etc. all behave correctly.
 export async function cloneIntoCwd(opts = {}) {
   const [owner, name] = repoOwnerName();
   if (!owner) return;
-  const dest = safeCwdJoin(name);
+  const parent = resolve(process.cwd(), '..');
+  const dest = join(parent, name);
   if (dirExists(dest)) {
-    showMessage('Directory ./' + name + ' already exists — refusing to clone', 'warning');
+    showMessage('Directory ../' + name + ' already exists — refusing to clone', 'warning');
     return;
   }
   const url = ghCloneUrl(owner, name);
@@ -299,8 +300,8 @@ export async function cloneIntoCwd(opts = {}) {
   showMessage('git ' + args.join(' ') + ' …', 'info');
   render();
   try {
-    const code = await runCommand('git', args);
-    if (code === 0) showMessage('Cloned into ./' + name, 'success');
+    const code = await runCommand('git', args, { cwd: parent });
+    if (code === 0) showMessage('Cloned into ../' + name, 'success');
     else showMessage('git exited ' + code, 'error');
   } catch (e) { showMessage('Clone failed: ' + e.message, 'error'); }
 }
@@ -309,16 +310,17 @@ export async function cloneIntoCwd(opts = {}) {
 export async function ghCloneIntoCwd() {
   const [owner, name] = repoOwnerName();
   if (!owner) return;
-  const dest = safeCwdJoin(name);
+  const parent = resolve(process.cwd(), '..');
+  const dest = join(parent, name);
   if (dirExists(dest)) {
-    showMessage('Directory ./' + name + ' already exists — refusing to clone', 'warning');
+    showMessage('Directory ../' + name + ' already exists — refusing to clone', 'warning');
     return;
   }
   showMessage('gh repo clone ' + owner + '/' + name + ' …', 'info');
   render();
   try {
-    const code = await runCommand('gh', ['repo', 'clone', owner + '/' + name]);
-    if (code === 0) showMessage('Cloned via gh into ./' + name, 'success');
+    const code = await runCommand('gh', ['repo', 'clone', owner + '/' + name], { cwd: parent });
+    if (code === 0) showMessage('Cloned via gh into ../' + name, 'success');
     else showMessage('gh exited ' + code + ' (is gh installed & authed?)', 'error');
   } catch (e) { showMessage('gh clone failed: ' + e.message, 'error'); }
 }
