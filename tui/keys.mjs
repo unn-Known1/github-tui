@@ -198,7 +198,6 @@ export function handleKey(key) {
     case '1': case '2': case '3': case '4': case '5': {
       const i = parseInt(key, 10) - 1;
       setTab(i);
-      if (i === 0) appState.dashboardScroll = 0;
       if (i === 4 && appState.notifications.length === 0 && appState.token) {
         inbox.loadNotifications();
       }
@@ -218,10 +217,10 @@ export function handleKey(key) {
     case '\r': case '\n': handleEnter(); return;
     case '\x1b[A': case 'k': handleUp(); return;
     case '\x1b[B': case 'j': handleDown(); return;
-    case '\x1b[D': case 'h': case '\x7f':
-      if (tabState.current === 2) analyze.handleBack();
-      return;
+    case '\x1b[D': case 'h': case '\x7f': handleBack(); return;
     case ' ': handleSpace(); return;
+    case '\x1b[5~': handlePageUp(); return;  // PageUp
+    case '\x1b[6~': handlePageDown(); return;  // PageDown
     case 'G': {
       const screen = getScreen();
       if (tabState.current === 1 && typeof repos.bottom === 'function') {
@@ -278,6 +277,20 @@ function handleSpace() {
   else if (t === 2) analyze.space();
   else if (t === 4) inbox.space();
 }
+function handlePageUp() {
+  const t = tabState.current;
+  if (t === 0) dashboard.pageUp();
+  else if (t === 1) repos.pageUp();
+  else if (t === 2) analyze.pageUp();
+  else if (t === 4) inbox.pageUp();
+}
+function handlePageDown() {
+  const t = tabState.current;
+  if (t === 0) dashboard.pageDown();
+  else if (t === 1) repos.pageDown();
+  else if (t === 2) analyze.pageDown();
+  else if (t === 4) inbox.pageDown();
+}
 function handleEnter() {
   const t = tabState.current;
   if (t === 0) dashboard.openTrendingRepo();
@@ -289,7 +302,7 @@ function handleEnter() {
 function handleUp() {
   const t = tabState.current;
   const screen = getScreen();
-  if (t === 0) { dashboard.up(); return; }
+  if (t === 0) { dashboard.trendingUp(); return; }
   if (t === 1) repos.up(screen);
   else if (t === 2) analyze.up(screen);
   else if (t === 3) settings.up();
@@ -298,11 +311,26 @@ function handleUp() {
 function handleDown() {
   const t = tabState.current;
   const screen = getScreen();
-  if (t === 0) { dashboard.down(); return; }
+  if (t === 0) { dashboard.trendingDown(); return; }
   if (t === 1) repos.down(screen);
   else if (t === 2) analyze.down(screen);
   else if (t === 3) settings.down();
   else if (t === 4) inbox.down(screen);
+}
+function handleBack() {
+  const t = tabState.current;
+  if (t === 0) return;
+  if (t === 2) { analyze.handleBack(); return; }
+  if (t === 1) {
+    if (appState.reposView === 'starred') { repos.toggleReposView(); return; }
+  }
+  if (t === 4) {
+    if (appState.showDetail) {
+      import('./tabs/detail.mjs').then(m => m.closeDetail());
+      return;
+    }
+  }
+  setTab(0);
 }
 
 // ──────────────────────────────────────────────────────────────────

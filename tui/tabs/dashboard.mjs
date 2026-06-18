@@ -28,6 +28,7 @@ export async function loadDashboardWidgets(force = false) {
     if (isStale(gen)) return;
     appState.events = Array.isArray(events) ? events : [];
     appState.trending = Array.isArray(trending) ? trending : [];
+    appState.trendingHasMore = appState.trending.length >= 10;
     appState.starred = Array.isArray(starred) ? starred : [];
     appState.dashboardRecentIssues = Array.isArray(issues) ? issues : [];
     appState.dashboardRecentPRs = Array.isArray(prs) ? (prs.items || prs) : [];
@@ -37,7 +38,6 @@ export async function loadDashboardWidgets(force = false) {
     appState.dashboardStaleRepos = staleResult.repos;
     appState.dashboardStarHistory = buildStarHistory(appState.starred);
     appState.dashboardLoaded = true;
-    appState.dashboardScroll = 0;
     render();
   } catch (e) {
     if (!isStale(gen)) showMessage('Dashboard widgets failed: ' + e.message, 'error');
@@ -202,10 +202,6 @@ export function renderDashboard(screen, y, h) {
     return;
   }
 
-  // Apply scroll offset — content slides up, screen clips automatically.
-  const scroll = Math.max(0, appState.dashboardScroll || 0);
-  y -= scroll;
-
   // Greeting row.
   const heading = greeting() + ', ' + (user.name || user.login);
   screen.writeStr(2, y, heading, { fg: 'white', bold: true });
@@ -244,7 +240,7 @@ export function renderDashboard(screen, y, h) {
     if (cardY + cardH >= y + h) return;
     const focused = cardsFocus && i === appState.dashboardSelectedCard;
     const fillStyle = focused ? { bg: 'darkGray', fg: 'white' } : null;
-    const borderStyle = focused ? { fg: 'cyan', bold: true } : { dim: true };
+    const borderStyle = focused ? color('cardBorderFocused') : color('cardBorder');
     screen.card(cx, cardY, cardW, cardH, c.label, fillStyle, borderStyle);
     const valStr = c.value;
     const valX = cx + Math.floor((cardW - valStr.length) / 2);
@@ -309,6 +305,88 @@ export function renderDashboard(screen, y, h) {
         screen.writeStr(leftX, ly, truncate(r.name, nameMax), { fg: 'white' });
         screen.writeStr(leftX + leftW - stars.length, ly, stars, { fg: 'yellow' });
         ly++;
+      }
+    }
+    ly++;
+  }
+
+  // Heatmap + Languages side by side in left column below top repos.
+  const halfW = splitX - leftX - 2;
+  const heatRightX = leftX + Math.floor(halfW * 0.58);
+  const langLeftX = heatRightX + 2;
+  const heatTopY = ly;
+
+  // ── Heatmap (left sub-column) ──
+  if (ly < y + h - 10) {
+    const hm = appState.dashboardContributions;
+    if (hm) {
+      const dayLabels = ['S', 'M', 'T', 'W', 'T', 'F', 'S'];
+      const heatW = heatRightX - leftX - 4;
+      const cellW = Math.max(1, Math.min(2, Math.floor(heatW / hm.weeks)));
+      const totalEvents = hm.grid.flat().reduce((a, b) => a + b, 0);
+
+      if (totalEvents === 0) {
+        sectionHeader(screen, leftX, ly, '◧ ACTIVITY');
+        ly++;
+        screen.writeStr(leftX, ly++, '(no activity)', { dim: true });
+      } else {
+        sectionHeader(screen, leftX, ly, '◧ ACTIVITY · ' + totalEvents);
+        ly++;
+
+  const heatStyle = (level) => {
+    if (level === 0) return color('dim');
+    if (hm.max <= 3) return color('activity');
+    const ratio = level / hm.max;
+    if (ratio < 0.25) return color('heatmapLow');
+    if (ratio < 0.5)  return color('heatmapMid');
+    return color('heatmapHigh');
+  };
+
+        const heatChars = [' ', '░', '▒', '▓', '█'];
+        for (let row = 0; row < 7; row++) {
+          if (ly >= y + h - 1) break;
+          screen.writeStr(leftX, ly, dayLabels[row], { dim: true });
+          for (let col = 0; col < hm.weeks; col++) {
+            const cx = leftX + 2 + col * cellW;
+            if (cx >= heatRightX - 1) break;
+            const val = hm.grid[row][col];
+            const level = val === 0 ? 0
+              : hm.max <= 4 ? Math.min(4, val)
+              : Math.min(4, Math.ceil((val / hm.max) * 4));
+            screen.writeStr(cx, ly, heatChars[level].repeat(cellW), heatStyle(level));
+          }
+          ly++;
+        }
+        screen.writeStr(leftX, ly, 'Less ░▒▓█ More', { dim: true });
+        ly++;
+      }
+    }
+    ly++;
+  }
+
+  // ── Languages (right sub-column, aligned with heatmap top) ──
+  if (appState.repos.length > 0 && heatTopY < y + h - 3) {
+    sectionHeader(screen, langLeftX, heatTopY, '◨ LANGUAGES');
+    const langCount = {};
+    for (const r of appState.repos) {
+      if (r.language) langCount[r.language] = (langCount[r.language] || 0) + 1;
+    }
+    const total = Object.values(langCount).reduce((a, b) => a + b, 0);
+    const sorted = Object.entries(langCount).sort((a, b) => b[1] - a[1]).slice(0, 7);
+    const barW = Math.max(3, halfW - Math.floor(halfW * 0.58) - 14);
+    let lly = heatTopY + 1;
+    if (sorted.length === 0) {
+      screen.writeStr(langLeftX, lly, '(no metadata)', { dim: true });
+    } else {
+      for (const [lang, count] of sorted) {
+        if (lly >= y + h - 1) break;
+        const pct = count / total;
+        const filled = Math.max(1, Math.round(pct * barW));
+        const bar = '█'.repeat(filled) + '░'.repeat(Math.max(0, barW - filled));
+        screen.writeStr(langLeftX, lly, lang.substring(0, 8).padEnd(9));
+        screen.writeStr(langLeftX + 9, lly, bar, { fg: 'cyan' });
+        screen.writeStr(langLeftX + 10 + barW, lly, String(count), { dim: true });
+        lly++;
       }
     }
   }
@@ -396,14 +474,20 @@ export function renderDashboard(screen, y, h) {
       for (let i = 0; i < maxTrending && i < appState.trending.length; i++) {
         if (ry >= y + h - 1) break;
         const r = appState.trending[i];
+        const sel = i === appState.trendingSelected;
+        if (sel) {
+          for (let x = rightX; x < rightX + rightW; x++) screen.styleBuf[ry][x] = { bg: 'blue', fg: 'white', bold: true };
+        }
         const name = truncate(r.full_name || '?', rightW - 8);
         const stars = '★' + shortNum(r.stargazers_count || 0);
-        screen.writeStr(rightX, ry, name, { fg: 'white' });
-        screen.writeStr(rightX + rightW - stars.length, ry, stars, { fg: 'magenta' });
+        screen.writeStr(rightX, ry, sel ? '▶ ' : '  ', sel ? { bg: 'blue', fg: 'white' } : null);
+        screen.writeStr(rightX + 2, ry, name, sel ? { bg: 'blue', fg: 'white', bold: true } : { fg: 'white' });
+        screen.writeStr(rightX + rightW - stars.length, ry, stars, sel ? { bg: 'blue', fg: 'magenta' } : { fg: 'magenta' });
         ry++;
       }
-      if (appState.trending.length > maxTrending) {
-        screen.writeStr(rightX, ry, '[Space] Load more', { dim: true });
+      if (appState.trendingHasMore || appState.trendingPage > 1) {
+        const pageInfo = 'Page ' + appState.trendingPage + '   [PgUp/PgDn]';
+        screen.writeStr(rightX, ry, pageInfo, { dim: true });
         ry++;
       }
     }
@@ -414,43 +498,6 @@ export function renderDashboard(screen, y, h) {
   const bodyH = Math.max(0, colBot - bodyY);
   for (let dy = 0; dy < bodyH; dy++) {
     screen.setCell(splitX, bodyY + dy, '│', { dim: true });
-  }
-
-  // Full-width sections below the columns.
-  const colEnd = colBot + 1;
-  if (colEnd + 10 < y + h) {
-    renderHeatmap(screen, leftX, colEnd, W - 2);
-    const heatEnd = colEnd + 9;
-    if (heatEnd + 2 < y + h && appState.repos.length > 0) {
-      const langY = heatEnd;
-      sectionHeader(screen, leftX, langY, '◨ LANGUAGES');
-      const langCount = {};
-      for (const r of appState.repos) {
-        if (r.language) langCount[r.language] = (langCount[r.language] || 0) + 1;
-      }
-      const total = Object.values(langCount).reduce((a, b) => a + b, 0);
-      const sorted = Object.entries(langCount).sort((a, b) => b[1] - a[1]).slice(0, 8);
-      const barW = Math.max(6, W - leftX - 26);
-      let lly = langY + 1;
-      if (sorted.length === 0) {
-        screen.writeStr(leftX, lly, '(no language metadata)', { dim: true });
-      } else {
-        for (const [lang, count] of sorted) {
-          if (lly >= y + h - 1) break;
-          const pct = count / total;
-          const filled = Math.max(1, Math.round(pct * barW));
-          const bar = '█'.repeat(filled) + '░'.repeat(Math.max(0, barW - filled));
-          screen.writeStr(leftX, lly, lang.substring(0, 10).padEnd(11));
-          screen.writeStr(leftX + 11, lly, bar, { fg: 'cyan' });
-          screen.writeStr(leftX + 12 + barW, lly, String(count), { dim: true });
-          lly++;
-        }
-      }
-    }
-  }
-
-  if (scroll > 0) {
-    screen.writeStr(W - 18, y + h - 1, '↑ scroll up', { dim: true });
   }
 }
 
@@ -478,10 +525,69 @@ export async function loadMoreTrending() {
 
 export function openTrendingRepo() {
   if (appState.trending.length === 0) return;
-  const r = appState.trending[0];
+  const r = appState.trending[appState.trendingSelected] || appState.trending[0];
   const [owner, name] = r.full_name.split('/');
   setTab(2);
   loadRepoDetails(owner, name);
+}
+
+export function trendingUp() {
+  appState.trendingSelected = Math.max(0, appState.trendingSelected - 1);
+  render();
+}
+
+export function trendingDown() {
+  appState.trendingSelected = Math.min(
+    appState.trending.length - 1,
+    appState.trendingSelected + 1
+  );
+  render();
+}
+
+export function pageUp() {
+  if (appState.trendingPage > 1) {
+    const page = appState.trendingPage - 1;
+    const since = new Date(Date.now() - 7 * 86400000).toISOString().split('T')[0];
+    const q = 'created:>' + since;
+    const gen = startAsync();
+    appState.loading = true;
+    render();
+    searchRepositories(appState.token, q, page, 10).then(more => {
+      if (isStale(gen)) return;
+      if (Array.isArray(more)) {
+        appState.trending = more;
+        appState.trendingPage = page;
+        appState.trendingHasMore = true;
+        appState.trendingSelected = 0;
+      }
+      appState.loading = false;
+      render();
+    }).catch(() => { appState.loading = false; render(); });
+  }
+}
+
+export function pageDown() {
+  if (appState.trendingHasMore) {
+    const page = appState.trendingPage + 1;
+    const since = new Date(Date.now() - 7 * 86400000).toISOString().split('T')[0];
+    const q = 'created:>' + since;
+    const gen = startAsync();
+    appState.loading = true;
+    render();
+    searchRepositories(appState.token, q, page, 10).then(more => {
+      if (isStale(gen)) return;
+      if (Array.isArray(more) && more.length > 0) {
+        appState.trending = more;
+        appState.trendingPage = page;
+        appState.trendingHasMore = more.length >= 10;
+        appState.trendingSelected = 0;
+      } else {
+        appState.trendingHasMore = false;
+      }
+      appState.loading = false;
+      render();
+    }).catch(() => { appState.loading = false; render(); });
+  }
 }
 
 // Open the focused stat card (currently: STALE = jump to Repos with stale filter).
@@ -506,15 +612,6 @@ export function openFocusedCard() {
 }
 
 export const keys = {};
-
-export function up() {
-  appState.dashboardScroll = Math.max(0, (appState.dashboardScroll || 0) - 1);
-  render();
-}
-export function down() {
-  appState.dashboardScroll = (appState.dashboardScroll || 0) + 1;
-  render();
-}
 
 // Card focus navigation (Tab on dashboard).
 export function focusCards() {

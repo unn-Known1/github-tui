@@ -74,6 +74,33 @@ const B = {
   toastWarning: { fg: 'yellow', bold: true },
   // Section accent
   sectionHeading: { fg: 'cyan', bold: true },
+  // Repo / list items
+  repoName: { fg: 'white' },
+  repoNameSelected: { fg: 'white', bold: true },
+  statValue: { fg: 'white', bold: true },
+  date: { dim: true },
+  // Packages / downloads
+  packageName: { fg: 'white' },
+  packageSize: { dim: true },
+  packageTag: { fg: 'cyan' },
+  downloadCount: { dim: true },
+  // Pinned / bookmarked
+  pinned: { fg: 'yellow', bold: true },
+  bookmarked: { fg: 'magenta' },
+  // Card
+  cardBorder: { dim: true },
+  cardBorderFocused: { fg: 'cyan', bold: true },
+  // List item
+  listItem: { fg: 'white' },
+  listItemDim: { dim: true },
+  // Empty state
+  emptyIcon: { fg: 'cyan' },
+  emptyTitle: { fg: 'white', bold: true },
+  emptyMessage: { dim: true },
+  // Heatmap
+  heatmapLow: { fg: 'green', dim: true },
+  heatmapMid: { fg: 'green' },
+  heatmapHigh: { fg: 'green', bold: true },
 };
 
 const O = (o) => ({ ...B, ...o });
@@ -104,6 +131,13 @@ const THEMES = {
     inputBox: { fg: 'white', bold: true, underline: true },
     breadcrumb: { fg: 'gray' },
     sectionHeading: { fg: 'white', bold: true },
+    pinned: { fg: 'yellow', bold: true },
+    bookmarked: { fg: 'magenta', bold: true },
+    packageName: { fg: 'white', bold: true },
+    packageTag: { fg: 'cyan', bold: true },
+    heatmapLow: { fg: 'green' },
+    heatmapMid: { fg: 'green', bold: true },
+    heatmapHigh: { fg: 'green', bold: true },
   }),
   dracula: O({
     heading: { fg: 'magenta', bold: true },
@@ -122,6 +156,13 @@ const THEMES = {
     breadcrumbActive: { fg: 'magenta', bold: true },
     welcomeTitle: { fg: 'magenta', bold: true },
     keyHint: { fg: 'magenta', bold: true },
+    pinned: { fg: 'magenta', bold: true },
+    bookmarked: { fg: 'green' },
+    packageName: { fg: 'magenta' },
+    packageTag: { fg: 'green' },
+    heatmapLow: { fg: 'magenta', dim: true },
+    heatmapMid: { fg: 'magenta' },
+    heatmapHigh: { fg: 'magenta', bold: true },
   }),
   solarized: O({
     heading: { fg: 'yellow', bold: true },
@@ -139,6 +180,13 @@ const THEMES = {
     breadcrumbActive: { fg: 'blue', bold: true },
     welcomeTitle: { fg: 'yellow', bold: true },
     keyHint: { fg: 'blue', bold: true },
+    pinned: { fg: 'yellow', bold: true },
+    bookmarked: { fg: 'blue' },
+    packageName: { fg: 'blue' },
+    packageTag: { fg: 'yellow' },
+    heatmapLow: { fg: 'blue', dim: true },
+    heatmapMid: { fg: 'blue' },
+    heatmapHigh: { fg: 'blue', bold: true },
   }),
   nord: O({
     heading: { fg: 'cyan', bold: true },
@@ -146,6 +194,13 @@ const THEMES = {
     tabBarActive: { fg: 'cyan', bold: true, underline: true },
     sectionHeading: { fg: 'cyan', bold: true },
     breadcrumbActive: { fg: 'cyan', bold: true },
+    pinned: { fg: 'cyan', bold: true },
+    bookmarked: { fg: 'cyan' },
+    packageName: { fg: 'cyan' },
+    packageTag: { fg: 'cyan' },
+    heatmapLow: { fg: 'cyan', dim: true },
+    heatmapMid: { fg: 'cyan' },
+    heatmapHigh: { fg: 'cyan', bold: true },
   }),
   monokai: O({
     heading: { fg: 'green', bold: true },
@@ -162,6 +217,13 @@ const THEMES = {
     breadcrumbActive: { fg: 'yellow', bold: true },
     welcomeTitle: { fg: 'yellow', bold: true },
     keyHint: { fg: 'yellow', bold: true },
+    pinned: { fg: 'yellow', bold: true },
+    bookmarked: { fg: 'magenta' },
+    packageName: { fg: 'green' },
+    packageTag: { fg: 'yellow' },
+    heatmapLow: { fg: 'green', dim: true },
+    heatmapMid: { fg: 'green' },
+    heatmapHigh: { fg: 'green', bold: true },
   }),
   gruvbox: O({
     heading: { fg: 'yellow', bold: true },
@@ -178,6 +240,13 @@ const THEMES = {
     breadcrumbActive: { fg: 'yellow', bold: true },
     welcomeTitle: { fg: 'yellow', bold: true },
     keyHint: { fg: 'yellow', bold: true },
+    pinned: { fg: 'yellow', bold: true },
+    bookmarked: { fg: 'cyan' },
+    packageName: { fg: 'yellow' },
+    packageTag: { fg: 'cyan' },
+    heatmapLow: { fg: 'yellow', dim: true },
+    heatmapMid: { fg: 'yellow' },
+    heatmapHigh: { fg: 'yellow', bold: true },
   }),
   light: {
     title: { fg: 'blue', bold: true },
@@ -234,6 +303,14 @@ const THEMES = {
     toastError: { fg: 'red', bold: true },
     toastWarning: { fg: 'yellow', bold: true },
     sectionHeading: { fg: 'blue', bold: true },
+    pinned: { fg: 'yellow', bold: true },
+    bookmarked: { fg: 'magenta' },
+    packageName: { fg: 'blue' },
+    packageTag: { fg: 'yellow' },
+    packageSize: { fg: 'gray' },
+    heatmapLow: { fg: 'green', dim: true },
+    heatmapMid: { fg: 'green' },
+    heatmapHigh: { fg: 'green', bold: true },
   },
 };
 

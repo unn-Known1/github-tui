@@ -57,6 +57,50 @@ export async function loadMoreNotifications() {
   if (!isStale(gen)) render();
 }
 
+export function pageUp() {
+  if (appState.inboxPage > 1) {
+    const page = appState.inboxPage - 1;
+    const gen = startAsync();
+    appState.loading = true;
+    render();
+    getNotifications(appState.token, page, INBOX_PER_PAGE).then(more => {
+      if (isStale(gen)) return;
+      if (Array.isArray(more)) {
+        appState.notifications = more;
+        appState.inboxPage = page;
+        appState.inboxHasMore = true;
+        appState.selectedNotification = 0;
+        appState.inboxScroll = 0;
+      }
+      appState.loading = false;
+      render();
+    }).catch(() => { appState.loading = false; render(); });
+  }
+}
+
+export function pageDown() {
+  if (appState.inboxHasMore) {
+    const page = appState.inboxPage + 1;
+    const gen = startAsync();
+    appState.loading = true;
+    render();
+    getNotifications(appState.token, page, INBOX_PER_PAGE).then(more => {
+      if (isStale(gen)) return;
+      if (Array.isArray(more) && more.length > 0) {
+        appState.notifications = more;
+        appState.inboxPage = page;
+        appState.inboxHasMore = more.length >= INBOX_PER_PAGE;
+        appState.selectedNotification = 0;
+        appState.inboxScroll = 0;
+      } else {
+        appState.inboxHasMore = false;
+      }
+      appState.loading = false;
+      render();
+    }).catch(() => { appState.loading = false; render(); });
+  }
+}
+
 function filtered() {
   const list = appState.notifications;
   switch (appState.inboxFilter) {
@@ -231,11 +275,11 @@ export function renderInbox(screen, y, h) {
     const unread = n.unread;
 
     if (sel) {
-      for (let x = 0; x < listW + 4; x++) screen.styleBuf[row][x] = { bg: 'blue', fg: 'white', bold: true };
+      for (let x = 0; x < listW + 4; x++) screen.styleBuf[row][x] = color('selection');
     }
 
-    screen.writeStr(2, row, sel ? '▶' : '  ', sel ? { bg: 'blue', fg: 'white' } : { dim: true });
-    screen.writeStr(3, row, unread ? '●' : ' ', unread ? { fg: 'yellow', bold: true } : { dim: true });
+    screen.writeStr(2, row, sel ? '▶' : '  ', sel ? color('selection') : color('dim'));
+    screen.writeStr(3, row, unread ? '●' : ' ', unread ? color('unread') : color('dim'));
 
     const type = (n.subject && n.subject.type) || '?';
     const typeColor = notifTypeColor(type);
@@ -246,7 +290,7 @@ export function renderInbox(screen, y, h) {
       : type === 'Commit' ? 'Commit'
       : type === 'CheckSuite' ? 'CI'
       : type;
-    screen.writeStr(4, row, typeName.padEnd(9), sel ? { bg: 'blue', fg: typeColor, bold: true } : typeColor);
+    screen.writeStr(4, row, typeName.padEnd(9), sel ? color('selection') : typeColor);
 
     const repoName = (n.repository && n.repository.full_name || '?').split('/')[1] ||
       (n.repository && n.repository.full_name) || '?';
@@ -254,12 +298,12 @@ export function renderInbox(screen, y, h) {
     const combined = repoName + ' / ' + title;
     const titleW = Math.min(listW - 30, 40);
     screen.writeStr(14, row, truncate(combined, titleW),
-      sel ? { bg: 'blue', fg: 'white' } : (unread ? { fg: 'white' } : { dim: true }));
+      sel ? color('selection') : (unread ? color('listItem') : color('listItemDim')));
 
     screen.writeStr(Math.min(listW - 12, 56), row,
-      truncate(n.reason || '?', 11), sel ? { bg: 'blue', fg: 'white' } : { dim: true });
+      truncate(n.reason || '?', 11), sel ? color('selection') : color('dim'));
     const when = n.updated_at ? relTime(n.updated_at) : '';
-    screen.writeStr(Math.min(listW - 4, 68), row, when, sel ? { bg: 'blue', fg: 'white' } : { dim: true });
+    screen.writeStr(Math.min(listW - 4, 68), row, when, sel ? color('selection') : color('date'));
   }
 
   const infoY = headerY + 2 + Math.min(maxRows, list.length) + 1;

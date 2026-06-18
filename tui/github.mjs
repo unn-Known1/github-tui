@@ -154,6 +154,8 @@ export const getRepositoryLanguages = (token, owner, repo) =>
 export const getRepositoryReleases = (token, owner, repo, page, perPage) =>
   request('/repos/' + owner + '/' + repo + '/releases?page=' + (page||1) +
     '&per_page=' + (perPage||5), { token });
+export const getReleaseAssets = (token, owner, repo, releaseId) =>
+  request('/repos/' + owner + '/' + repo + '/releases/' + releaseId + '/assets', { token });
 
 // ─── Notifications ──────────────────────────────────────────────────
 export const getNotifications = (token, page, perPage) =>

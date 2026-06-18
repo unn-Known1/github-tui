@@ -270,10 +270,8 @@ function statusLine() {
   const sep = '   ';
   switch (tabState.current) {
     case 0: {
-      const scroll = appState.dashboardScroll || 0;
       const cardNav = appState.dashboardCardsFocus ? '   [Enter] Open' : '';
-      const up = scroll > 0 ? '   [↑] Scroll up' : '';
-      return ' [1-5] Tabs' + sep + '[j/↓] Scroll' + sep + '[r] Refresh' + sep + '[?] Help' + sep + '[Ctrl-P] Palette' + up + cardNav;
+      return ' [1-5] Tabs' + sep + '[r] Refresh' + sep + '[?] Help' + sep + '[Ctrl-P] Palette' + cardNav;
     }
     case 1: {
       if (appState.reposView === 'starred') {

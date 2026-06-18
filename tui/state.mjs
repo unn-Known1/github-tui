@@ -32,8 +32,6 @@ export const tabState = { current: 0 };
 export function setTab(i) {
   if (i < 0 || i >= TABS.length) return;
   tabState.current = i;
-  // Reset context-specific scroll whenever switching tabs.
-  if (i === 0) appState.dashboardScroll = 0;
   render();
 }
 
@@ -90,6 +88,8 @@ export const appState = {
   repoLanguages: null,
   repoContributors: [],
   repoReleases: [],
+  repoReleaseAssets: [],
+  selectedAsset: 0,
   repoIssues: [],
   repoPullRequests: [],
 
@@ -106,7 +106,10 @@ export const appState = {
   trending: [],
   trendingPage: 1,
   trendingHasMore: true,
+  trendingSelected: 0,
   starred: [],
+  starredPage: 1,
+  starredHasMore: false,
   dashboardLoaded: false,
   dashboardContributions: null,  // { weeks: [[day, day, ...], ...] } heatmap data
   dashboardRecentIssues: [],     // recently opened/updated issues across repos
@@ -114,7 +117,6 @@ export const appState = {
   dashboardStaleCount: 0,        // repos with no push in 60+ days
   dashboardStaleRepos: [],       // stale repo names for display
   dashboardStarHistory: [],      // daily star counts for sparkline
-  dashboardScroll: 0,            // scroll offset for dashboard content
   dashboardSelectedCard: 0,      // 0..4 stat-card focus for keyboard nav
   dashboardCardsFocus: false,    // true when keyboard focus is on a stat card
 

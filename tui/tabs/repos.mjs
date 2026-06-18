@@ -224,11 +224,11 @@ export function visibleRows(screen) {
 }
 
 function badgeChar(r) {
-  if (r.private)     return { ch: 'P', style: { fg: 'yellow', bold: true }, label: 'private' };
-  if (r.fork)        return { ch: 'F', style: { fg: 'cyan', bold: true },    label: 'fork' };
-  if (r.archived)    return { ch: 'A', style: { dim: true },                  label: 'archived' };
-  if (isPinnedLocal(r.full_name)) return { ch: '★', style: { fg: 'yellow', bold: true }, label: 'pinned' };
-  if (isBookmarked(r.full_name)) return { ch: 'B', style: { fg: 'magenta' },  label: 'bookmarked' };
+  if (r.private)     return { ch: 'P', style: color('warning'), label: 'private' };
+  if (r.fork)        return { ch: 'F', style: color('fork'),    label: 'fork' };
+  if (r.archived)    return { ch: 'A', style: color('dim'),      label: 'archived' };
+  if (isPinnedLocal(r.full_name)) return { ch: '★', style: color('pinned'), label: 'pinned' };
+  if (isBookmarked(r.full_name)) return { ch: 'B', style: color('bookmarked'),  label: 'bookmarked' };
   return null;
 }
 
@@ -274,20 +274,22 @@ function renderStarredList(screen, y, h) {
     const sel = start + i === appState.starredSelected;
 
     if (sel) {
-      for (let x = 0; x < W; x++) screen.styleBuf[row][x] = { bg: 'blue', fg: 'white', bold: true };
+      for (let x = 0; x < W; x++) screen.styleBuf[row][x] = color('selection');
     }
 
-    screen.writeStr(2, row, sel ? '▶' : '  ', sel ? { bg: 'blue', fg: 'white' } : { dim: true });
+    screen.writeStr(2, row, sel ? '▶' : '  ', sel ? color('selection') : color('dim'));
     const name = truncate(r.full_name || '?', Math.max(15, W - 36));
-    screen.writeStr(5, row, name, sel ? { bg: 'blue', fg: 'white' } : { fg: 'white' });
+    screen.writeStr(5, row, name, sel ? color('selection') : color('repoName'));
     const stars = '★' + shortNum(r.stargazers_count || 0);
-    screen.writeStr(W - 22, row, stars, sel ? { bg: 'blue', fg: 'white' } : { fg: 'yellow' });
+    screen.writeStr(W - 22, row, stars, sel ? color('selection') : color('star'));
   }
 
   const footerY = headerY + 1 + rowsToShow + 1;
   if (footerY < y + h) {
     const range = (start + 1) + '-' + Math.min(start + rowsToShow, list.length) + ' of ' + list.length;
-    screen.writeStr(2, footerY, range + '   [V] Back to own repos   [Enter] Analyze', { dim: true });
+    const pageInfo = appState.starredHasMore || appState.starredPage > 1
+      ? '   Page ' + appState.starredPage + '   [PgUp/PgDn]' : '';
+    screen.writeStr(2, footerY, range + pageInfo + '   [V] Back to own repos   [Enter] Analyze', { dim: true });
   }
 }
 
@@ -403,24 +405,24 @@ export function renderRepos(screen, y, h) {
   for (let i = start; i < repos.length && drawn < maxRows; i++) {
     if (isSectionStart[i]) {
       if (i > 0) screen.hline(curY - 1, '─', { dim: true });
-      screen.writeStr(2, curY, '★ PINNED', { fg: 'yellow', bold: true });
+      screen.writeStr(2, curY, '★ PINNED', color('pinned'));
       curY++;
       if (drawn + 1 > maxRows) break;
     }
     const repo = repos[i];
     const sel = i === appState.repoSelected;
     if (sel) {
-      for (let x = 0; x < W; x++) screen.styleBuf[curY][x] = { bg: 'blue', fg: 'white', bold: true };
+      for (let x = 0; x < W; x++) screen.styleBuf[curY][x] = color('selection');
     }
     const badge = badgeChar(repo);
     if (badge) screen.writeStr(2, curY, '[' + badge.ch + ']', badge.style);
     else screen.writeStr(2, curY, '  ', null);
 
-    const nameStyle = sel ? { bg: 'blue', fg: 'white', bold: true } : { fg: 'white' };
+    const nameStyle = sel ? color('selection') : color('repoName');
     screen.writeStr(nameCol, curY, truncate(repo.name || 'N/A', nameW), nameStyle);
 
-    const statStyle = sel ? { bg: 'blue', fg: 'white' } : { dim: true };
-    const langStyle = sel ? { bg: 'blue', fg: 'white' } : { dim: true };
+    const statStyle = sel ? color('selection') : color('dim');
+    const langStyle = sel ? color('selection') : color('dim');
     screen.writeStr(langCol, curY, truncate(repo.language || '—', 10), langStyle);
     screen.writeStr(starsCol, curY, shortNum(repo.stargazers_count || 0), statStyle);
     screen.writeStr(forksCol, curY, shortNum(repo.forks_count || 0), statStyle);
@@ -541,12 +543,83 @@ async function loadStarredRepos() {
     const starred = await getStarredRepos(appState.token, 1, 50);
     if (isStale(gen)) return;
     appState.starred = Array.isArray(starred) ? starred : [];
+    appState.starredPage = 1;
+    appState.starredHasMore = appState.starred.length >= 50;
     showMessage('Loaded ' + appState.starred.length + ' starred repos', 'success');
   } catch (e) {
     if (!isStale(gen)) showMessage('Failed to load starred repos: ' + e.message, 'error');
   }
   appState.loading = false;
   if (!isStale(gen)) render();
+}
+
+export async function loadMoreStarred() {
+  if (!appState.token || !appState.starredHasMore) return;
+  const gen = startAsync();
+  appState.loading = true;
+  render();
+  try {
+    const page = appState.starredPage + 1;
+    const more = await getStarredRepos(appState.token, page, 50);
+    if (isStale(gen)) return;
+    if (Array.isArray(more) && more.length > 0) {
+      appState.starred = [...appState.starred, ...more];
+      appState.starredPage = page;
+      appState.starredHasMore = more.length >= 50;
+      showMessage('Loaded ' + appState.starred.length + ' starred repos', 'success');
+    } else {
+      appState.starredHasMore = false;
+      showMessage('All starred repos loaded', 'info');
+    }
+  } catch (e) {
+    if (!isStale(gen)) showMessage('Failed to load more starred repos', 'error');
+  }
+  appState.loading = false;
+  if (!isStale(gen)) render();
+}
+
+export function pageUp() {
+  if (appState.reposView === 'starred' && appState.starredPage > 1) {
+    const page = appState.starredPage - 1;
+    const gen = startAsync();
+    appState.loading = true;
+    render();
+    getStarredRepos(appState.token, page, 50).then(more => {
+      if (isStale(gen)) return;
+      if (Array.isArray(more)) {
+        appState.starred = more;
+        appState.starredPage = page;
+        appState.starredHasMore = true;
+        appState.starredSelected = 0;
+        appState.starredScroll = 0;
+      }
+      appState.loading = false;
+      render();
+    }).catch(() => { appState.loading = false; render(); });
+  }
+}
+
+export function pageDown() {
+  if (appState.reposView === 'starred' && appState.starredHasMore) {
+    const page = appState.starredPage + 1;
+    const gen = startAsync();
+    appState.loading = true;
+    render();
+    getStarredRepos(appState.token, page, 50).then(more => {
+      if (isStale(gen)) return;
+      if (Array.isArray(more) && more.length > 0) {
+        appState.starred = more;
+        appState.starredPage = page;
+        appState.starredHasMore = more.length >= 50;
+        appState.starredSelected = 0;
+        appState.starredScroll = 0;
+      } else {
+        appState.starredHasMore = false;
+      }
+      appState.loading = false;
+      render();
+    }).catch(() => { appState.loading = false; render(); });
+  }
 }
 
 export const keys = {
@@ -597,7 +670,7 @@ export function down(screen) {
   render();
 }
 export function space() {
-  if (appState.reposView === 'starred') return;
+  if (appState.reposView === 'starred') { loadMoreStarred(); return; }
   loadMoreRepos();
 }
 export function enter() {
