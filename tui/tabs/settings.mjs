@@ -241,7 +241,13 @@ function buildSystemLines(screenW) {
   return lines;
 }
 
-export const keys = {};
+export const keys = {
+  'r': () => {
+    showMessage('Refreshing...', 'info');
+    import('../repos.mjs').then(m => m.loadUserData());
+  },
+  'g': () => { appState.settingsCursor = 0; render(); },
+};
 export function up() {
   appState.settingsCursor = Math.max(0, appState.settingsCursor - 1); render();
 }

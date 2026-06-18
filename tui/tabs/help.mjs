@@ -17,8 +17,9 @@ const CATEGORIES = [
     { key: 'Enter',     desc: 'Select / drill in' },
     { key: 'Esc / Backspace', desc: 'Back to previous view' },
     { key: 'PgUp / PgDn', desc: 'Navigate pages (pagination)' },
+    { key: 'g',         desc: 'Jump to top' },
     { key: 'G',         desc: 'Jump to bottom' },
-    { key: 'g',         desc: 'Jump to top (in file viewer)' },
+    { key: 'Space',     desc: 'Page down (same as PgDn)' },
     { key: 'o',         desc: 'Open current item in browser' },
     { key: 'y',         desc: 'Copy URL to clipboard (OSC-52)' },
     { key: 'b',         desc: 'Toggle bookmark' },
@@ -47,6 +48,7 @@ const CATEGORIES = [
     { key: 'P',         desc: 'Pin / unpin repo (sticky top, persisted)' },
     { key: 'n / S / f / i / u', desc: 'Sort by name / stars / forks / issues / updated' },
     { key: 'V',         desc: 'Toggle starred / own repos' },
+    { key: 'g / G',     desc: 'Jump to top / bottom' },
     { key: 'PgUp / PgDn', desc: 'Navigate pages (starred repos)' },
   ]},
   { id: 'analyze',    name: 'ANALYZE',           shortcuts: [
@@ -57,6 +59,7 @@ const CATEGORIES = [
     { key: 'F',         desc: 'Files pane' },
     { key: 'P',         desc: 'PRs pane' },
     { key: 'A',         desc: 'Packages pane (release assets)' },
+    { key: 'g / G',     desc: 'Jump to top / bottom' },
     { key: 'PgUp / PgDn', desc: 'Navigate pages' },
   ]},
   { id: 'files',      name: 'FILES',             shortcuts: [

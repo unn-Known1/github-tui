@@ -6,7 +6,7 @@ import {
   getUserEvents, getTrendingRepos, getStarredRepos,
   getUserIssues, getUserPullRequests, searchRepositories,
 } from '../github.mjs';
-import { relTime, eventGlyph, greeting, shortNum, truncate } from '../utils.mjs';
+import { relTime, eventGlyph, greeting, shortNum, truncate, openUrl } from '../utils.mjs';
 import { color } from '../theme.mjs';
 import { emptyState } from '../render.mjs';
 import { loadRepoDetails } from './analyze.mjs';
@@ -611,7 +611,20 @@ export function openFocusedCard() {
   }
 }
 
-export const keys = {};
+export const keys = {
+  'n': () => {
+    const repos = appState.repos;
+    if (repos.length > 0) {
+      const url = repos[0].html_url + '/issues/new';
+      openUrl(url).then(res => {
+        if (res.ok) showMessage('Opened new issue page', 'success');
+        else showMessage(res.error || 'Open failed', 'error');
+      });
+    } else {
+      showMessage('No repos to create issues for', 'warning');
+    }
+  },
+};
 
 // Card focus navigation (Tab on dashboard).
 export function focusCards() {

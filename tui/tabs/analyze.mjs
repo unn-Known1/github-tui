@@ -685,7 +685,21 @@ export const keys = {
   'G': () => { if (isFilesPane()) files.keys.G(); },
   'B': () => { if (isFilesPane()) files.keys.B(); },
   'Y': () => { if (isFilesPane()) files.keys.Y(); },
-  'g': () => { if (isFilesPane()) files.jumpTop(); },
+  'g': () => {
+    if (isFilesPane()) files.jumpTop();
+    else if (appState.analyzeView === 'results') {
+      appState.selectedRepo = 0;
+      appState.searchScroll = 0;
+      render();
+    } else if (appState.analyzeView === 'forks') {
+      appState.selectedFork = 0;
+      appState.forkScroll = 0;
+      render();
+    } else {
+      appState.detailsScroll = 0;
+      render();
+    }
+  },
   'n': () => { if (appState.analyzeView === 'forks') toggleForkSort('name'); },
 };
 

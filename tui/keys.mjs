@@ -14,6 +14,7 @@ import * as palette from './palette.mjs';
 import * as onboarding from './tabs/onboarding.mjs';
 import { handleInputKey } from './input.mjs';
 import { copyToClipboard, openUrl, notificationToHtmlUrl } from './utils.mjs';
+import { startInput } from './input.mjs';
 
 import * as dashboard from './tabs/dashboard.mjs';
 import * as repos     from './tabs/repos.mjs';
@@ -221,13 +222,8 @@ export function handleKey(key) {
     case ' ': handleSpace(); return;
     case '\x1b[5~': handlePageUp(); return;  // PageUp
     case '\x1b[6~': handlePageDown(); return;  // PageDown
-    case 'G': {
-      const screen = getScreen();
-      if (tabState.current === 1 && typeof repos.bottom === 'function') {
-        repos.bottom(screen); return;
-      }
-      break;
-    }
+    case 'g': handleTop(); return;
+    case 'G': handleBottom(); return;
   }
 
   // 5. Global star toggle.
@@ -253,29 +249,14 @@ export function handleKey(key) {
     mod.keys[key]();
     return;
   }
-
-  // 8. Dashboard quick actions: 'n' opens new issue page.
-  if (tabState.current === 0 && key === 'n') {
-    const repos = appState.repos;
-    if (repos.length > 0) {
-      const url = repos[0].html_url + '/issues/new';
-      openUrl(url).then(res => {
-        if (res.ok) showMessage('Opened new issue page', 'success');
-        else showMessage(res.error || 'Open failed', 'error');
-      });
-    } else {
-      showMessage('No repos to create issues for', 'warning');
-    }
-    return;
-  }
 }
 
 function handleSpace() {
   const t = tabState.current;
-  if (t === 0) dashboard.loadMoreTrending();
-  else if (t === 1) repos.space();
-  else if (t === 2) analyze.space();
-  else if (t === 4) inbox.space();
+  if (t === 0) dashboard.pageDown();
+  else if (t === 1) repos.pageDown();
+  else if (t === 2) analyze.pageDown();
+  else if (t === 4) inbox.pageDown();
 }
 function handlePageUp() {
   const t = tabState.current;
@@ -290,6 +271,62 @@ function handlePageDown() {
   else if (t === 1) repos.pageDown();
   else if (t === 2) analyze.pageDown();
   else if (t === 4) inbox.pageDown();
+}
+function handleTop() {
+  const t = tabState.current;
+  const screen = getScreen();
+  if (t === 0) return;
+  if (t === 1) {
+    if (appState.reposView === 'starred') {
+      appState.starredSelected = 0;
+      appState.starredScroll = 0;
+    } else {
+      appState.repoSelected = 0;
+      appState.repoScroll = 0;
+    }
+    render();
+  } else if (t === 2) {
+    if (appState.analyzeView === 'results') {
+      appState.selectedRepo = 0;
+      appState.searchScroll = 0;
+    } else if (appState.analyzeView === 'forks') {
+      appState.selectedFork = 0;
+      appState.forkScroll = 0;
+    } else {
+      appState.detailsScroll = 0;
+    }
+    render();
+  } else if (t === 4) {
+    appState.selectedNotification = 0;
+    appState.inboxScroll = 0;
+    render();
+  }
+}
+function handleBottom() {
+  const t = tabState.current;
+  const screen = getScreen();
+  if (t === 0) return;
+  if (t === 1) repos.bottom(screen);
+  else if (t === 2) {
+    if (appState.analyzeView === 'results') {
+      const maxVisible = Math.max(1, Math.min(8, screen.height - 16));
+      appState.selectedRepo = Math.max(0, appState.searchResults.length - 1);
+      appState.searchScroll = Math.max(0, appState.searchResults.length - maxVisible);
+    } else if (appState.analyzeView === 'forks') {
+      const maxVisible = Math.max(1, Math.min(6, screen.height - 16));
+      appState.selectedFork = Math.max(0, appState.forks.length - 1);
+      appState.forkScroll = Math.max(0, appState.forks.length - maxVisible);
+    } else {
+      appState.detailsScroll = 9999;
+    }
+    render();
+  } else if (t === 4) {
+    const list = appState.notifications;
+    appState.selectedNotification = Math.max(0, list.length - 1);
+    const maxVisible = Math.max(1, screen.height - 12);
+    appState.inboxScroll = Math.max(0, list.length - maxVisible);
+    render();
+  }
 }
 function handleEnter() {
   const t = tabState.current;

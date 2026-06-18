@@ -318,6 +318,7 @@ export const keys = {
   'M': markAllRead,
   'u': unsubscribeCurrent,
   'f': cycleFilter,
+  'g': () => { appState.selectedNotification = 0; appState.inboxScroll = 0; render(); },
 };
 
 export function up() {
