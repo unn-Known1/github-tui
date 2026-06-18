@@ -270,9 +270,6 @@ function renderPackagesPane(screen, y, maxH) {
       screen.writeStr(68, row, dl, sel ? color('selection') : color('downloadCount'));
     }
   }
-      screen.writeStr(68, row, dl, sel ? { bg: 'blue', fg: 'white' } : { dim: true });
-    }
-  }
   const infoY = y + 2 + Math.min(rows, assets.length);
   if (infoY < y + maxH) {
     const range = (start + 1) + '-' + Math.min(start + rows, assets.length) + ' of ' + assets.length;
