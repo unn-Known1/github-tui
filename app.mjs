@@ -9,6 +9,22 @@ import { initScreen, getScreen, render } from './tui/render.mjs';
 import { handleKey, registerCoreActions } from './tui/keys.mjs';
 import { loadUserData } from './tui/tabs/repos.mjs';
 import { loadBookmarks, loadSavedSearches, loadPins } from './tui/store.mjs';
+import { getRateLimit } from './tui/github.mjs';
+
+async function refreshRateLimit() {
+  if (!appState.token) return;
+  try {
+    const data = await getRateLimit(appState.token);
+    if (data && data.resources && data.resources.core) {
+      const core = data.resources.core;
+      const { lastRateLimit } = await import('./tui/github.mjs');
+      lastRateLimit.remaining = core.remaining;
+      lastRateLimit.limit = core.limit;
+      lastRateLimit.reset = core.reset;
+      render();
+    }
+  } catch {}
+}
 
 async function main() {
   if (!process.stdin.isTTY) {
@@ -51,6 +67,9 @@ async function main() {
   // Auto-load if we already have a saved token.
   if (appState.token) {
     await loadUserData();
+    refreshRateLimit();
+    // Refresh rate limit every 60 seconds.
+    setInterval(refreshRateLimit, 60000);
   } else {
     // First-time users get a friendly welcome overlay.
     const onboarding = await import('./tui/tabs/onboarding.mjs');

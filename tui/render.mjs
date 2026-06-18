@@ -126,10 +126,14 @@ function renderHeader(W) {
   if (lastRateLimit.remaining !== null && lastRateLimit.limit !== null) {
     const r = lastRateLimit.remaining, lim = lastRateLimit.limit;
     const pct = lim > 0 ? r / lim : 0;
+    const barWidth = 10;
+    const filled = Math.round(pct * barWidth);
+    const bar = '█'.repeat(filled) + '░'.repeat(barWidth - filled);
     const style = r === 0 ? { fg: 'red', bold: true }
       : pct < 0.1 ? { fg: 'yellow', bold: true }
+      : pct < 0.3 ? { fg: 'yellow' }
       : { fg: 'green' };
-    const txt = 'API  ' + r + ' / ' + lim;
+    const txt = 'API ' + bar + ' ' + r + '/' + lim;
     const x = Math.max(2, W - txt.length - 2);
     screen.writeStr(x, 1, txt, style);
   } else if (!appState.user) {

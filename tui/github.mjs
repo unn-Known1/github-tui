@@ -321,4 +321,8 @@ export const requestReview = (token, owner, repo, number, reviewers) =>
     token, method: 'POST', body: { reviewers },
   });
 
+// ─── Rate Limit ────────────────────────────────────────────────────
+export const getRateLimit = (token) =>
+  request('/rate_limit', { token });
+
 
