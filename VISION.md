@@ -2,9 +2,9 @@
 
 > *A living brainstorm of every realistic use case, persona, and feature that could make this app indispensable for every kind of GitHub user — from solo hackers to enterprise platform teams.*
 
-**Current version:** v0.3 (modular architecture + command palette + themes + inbox triage + README viewer + bookmarks + ETag cache — all shipped).
+**Current version:** v0.5.5 (complete feature set: dashboard, repos, analyze with 10 panes, inbox, settings, mouse support, collapsible sections, 8 themes).
 
-**Next milestone:** v0.4 — "Review from terminal" (PR/issue detail popup, comment, approve, merge, react).
+**Next milestone:** v0.6 — "Cache & Offline" (disk-backed ETag cache, offline mode, background prefetch).
 
 ---
 
@@ -28,16 +28,22 @@
 
 | Capability | State | Notes |
 |---|---|---|
-| Modular architecture (`tui/` split) | ✅ shipped v0.3 | 22 modules; tab modules export `render` + `keys` + dispatchers |
-| Dashboard with widgets | ✅ shipped v0.4 | Greeting, stat cards, activity feed, trending, languages bar, heatmap, sparkline |
+| Modular architecture (`tui/` split) | ✅ shipped v0.3 | 23 modules; tab modules export `render` + `keys` + dispatchers |
+| Dashboard with widgets | ✅ shipped v0.4 | Greeting, stat cards, activity feed, trending, languages bar, heatmap, sparkline, followers |
 | Repos browser (sort + filter + paginate) | ✅ shipped v0.3 | `/` filter, `c` clear, aggregate header stats, density toggle, pins |
 | Analyze: search → details → forks | ✅ shipped v0.2 | 2-column details with languages/contributors/releases |
-| Issues & PRs sub-panes (read-only) | ✅ shipped v0.2 | Toggle via `i` / `P` / `O` on details |
-| Issue / PR detail popup | ✅ shipped v0.5 | Full detail view with rendered body, labels, comments, file diffs |
+| Issues & PRs sub-panes | ✅ shipped v0.2 | Toggle via `i` / `P` / `O` on details |
+| Issue / PR detail popup | ✅ shipped v0.5 | Full detail view with rendered body, labels, comments, reviews, file diffs |
 | Comment / react / close-reopen / merge | ✅ shipped v0.5 | POST endpoints + confirmation modals |
 | PR diff viewer | ✅ shipped v0.5 | Unified diff with syntax-colored additions/deletions |
+| Review Comments | ✅ shipped v0.5.5 | Reviews tab in PR detail with state icons |
 | README viewer pane | ✅ shipped v0.3 | `R` opens it; naive Markdown styling |
 | Forks ahead/behind compares (parallel) | ✅ shipped v0.2 | 5-worker concurrent pool |
+| Traffic pane | ✅ shipped v0.5.5 | Views, clones, popular paths, popular referrers |
+| Milestones pane | ✅ shipped v0.5.5 | Title, state, due date, open/closed issues |
+| Labels pane | ✅ shipped v0.5.5 | Color dots, name, description |
+| Checks/CI pane | ✅ shipped v0.5.5 | Check runs with pass/fail/pending summary |
+| Security pane | ✅ shipped v0.5.5 | Dependabot alerts with severity icons |
 | Inbox: list + open in browser | ✅ shipped v0.2 | Color-coded types, by-repo summary, relative time |
 | Inbox: mark-as-read / all / unsubscribe | ✅ shipped v0.3 | Keys `m`/`M`/`u` |
 | Inbox: filter cycle | ✅ shipped v0.3 | `f` cycles all → unread → mentions → review |
@@ -46,21 +52,22 @@
 | Settings panel with system info | ✅ shipped v0.2 | Version, paths, Node, platform, terminal |
 | Token scope inspector | ✅ shipped v0.3 | `lastScopes` from `x-oauth-scopes` |
 | Secure local auth (chmod 600 + masked + 401 auto-clear) | ✅ shipped v0.2 | |
-| Live API rate-limit indicator | ✅ shipped v0.2 | Top-right + Settings detail |
+| Live API rate-limit indicator | ✅ shipped v0.5.5 | Visual `█░` bar in header + explicit endpoint |
 | ETag-aware caching | ✅ shipped v0.3 | In-memory; auto `If-None-Match` |
 | Command palette (Ctrl-P / `:`) | ✅ shipped v0.3 | ~30 registered actions, fuzzy match |
-| Themes (7 themes) | ✅ shipped v0.5 | default/highContrast/dracula/solarized/nord/monokai/gruvbox |
+| Themes (8 themes) | ✅ shipped v0.5.5 | default/highContrast/dracula/solarized/nord/monokai/gruvbox/light |
 | Bookmarks store | ✅ shipped v0.3 | `b` toggles; `~/.github-tui/bookmarks.json` |
 | Star / unstar from anywhere | ✅ shipped v0.3 | `*` |
 | OSC-52 clipboard copy | ✅ shipped v0.3 | `y` |
-| Help overlay (`?`) | ✅ shipped v0.5 | Updated for all v0.5 keys including detail popup |
+| Help overlay (`?`) | ✅ shipped v0.5 | Updated for all keys including detail popup |
+| Mouse support | ✅ shipped v0.5.5 | Click tabs/panes/items, scroll wheel, hover effects |
+| Collapsible sections | ✅ shipped v0.5.5 | `z`/`Z`/`X` keys, disk persistence |
 | Saved searches | 🟡 store ready | `store.mjs` exposes API; needs UI surface |
 | Disk-backed cache (beyond ETag) | 🔲 planned v0.6 | Survives restarts; offline mode |
 | Workflows / Actions CI tab | 🔲 planned v0.7 | API ready in `github.mjs`; no UI yet |
-| File-tree browser + file viewer | 🔲 planned v0.8 | `getRepoContents` / `getRepoFile` ready |
 | Code search across orgs | 🔲 planned v0.8 | `searchCode` ready |
 | OAuth device-flow + OS keychain | 🔲 planned v0.9 | |
-| User-editable keybindings | 🔲 planned v0.5 | File path reserved: `~/.github-tui/keys.json` |
+| User-editable keybindings | 🔲 planned | File path reserved: `~/.github-tui/keys.json` |
 | AI summarise (BYO-key) | 🔲 planned v1.x | |
 
 ## 🎯 Guiding Principles
@@ -464,6 +471,19 @@ Real sequences a user runs through, end-to-end. Status reflects today.
 - 7 themes (added nord, monokai, gruvbox).
 - Help overlay updated for all new keybindings.
 
+### v0.5.5 — "Repo Analytics + Input Systems" ✅ SHIPPED
+- **Rate limit indicator** — visual `█░` bar in header + explicit `/rate_limit` endpoint.
+- **Traffic pane** — views, clones, popular paths, popular referrers.
+- **Milestones pane** — title, state, due date, open/closed issues.
+- **Labels pane** — color dots, name, description.
+- **Checks/CI pane** — check runs with pass/fail/pending summary.
+- **Security pane** — Dependabot alerts with severity icons.
+- **Review Comments** — Reviews tab in PR detail view with state icons.
+- **Mouse support** — click tabs/panes/items, scroll wheel, hover effects.
+- **Collapsible sections** — `z`/`Z`/`X` keys, disk persistence.
+- **Followers section** — recent followers in Dashboard profile.
+- **8 themes** — added light theme.
+
 ### v0.6 — "Cache & Offline" *(next)*
 - Disk-backed ETag cache (survives restarts).
 - Offline banner; "last-synced" timestamps per tab.
@@ -479,13 +499,11 @@ Real sequences a user runs through, end-to-end. Status reflects today.
 
 ### v0.8 — "Discovery & Read Mode"
 - Topic explorer with language facet + 7d/30d/90d toggles.
-- File-tree browser using `getRepoContents`.
 - Syntax-highlighted file view (tiny lexer for the top 10 languages).
 - Compare branches/tags.
 - Code search using `searchCode`.
 
 ### v0.9 — "Security & Enterprise"
-- Dependabot / advisories tab.
 - Token-scope auditor with warnings for over-privileged tokens.
 - GitHub Enterprise Server configurable host.
 - OS keychain integration (mac/linux/windows).
