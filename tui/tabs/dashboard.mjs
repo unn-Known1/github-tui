@@ -3,11 +3,12 @@
 import { appState, render, startAsync, isStale, showMessage, setTab } from '../state.mjs';
 import {
   getUserEvents, getTrendingRepos, getStarredRepos,
-  getUserIssues, getUserPullRequests,
+  getUserIssues, getUserPullRequests, searchRepositories,
 } from '../github.mjs';
 import { relTime, eventGlyph, greeting, shortNum, truncate } from '../utils.mjs';
 import { color } from '../theme.mjs';
 import { emptyState } from '../render.mjs';
+import { loadRepoDetails } from './analyze.mjs';
 
 export async function loadDashboardWidgets(force = false) {
   if (!appState.token || !appState.user) return;
@@ -35,6 +36,7 @@ export async function loadDashboardWidgets(force = false) {
     appState.dashboardStaleRepos = staleResult.repos;
     appState.dashboardStarHistory = buildStarHistory(appState.starred);
     appState.dashboardLoaded = true;
+    appState.dashboardScroll = 0;
     render();
   } catch (e) {
     if (!isStale(gen)) showMessage('Dashboard widgets failed: ' + e.message, 'error');
@@ -201,6 +203,10 @@ export function renderDashboard(screen, y, h) {
     return;
   }
 
+  // Apply scroll offset — content slides up, screen clips automatically.
+  const scroll = Math.max(0, appState.dashboardScroll || 0);
+  y -= scroll;
+
   // Greeting row.
   const heading = greeting() + ', ' + (user.name || user.login);
   screen.writeStr(4, y, heading, color('title'));
@@ -246,11 +252,13 @@ export function renderDashboard(screen, y, h) {
   const splitX = Math.floor(W / 2);
   const leftX = 4;
   const rightX = splitX + 3;
-  const bodyH = (y + h) - bodyY;
+  const bodyH = Math.max(0, Math.min(ly, ry) - bodyY);
 
   for (let dy = 0; dy < bodyH; dy++) {
     screen.setCell(splitX + 1, bodyY + dy, '│', color('dim'));
   }
+
+  const colBot = bodyY + bodyH;
 
   // LEFT COLUMN.
   let ly = bodyY;
@@ -262,13 +270,13 @@ export function renderDashboard(screen, y, h) {
     ['Public: ' + (user.public_repos || 0) + '  Private: ' + (user.total_private_repos || 0), color('dim')],
   ];
   for (const [txt, style] of profile) {
-    if (ly >= y + h - 1) break;
+    if (ly >= colBot - 1) break;
     screen.writeStr(leftX, ly++, txt.substring(0, splitX - leftX - 2), style);
   }
   ly++;
 
   // Sparkline with axis labels.
-  if (ly < y + h - 4 && appState.dashboardStarHistory.length > 0) {
+  if (ly < colBot - 4 && appState.dashboardStarHistory.length > 0) {
     sectionHeader(screen, leftX, ly++, 'STARS (30 DAYS)');
     const sparkW = Math.min(30, splitX - leftX - 4);
     const spark = sparkline(appState.dashboardStarHistory, sparkW);
@@ -283,7 +291,7 @@ export function renderDashboard(screen, y, h) {
   }
 
   // Top repos.
-  if (ly < y + h - 2) {
+  if (ly < colBot - 2) {
     sectionHeader(screen, leftX, ly++, 'TOP REPOS');
     const top = [...appState.repos]
       .sort((a, b) => (b.stargazers_count || 0) - (a.stargazers_count || 0))
@@ -292,7 +300,7 @@ export function renderDashboard(screen, y, h) {
       screen.writeStr(leftX, ly++, '(no repos)', color('dim'));
     } else {
       for (const r of top) {
-        if (ly >= y + h - 1) break;
+        if (ly >= colBot - 1) break;
         const stars = '★' + shortNum(r.stargazers_count || 0);
         screen.writeStr(leftX, ly, r.name.substring(0, splitX - leftX - 12));
         screen.writeStr(splitX - 8, ly, stars, color('star'));
@@ -312,7 +320,7 @@ export function renderDashboard(screen, y, h) {
   } else {
     const maxEvents = Math.min(6, Math.max(1, Math.floor(bodyH * 0.35)));
     for (const ev of appState.events.slice(0, maxEvents)) {
-      if (ry >= y + h - 1) break;
+      if (ry >= colBot - 1) break;
       const [icon, c, label] = eventGlyph(ev.type);
       const repo = (ev.repo && ev.repo.name ? ev.repo.name : '?').substring(0, Math.max(10, rightW - 22));
       const when = relTime(ev.created_at);
@@ -325,11 +333,11 @@ export function renderDashboard(screen, y, h) {
   }
   ry++;
 
-  if (ry < y + h - 3 && appState.dashboardRecentIssues.length > 0) {
+  if (ry < colBot - 3 && appState.dashboardRecentIssues.length > 0) {
     sectionHeader(screen, rightX, ry++, 'RECENT ISSUES');
     const maxIssues = Math.min(4, Math.max(1, Math.floor(bodyH * 0.2)));
     for (const issue of appState.dashboardRecentIssues.slice(0, maxIssues)) {
-      if (ry >= y + h - 1) break;
+      if (ry >= colBot - 1) break;
       const num = '#' + (issue.number || '?');
       const title = (issue.title || '?').substring(0, Math.max(10, rightW - 20));
       const state = issue.state === 'open' ? color('success') : color('dim');
@@ -340,11 +348,11 @@ export function renderDashboard(screen, y, h) {
     ry++;
   }
 
-  if (ry < y + h - 3 && appState.dashboardRecentPRs.length > 0) {
+  if (ry < colBot - 3 && appState.dashboardRecentPRs.length > 0) {
     sectionHeader(screen, rightX, ry++, 'RECENT PRS');
     const maxPRs = Math.min(4, Math.max(1, Math.floor(bodyH * 0.2)));
     for (const pr of appState.dashboardRecentPRs.slice(0, maxPRs)) {
-      if (ry >= y + h - 1) break;
+      if (ry >= colBot - 1) break;
       const num = '#' + (pr.number || '?');
       const title = (pr.title || '?').substring(0, Math.max(10, rightW - 20));
       const draft = pr.draft ? '[draft] ' : '';
@@ -356,10 +364,10 @@ export function renderDashboard(screen, y, h) {
     ry++;
   }
 
-  if (ry < y + h - 3 && appState.dashboardStaleCount > 0) {
+  if (ry < colBot - 3 && appState.dashboardStaleCount > 0) {
     sectionHeader(screen, rightX, ry++, 'STALE REPOS');
     for (const name of appState.dashboardStaleRepos) {
-      if (ry >= y + h - 1) break;
+      if (ry >= colBot - 1) break;
       screen.writeStr(rightX + 2, ry++, name.substring(0, rightW - 4), color('warning'));
     }
     if (appState.dashboardStaleCount > appState.dashboardStaleRepos.length) {
@@ -369,24 +377,19 @@ export function renderDashboard(screen, y, h) {
     ry++;
   }
 
-  if (ry < y + h - 2) {
+  if (ry < colBot - 2) {
     sectionHeader(screen, rightX, ry++, 'TRENDING');
     if (appState.trending.length === 0) {
       screen.writeStr(rightX, ry++, appState.dashboardLoaded ? '(none)' : 'Loading...', color('dim'));
     } else {
       const maxTrending = Math.min(appState.trending.length, Math.max(3, Math.floor(bodyH * 0.3)));
       for (let i = 0; i < maxTrending && i < appState.trending.length; i++) {
-        if (ry >= y + h - 1) break;
+        if (ry >= colBot - 1) break;
         const r = appState.trending[i];
-        const name = (r.full_name || '?').substring(0, Math.max(10, rightW - 16));
+        const name = (r.full_name || '?').substring(0, Math.max(10, rightW - 14));
         const stars = '★' + shortNum(r.stargazers_count || 0);
-        const sel = i === appState.trendingSelected;
-        if (sel) {
-          for (let x = rightX - 1; x < rightX + rightW; x++) screen.styleBuf[ry][x] = color('selection');
-        }
-        screen.writeStr(rightX, ry, sel ? '>' : ' ', sel ? color('selection') : null);
-        screen.writeStr(rightX + 2, ry, name, sel ? color('selection') : null);
-        screen.writeStr(rightX + rightW - stars.length - 1, ry, stars, sel ? color('selection') : color('star'));
+        screen.writeStr(rightX, ry, name);
+        screen.writeStr(rightX + rightW - stars.length - 1, ry, stars, color('star'));
         ry++;
       }
       if (appState.trending.length > maxTrending) {
@@ -401,10 +404,11 @@ export function renderDashboard(screen, y, h) {
 
   // Full-width sections below columns.
   const colEnd = Math.max(ly, ry) + 1;
+  const fullBottom = Math.min(y + h, colEnd + 10);
 
   // Heatmap — full width.
   if (colEnd + 10 < y + h) {
-    renderHeatmap(screen, leftX, colEnd, W - 4, y + h);
+    renderHeatmap(screen, leftX, colEnd, W - 4, fullBottom);
   }
 
   // Language breakdown — full width.
@@ -436,14 +440,22 @@ export function renderDashboard(screen, y, h) {
       }
     }
   }
+
+  // Scroll indicator at bottom of content area.
+  const contentBot = (HEADER_HEIGHT || 7) + h - 1;
+  if (scroll > 0) {
+    screen.writeStr(W - 16, contentBot, '↑ more above', color('dim'));
+  }
 }
 
 export async function loadMoreTrending() {
   if (!appState.trendingHasMore || !appState.token) return;
   const gen = startAsync();
   try {
+    const since = new Date(Date.now() - 7 * 86400000).toISOString().split('T')[0];
+    const q = 'created:>' + since;
     const page = appState.trendingPage + 1;
-    const more = await getTrendingRepos(appState.token, 7, 10);
+    const more = await searchRepositories(appState.token, q, page, 10);
     if (isStale(gen)) return;
     if (Array.isArray(more) && more.length > 0) {
       appState.trending = [...appState.trending, ...more];
@@ -459,8 +471,8 @@ export async function loadMoreTrending() {
 }
 
 export function openTrendingRepo() {
-  const r = appState.trending[appState.trendingSelected];
-  if (!r) return;
+  if (appState.trending.length === 0) return;
+  const r = appState.trending[0];
   const [owner, name] = r.full_name.split('/');
   setTab(2);
   loadRepoDetails(owner, name);
@@ -469,11 +481,10 @@ export function openTrendingRepo() {
 export const keys = {};
 
 export function up() {
-  appState.trendingSelected = Math.max(0, appState.trendingSelected - 1);
+  appState.dashboardScroll = Math.max(0, (appState.dashboardScroll || 0) - 1);
   render();
 }
 export function down() {
-  const max = Math.max(0, appState.trending.length - 1);
-  appState.trendingSelected = Math.min(max, appState.trendingSelected + 1);
+  appState.dashboardScroll = (appState.dashboardScroll || 0) + 1;
   render();
 }

@@ -221,7 +221,11 @@ function statusLine() {
   if (appState.showDetail) return '[↑↓] scroll  [Esc] close  [c] comment  [r] react  [x] close/reopen  [M] merge';
   const sep = ' | ';
   switch (tabState.current) {
-    case 0: return 'Tabs: [1-5]' + sep + '[r] Refresh' + sep + '[Ctrl-P] Palette' + sep + '[?] Help';
+    case 0: {
+      const scroll = appState.dashboardScroll || 0;
+      const hint = scroll > 0 ? '  [↑] Scroll up' : '';
+      return 'Tabs: [1-5]' + sep + '[j/↓] Scroll' + sep + '[r] Refresh' + sep + '[Ctrl-P] Palette' + sep + '[?] Help' + hint;
+    }
     case 1: {
       if (appState.reposView === 'starred') return '[↑↓jk] Nav' + sep + '[Enter] Analyze' + sep + '[V] Own repos';
       return 'Sort: [n/S/f/i/u]' + sep + '[/] Filter' + sep + '[t] Type' + sep + '[D] Density' + sep + '[V] Starred';

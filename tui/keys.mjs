@@ -168,6 +168,7 @@ export function handleKey(key) {
     case '1': case '2': case '3': case '4': case '5': {
       const i = parseInt(key, 10) - 1;
       setTab(i);
+      if (i === 0) appState.dashboardScroll = 0;
       // Auto-load Inbox on first visit.
       if (i === 4 && appState.notifications.length === 0 && appState.token) {
         inbox.loadNotifications();

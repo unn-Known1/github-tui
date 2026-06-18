@@ -104,8 +104,6 @@ export const appState = {
   trending: [],
   trendingPage: 1,
   trendingHasMore: true,
-  trendingSelected: 0,
-  trendingScroll: 0,
   starred: [],
   dashboardLoaded: false,
   dashboardContributions: null,  // { weeks: [[day, day, ...], ...] } heatmap data
@@ -114,6 +112,7 @@ export const appState = {
   dashboardStaleCount: 0,        // repos with no push in 60+ days
   dashboardStaleRepos: [],       // stale repo names for display
   dashboardStarHistory: [],      // daily star counts for sparkline
+  dashboardScroll: 0,            // scroll offset for dashboard content
 
   // ── Inbox ──
   notifications: [],

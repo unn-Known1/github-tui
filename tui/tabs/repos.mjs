@@ -231,7 +231,7 @@ function renderStarredList(screen, y, h) {
   screen.hline(y + 1, '─');
 
   if (list.length === 0) {
-    emptyState(screen, y, h, {
+    emptyState(screen, y + 3, h - 3, {
       icon: '---',
       title: appState.loading ? 'Loading...' : 'No starred repos',
       message: appState.loading ? 'Fetching starred repos...' : 'Star repos on GitHub to see them here',
@@ -316,7 +316,7 @@ export function renderRepos(screen, y, h) {
   if (!repos || repos.length === 0) {
     const hasFilters = appState.repoFilter || appState.reposLangFilter ||
       appState.repoStaleOnly || appState.repoTypeFilter !== 'all';
-    emptyState(screen, y, h, {
+    emptyState(screen, y + 3, h - 3, {
       icon: hasFilters ? '---' : '---',
       title: hasFilters ? 'No matching repos' : 'No repositories',
       message: hasFilters
@@ -478,6 +478,7 @@ function togglePinCurrent() {
 }
 
 function clearAllFilters() {
+  if (appState.reposView !== 'own') return;
   appState.repoFilter = '';
   appState.repoTypeFilter = 'all';
   appState.reposLangFilter = null;
