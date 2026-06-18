@@ -345,4 +345,11 @@ export const getRepoLabels = (token, owner, repo, page, perPage) =>
   request('/repos/' + owner + '/' + repo + '/labels?page=' + (page||1) +
     '&per_page=' + (perPage||100), { token });
 
+// ─── Checks/CI ─────────────────────────────────────────────────────
+export const getRepoCheckRuns = (token, owner, repo, ref) =>
+  request('/repos/' + owner + '/' + repo + '/commits/' + (ref || 'HEAD') + '/check-runs', { token });
+
+export const getRepoCheckSuites = (token, owner, repo, ref) =>
+  request('/repos/' + owner + '/' + repo + '/commits/' + (ref || 'HEAD') + '/check-suites', { token });
+
 

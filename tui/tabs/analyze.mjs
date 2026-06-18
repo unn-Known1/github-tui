@@ -10,7 +10,7 @@ import {
   getReleaseAssets, getReadme,
   getRepoTrafficViews, getRepoTrafficClones,
   getRepoTrafficPopularPaths, getRepoTrafficPopularReferrers,
-  getRepoMilestones, getRepoLabels,
+  getRepoMilestones, getRepoLabels, getRepoCheckRuns, getRepoCheckSuites,
 } from '../github.mjs';
 import { startInput, registerInputHandler } from '../input.mjs';
 import { shortNum, truncate } from '../utils.mjs';
@@ -448,6 +448,74 @@ function mapLabelColor(hex) {
   return 'white';
 }
 
+export async function loadChecks() {
+  const repo = appState.repoDetails;
+  if (!repo) return;
+  const gen = startAsync();
+  appState.loading = true;
+  appState.repoCheckRuns = [];
+  appState.repoCheckSuites = [];
+  render();
+  try {
+    const [owner, name] = repo.full_name.split('/');
+    const [runs, suites] = await Promise.all([
+      getRepoCheckRuns(appState.token, owner, name, repo.default_branch),
+      getRepoCheckSuites(appState.token, owner, name, repo.default_branch),
+    ]);
+    if (isStale(gen)) return;
+    appState.repoCheckRuns = (runs && runs.check_runs) ? runs.check_runs : [];
+    appState.repoCheckSuites = (suites && suites.check_suites) ? suites.check_suites : [];
+  } catch (e) {
+    if (!isStale(gen)) showMessage('Failed to load checks: ' + e.message, 'error');
+  }
+  appState.loading = false;
+  if (!isStale(gen)) render();
+}
+
+function renderChecksPane(screen, y, maxH) {
+  const W = screen.width;
+  const runs = appState.repoCheckRuns;
+  const suites = appState.repoCheckSuites;
+  sectionHeader(screen, 2, y, '✅ CHECKS/CI (' + runs.length + ' runs, ' + suites.length + ' suites)');
+  y++;
+
+  if (runs.length === 0 && suites.length === 0) {
+    screen.writeStr(2, y++, 'No check runs found for default branch', { dim: true });
+    return;
+  }
+
+  // Summary stats
+  const completed = runs.filter(r => r.status === 'completed');
+  const success = completed.filter(r => r.conclusion === 'success');
+  const failed = completed.filter(r => r.conclusion === 'failure');
+  const pending = runs.filter(r => r.status !== 'completed');
+
+  if (y < y + maxH - 1) {
+    const summary = '✅ ' + success.length + ' passed   ❌ ' + failed.length + ' failed   ⏳ ' + pending.length + ' pending';
+    screen.writeStr(2, y, summary, { dim: true });
+    y++;
+    y++;
+  }
+
+  // List check runs
+  for (const run of runs) {
+    if (y >= y + maxH - 1) break;
+    const icon = run.status !== 'completed' ? '⏳'
+      : run.conclusion === 'success' ? '✅'
+      : run.conclusion === 'failure' ? '❌'
+      : run.conclusion === 'cancelled' ? '⚠️'
+      : '❓';
+    const name = truncate(run.name || '?', 30);
+    const status = run.status === 'completed' ? run.conclusion : run.status;
+    screen.writeStr(2, y, icon);
+    screen.writeStr(5, y, name, { fg: 'white' });
+    if (37 + status.length < W) {
+      screen.writeStr(37, y, status, { dim: true });
+    }
+    y++;
+  }
+}
+
 function renderPackagesPane(screen, y, maxH) {
   const W = screen.width;
   const assets = appState.repoReleaseAssets;
@@ -708,6 +776,7 @@ function renderRepoDetails(screen, y, maxH) {
     ['traffic',  'Traffic',                                     'T'],
     ['milestones', 'Milestones',                                'M'],
     ['labels',   'Labels',                                      'L'],
+    ['checks',   'Checks',                                      'K'],
   ];
   let px = 2;
   for (const [id, label, k] of panes) {
@@ -727,6 +796,7 @@ function renderRepoDetails(screen, y, maxH) {
   if (appState.detailsPane === 'traffic') { renderTrafficPane(screen, y + 3, maxH - 3); return; }
   if (appState.detailsPane === 'milestones') { renderMilestonesPane(screen, y + 3, maxH - 3); return; }
   if (appState.detailsPane === 'labels') { renderLabelsPane(screen, y + 3, maxH - 3); return; }
+  if (appState.detailsPane === 'checks') { renderChecksPane(screen, y + 3, maxH - 3); return; }
 
   // Overview pane: 2-column layout.
   const leftWidth = Math.min(48, Math.floor(W / 2));
@@ -944,6 +1014,18 @@ export const keys = {
         appState.detailsPane = 'labels';
         appState.detailsScroll = 0;
         loadLabels();
+      }
+      render();
+    }
+  },
+  'K': () => {
+    if (appState.analyzeView === 'details') {
+      if (appState.detailsPane === 'checks') {
+        appState.detailsPane = 'overview';
+      } else {
+        appState.detailsPane = 'checks';
+        appState.detailsScroll = 0;
+        loadChecks();
       }
       render();
     }

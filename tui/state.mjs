@@ -98,6 +98,8 @@ export const appState = {
   repoTrafficPopularReferrers: [],
   repoMilestones: [],
   repoLabels: [],
+  repoCheckRuns: [],
+  repoCheckSuites: [],
 
   // ── Forks sub-view ──
   forks: [],
