@@ -2,6 +2,7 @@
 // Supports: click, scroll wheel, hover.
 
 import { appState, tabState, setTab, render } from './state.mjs';
+import { getScreen } from './render.mjs';
 
 // Enable mouse tracking on startup.
 export function enableMouse() {
@@ -112,6 +113,8 @@ function handlePaneTabClick(col) {
     { id: 'traffic', label: '[T] Traffic' },
     { id: 'milestones', label: '[M] Milestones' },
     { id: 'labels', label: '[L] Labels' },
+    { id: 'checks', label: '[K] Checks' },
+    { id: 'security', label: '[S] Security' },
   ];
   
   let px = 2;
@@ -136,6 +139,8 @@ function loadPane(paneId) {
     if (paneId === 'traffic') analyze.loadTraffic();
     else if (paneId === 'milestones') analyze.loadMilestones();
     else if (paneId === 'labels') analyze.loadLabels();
+    else if (paneId === 'checks') analyze.loadChecks();
+    else if (paneId === 'security') analyze.loadSecurity();
   }).catch(() => {});
 }
 
@@ -185,7 +190,7 @@ function scrollUp() {
 // Scroll down (mouse wheel down).
 function scrollDown() {
   const t = tabState.current;
-  const screen = global.screen;
+  const screen = getScreen();
   if (!screen) return;
   
   if (t === 1) {
