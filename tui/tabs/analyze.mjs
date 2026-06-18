@@ -10,6 +10,7 @@ import {
   getReleaseAssets, getReadme,
   getRepoTrafficViews, getRepoTrafficClones,
   getRepoTrafficPopularPaths, getRepoTrafficPopularReferrers,
+  getRepoMilestones,
 } from '../github.mjs';
 import { startInput, registerInputHandler } from '../input.mjs';
 import { shortNum, truncate } from '../utils.mjs';
@@ -341,6 +342,52 @@ function renderTrafficPane(screen, y, maxH) {
   }
 }
 
+export async function loadMilestones() {
+  const repo = appState.repoDetails;
+  if (!repo) return;
+  const gen = startAsync();
+  appState.loading = true;
+  appState.repoMilestones = [];
+  render();
+  try {
+    const [owner, name] = repo.full_name.split('/');
+    const milestones = await getRepoMilestones(appState.token, owner, name);
+    if (isStale(gen)) return;
+    appState.repoMilestones = Array.isArray(milestones) ? milestones : [];
+  } catch (e) {
+    if (!isStale(gen)) showMessage('Failed to load milestones: ' + e.message, 'error');
+  }
+  appState.loading = false;
+  if (!isStale(gen)) render();
+}
+
+function renderMilestonesPane(screen, y, maxH) {
+  const W = screen.width;
+  const milestones = appState.repoMilestones;
+  sectionHeader(screen, 2, y, '📋 MILESTONES (' + milestones.length + ')');
+  y++;
+
+  if (milestones.length === 0) {
+    screen.writeStr(2, y++, 'No milestones found', { dim: true });
+    return;
+  }
+
+  for (const m of milestones) {
+    if (y >= y + maxH - 1) break;
+    const title = truncate(m.title || '', 30);
+    const state = m.state === 'open' ? '○' : '●';
+    const stateStyle = m.state === 'open' ? { fg: 'green' } : { dim: true };
+    const due = m.due_on ? new Date(m.due_on).toLocaleDateString() : 'no due date';
+    const issues = (m.open_issues || 0) + '/' + ((m.open_issues || 0) + (m.closed_issues || 0));
+
+    screen.writeStr(2, y, state, stateStyle);
+    screen.writeStr(4, y, title, { fg: 'white' });
+    screen.writeStr(36, y, due, { dim: true });
+    screen.writeStr(52, y, issues + ' issues', { dim: true });
+    y++;
+  }
+}
+
 function renderPackagesPane(screen, y, maxH) {
   const W = screen.width;
   const assets = appState.repoReleaseAssets;
@@ -599,6 +646,7 @@ function renderRepoDetails(screen, y, maxH) {
     ['files',    'Files',                                       'F'],
     ['packages', 'Packages',                                    'A'],
     ['traffic',  'Traffic',                                     'T'],
+    ['milestones', 'Milestones',                                'M'],
   ];
   let px = 2;
   for (const [id, label, k] of panes) {
@@ -616,6 +664,7 @@ function renderRepoDetails(screen, y, maxH) {
   if (appState.detailsPane === 'files')  { files.renderFilesPane(screen, y + 3, maxH - 3); return; }
   if (appState.detailsPane === 'packages') { renderPackagesPane(screen, y + 3, maxH - 3); return; }
   if (appState.detailsPane === 'traffic') { renderTrafficPane(screen, y + 3, maxH - 3); return; }
+  if (appState.detailsPane === 'milestones') { renderMilestonesPane(screen, y + 3, maxH - 3); return; }
 
   // Overview pane: 2-column layout.
   const leftWidth = Math.min(48, Math.floor(W / 2));
@@ -809,6 +858,18 @@ export const keys = {
         appState.detailsPane = 'traffic';
         appState.detailsScroll = 0;
         loadTraffic();
+      }
+      render();
+    }
+  },
+  'M': () => {
+    if (appState.analyzeView === 'details') {
+      if (appState.detailsPane === 'milestones') {
+        appState.detailsPane = 'overview';
+      } else {
+        appState.detailsPane = 'milestones';
+        appState.detailsScroll = 0;
+        loadMilestones();
       }
       render();
     }

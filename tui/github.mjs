@@ -335,4 +335,9 @@ export const getRepoTrafficPopularPaths = (token, owner, repo) =>
 export const getRepoTrafficPopularReferrers = (token, owner, repo) =>
   request('/repos/' + owner + '/' + repo + '/traffic/popular/referrers', { token });
 
+// ─── Milestones ─────────────────────────────────────────────────────
+export const getRepoMilestones = (token, owner, repo, page, perPage) =>
+  request('/repos/' + owner + '/' + repo + '/milestones?page=' + (page||1) +
+    '&per_page=' + (perPage||20), { token });
+
 
