@@ -59,7 +59,7 @@ registerInputHandler('save-search', (label) => {
   if (!v) return;
   const query = appState.searchQuery;
   if (!query) { showMessage('No search query to save', 'warning'); return; }
-  addSavedSearch(v, query);
+  appState.savedSearches = addSavedSearch(v, query);
   showMessage('Saved search: ' + v, 'success');
 });
 
@@ -94,7 +94,7 @@ export function pageUp() {
       if (Array.isArray(more)) {
         appState.searchResults = more;
         appState.searchPage = page;
-        appState.searchHasMore = true;
+        appState.searchHasMore = more.length >= SEARCH_PER_PAGE;
         appState.selectedRepo = 0;
         appState.searchScroll = 0;
       }
@@ -318,8 +318,9 @@ function renderTrafficPane(screen, y, maxH) {
   if (paths.length > 0) {
     sectionHeader(screen, 2, y, 'Popular Paths');
     y++;
+    const y0 = y;
     for (const p of paths.slice(0, 5)) {
-      if (y >= y + maxH - 1) break;
+      if (y >= y0 + maxH - 1) break;
       screen.writeStr(4, y, truncate(p.path || '', 30));
       screen.writeStr(36, y, String(p.count || 0), { dim: true });
       screen.writeStr(44, y, String(p.uniques || 0) + ' unique', { dim: true });
@@ -333,8 +334,9 @@ function renderTrafficPane(screen, y, maxH) {
   if (referrers.length > 0) {
     sectionHeader(screen, 2, y, 'Popular Referrers');
     y++;
+    const y1 = y;
     for (const r of referrers.slice(0, 5)) {
-      if (y >= y + maxH - 1) break;
+      if (y >= y1 + maxH - 1) break;
       screen.writeStr(4, y, truncate(r.referrer || '', 30));
       screen.writeStr(36, y, String(r.count || 0), { dim: true });
       screen.writeStr(44, y, String(r.uniques || 0) + ' unique', { dim: true });
@@ -373,12 +375,13 @@ function renderMilestonesPane(screen, y, maxH) {
     return;
   }
 
+  const yM = y;
   for (const m of milestones) {
-    if (y >= y + maxH - 1) break;
+    if (y >= yM + maxH - 1) break;
     const title = truncate(m.title || '', 30);
     const state = m.state === 'open' ? '○' : '●';
     const stateStyle = m.state === 'open' ? { fg: 'green' } : { dim: true };
-    const due = m.due_on ? new Date(m.due_on).toLocaleDateString() : 'no due date';
+    const due = m.due_on ? new Date(m.due_on).toISOString().split('T')[0] : 'no due date';
     const issues = (m.open_issues || 0) + '/' + ((m.open_issues || 0) + (m.closed_issues || 0));
 
     screen.writeStr(2, y, state, stateStyle);
@@ -419,8 +422,9 @@ function renderLabelsPane(screen, y, maxH) {
     return;
   }
 
+  const yL = y;
   for (const l of labels) {
-    if (y >= y + maxH - 1) break;
+    if (y >= yL + maxH - 1) break;
     const name = truncate(l.name || '', 25);
     const desc = truncate(l.description || '', 35);
     const colorHex = l.color || 'ededed';
@@ -499,8 +503,9 @@ function renderChecksPane(screen, y, maxH) {
   }
 
   // List check runs
+  const yR = y;
   for (const run of runs) {
-    if (y >= y + maxH - 1) break;
+    if (y >= yR + maxH - 1) break;
     const icon = run.status !== 'completed' ? '⏳'
       : run.conclusion === 'success' ? '✅'
       : run.conclusion === 'failure' ? '❌'
@@ -584,8 +589,9 @@ function renderSecurityPane(screen, y, maxH) {
     return;
   }
 
+  const yA = y;
   for (const alert of alerts) {
-    if (y >= y + maxH - 1) break;
+    if (y >= yA + maxH - 1) break;
     const severity = alert.security_advisory?.severity || '?';
     const severityIcon = severity === 'critical' ? '🔴' : severity === 'high' ? '🟠' : severity === 'medium' ? '🟡' : '⚪';
     const pkg = alert.dependency?.package?.name || '?';
@@ -861,8 +867,8 @@ function renderRepoDetails(screen, y, maxH) {
     ['Size:',        Math.round((repo.size || 0) / 1024) + ' MB'],
     ['License:',     (repo.license && repo.license.name) || 'N/A'],
     ['Default:',     repo.default_branch || 'main'],
-    ['Created:',     new Date(repo.created_at).toLocaleDateString()],
-    ['Updated:',     new Date(repo.updated_at).toLocaleDateString()],
+    ['Created:',     new Date(repo.created_at).toISOString().split('T')[0]],
+    ['Updated:',     new Date(repo.updated_at).toISOString().split('T')[0]],
     ['URL:',         repo.html_url],
   ];
   const rows = Math.min(details.length, maxH - 4);

@@ -600,13 +600,13 @@ function getBodyLines() {
   } else if (appState.detailTab === 'comments') {
     let count = 0;
     for (const c of appState.detailComments) {
-      count += 1 + (c.body || '').split(/\r?\n/).length + 1;
+      count += 1 + (c.body ? c.body.split(/\r?\n/).length : 0) + 1;
     }
     return count;
   } else if (appState.detailTab === 'reviews') {
     let count = 0;
     for (const r of appState.detailReviews) {
-      count += 1 + (r.body || '').split(/\r?\n/).length + 1;
+      count += 1 + (r.body ? r.body.split(/\r?\n/).length : 0) + 1;
     }
     return count;
   } else if (appState.detailTab === 'files') {

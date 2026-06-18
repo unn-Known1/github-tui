@@ -274,14 +274,14 @@ function dispatchReposClick(sx, sy) {
     if (itemIdx >= 0 && itemIdx < list.length) {
       if (appState.reposView === 'starred') {
         appState.starredScroll = Math.max(0, itemIdx - 5);
-        appState.starredCursor = itemIdx;
+        appState.starredSelected = itemIdx;
       } else {
         appState.repoScroll = Math.max(0, itemIdx - 5);
-        appState.repoCursor = itemIdx;
+        appState.repoSelected = itemIdx;
       }
       render();
     }
-  });
+  }).catch(() => {});
 }
 
 // ── Analyze tab ───────────────────────────────────────────────
@@ -300,7 +300,7 @@ function dispatchAnalyzeClick(sy) {
       if (appState.detailsPane === 'packages') appState.selectedAsset = itemIdx;
       render();
     }
-  });
+  }).catch(() => {});
 }
 
 // ── Inbox tab ─────────────────────────────────────────────────

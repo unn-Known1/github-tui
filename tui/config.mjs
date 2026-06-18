@@ -19,10 +19,11 @@ export const THEME_FILE = join(CONFIG_DIR, 'theme');
 export const CACHE_DIR = join(CONFIG_DIR, 'cache');
 
 export function loadToken() {
-  if (existsSync(TOKEN_FILE)) {
+  try {
     return readFileSync(TOKEN_FILE, 'utf-8').trim();
+  } catch {
+    return null;
   }
-  return null;
 }
 
 export function saveToken(token) {

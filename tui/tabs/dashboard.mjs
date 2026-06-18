@@ -21,8 +21,8 @@ export async function loadDashboardWidgets(force = false) {
     const safe = (p) => p.catch(() => null);
     const [events, trending, starred, issues, prs, followers] = await Promise.all([
       safe(getUserEvents(appState.token, username, 100)),
-      safe(getTrendingRepos(appState.token, 7, 10)),
-      safe(getStarredRepos(appState.token, 1, 30)),
+      safe(getTrendingRepos(appState.token, 7, 100)),
+      safe(getStarredRepos(appState.token, 1, 100)),
       safe(getUserIssues(appState.token, 1, 10)),
       safe(getUserPullRequests(appState.token, 1, 10)),
       safe(getUserFollowers(appState.token, 1, 10)),
@@ -30,7 +30,7 @@ export async function loadDashboardWidgets(force = false) {
     if (isStale(gen)) return;
     appState.events = Array.isArray(events) ? events : [];
     appState.trending = Array.isArray(trending) ? trending : [];
-    appState.trendingHasMore = appState.trending.length >= 10;
+    appState.trendingHasMore = appState.trending.length >= 100;
     appState.starred = Array.isArray(starred) ? starred : [];
     appState.dashboardRecentIssues = Array.isArray(issues) ? issues : [];
     appState.dashboardRecentPRs = Array.isArray(prs) ? (prs.items || prs) : [];
@@ -106,10 +106,14 @@ function buildStarHistory(starred) {
   const dayMs = 86400000;
   const days = 30;
   const counts = new Array(days).fill(0);
-  const now = Date.now();
+  // Normalise both dates to midnight UTC so the day boundary is clean.
+  const now = new Date();
+  now.setUTCHours(0, 0, 0, 0);
   for (const r of starred) {
     if (!r.starred_at) continue;
-    const diffDays = Math.floor((now - new Date(r.starred_at).getTime()) / dayMs);
+    const d = new Date(r.starred_at);
+    d.setUTCHours(0, 0, 0, 0);
+    const diffDays = Math.floor((now.getTime() - d.getTime()) / dayMs);
     if (diffDays >= 0 && diffDays < days) {
       counts[days - 1 - diffDays]++;
     }
@@ -295,7 +299,7 @@ export function renderDashboard(screen, y, h) {
   const heatTopY = ly;
 
   // ── Heatmap (left sub-column) ──
-  if (ly < y + h - 10) {
+  if (ly < y + h - 4) {
     const hm = appState.dashboardContributions;
     if (hm) {
       const dayLabels = ['S', 'M', 'T', 'W', 'T', 'F', 'S'];
@@ -345,7 +349,7 @@ export function renderDashboard(screen, y, h) {
   }
 
   // ── Languages (right sub-column, aligned with heatmap top) ──
-  if (appState.repos.length > 0 && heatTopY < y + h - 3) {
+  if (appState.repos.length > 0 && heatTopY < y + h - 2) {
     const langVisible = sectionHeader(screen, langLeftX, heatTopY, 'LANGUAGES', null, 'dashboard:languages');
     if (langVisible) {
       const langCount = {};

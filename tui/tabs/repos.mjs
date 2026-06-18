@@ -342,6 +342,7 @@ export function renderRepos(screen, y, h) {
   }
   // Store chips for click handling.
   appState._filterChips = chips;
+  appState._chipY = chipY;
 
   if (!repos || repos.length === 0) {
     const hasFilters = chips.length > 0;
@@ -389,13 +390,6 @@ export function renderRepos(screen, y, h) {
   for (let i = 0; i < repos.length; i++) {
     isPinnedArr[i] = isPinnedLocal(repos[i].full_name);
     if (isPinnedArr[i] && (i === 0 || !isPinnedArr[i - 1])) isSectionStart[i] = true;
-  }
-  // Count total visual rows needed for the visible window.
-  let visualRowsNeeded = 0;
-  for (let i = start; i < repos.length; i++) {
-    visualRowsNeeded += rowH;
-    if (isSectionStart[i]) visualRowsNeeded += 1;
-    if (visualRowsNeeded > 200) break; // safety
   }
   const maxRows = Math.max(1, Math.floor((h - 10) / rowH));
 
@@ -540,11 +534,11 @@ async function loadStarredRepos() {
   appState.loading = true;
   render();
   try {
-    const starred = await getStarredRepos(appState.token, 1, 50);
+    const starred = await getStarredRepos(appState.token, 1, 100);
     if (isStale(gen)) return;
     appState.starred = Array.isArray(starred) ? starred : [];
     appState.starredPage = 1;
-    appState.starredHasMore = appState.starred.length >= 50;
+    appState.starredHasMore = appState.starred.length >= 100;
     showMessage('Loaded ' + appState.starred.length + ' starred repos', 'success');
   } catch (e) {
     if (!isStale(gen)) showMessage('Failed to load starred repos: ' + e.message, 'error');
@@ -560,12 +554,12 @@ export async function loadMoreStarred() {
   render();
   try {
     const page = appState.starredPage + 1;
-    const more = await getStarredRepos(appState.token, page, 50);
+    const more = await getStarredRepos(appState.token, page, 100);
     if (isStale(gen)) return;
     if (Array.isArray(more) && more.length > 0) {
       appState.starred = [...appState.starred, ...more];
       appState.starredPage = page;
-      appState.starredHasMore = more.length >= 50;
+      appState.starredHasMore = more.length >= 100;
       showMessage('Loaded ' + appState.starred.length + ' starred repos', 'success');
     } else {
       appState.starredHasMore = false;
@@ -584,7 +578,7 @@ export function pageUp() {
     const gen = startAsync();
     appState.loading = true;
     render();
-    getStarredRepos(appState.token, page, 50).then(more => {
+    getStarredRepos(appState.token, page, 100).then(more => {
       if (isStale(gen)) return;
       if (Array.isArray(more)) {
         appState.starred = more;
@@ -605,12 +599,12 @@ export function pageDown() {
     const gen = startAsync();
     appState.loading = true;
     render();
-    getStarredRepos(appState.token, page, 50).then(more => {
+    getStarredRepos(appState.token, page, 100).then(more => {
       if (isStale(gen)) return;
       if (Array.isArray(more) && more.length > 0) {
         appState.starred = more;
         appState.starredPage = page;
-        appState.starredHasMore = more.length >= 50;
+        appState.starredHasMore = more.length >= 100;
         appState.starredSelected = 0;
         appState.starredScroll = 0;
       } else {

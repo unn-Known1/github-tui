@@ -10,6 +10,7 @@ export const lastRateLimit = { remaining: null, limit: null, reset: null };
 export const lastScopes = { scopes: [], accepted: [] };
 const etagCache = new Map();
 const ETAG_CACHE_MAX = 500;
+const ETAG_TTL = 300_000; // 5 minutes
 
 function buildOptions(path, token, method, body) {
   const headers = {
@@ -71,8 +72,10 @@ export function request(path, opts) {
         clearTimeout(timer);
 
         if (res.statusCode === 304) {
-          const cached = etagCache.get(`${method}:${path}`);
-          if (cached) return resolve(cached.body);
+          const key = `${method}:${path}`;
+          const cached = etagCache.get(key);
+          if (cached && Date.now() - cached.ts < ETAG_TTL) return resolve(cached.body);
+          etagCache.delete(key);
         }
         if (res.statusCode === 403 && rr === '0') {
           const resetDate = new Date(parseInt(rs, 10) * 1000);
@@ -87,11 +90,15 @@ export function request(path, opts) {
             catch (e) { return reject(new Error('Invalid JSON response')); }
           }
           if (method === 'GET' && res.headers.etag) {
-            etagCache.set(`${method}:${path}`, { etag: res.headers.etag, body: payload });
-            // Evict oldest entries when cache exceeds limit.
+            etagCache.set(`${method}:${path}`, { etag: res.headers.etag, body: payload, ts: Date.now() });
             if (etagCache.size > ETAG_CACHE_MAX) {
-              const first = etagCache.keys().next().value;
-              etagCache.delete(first);
+              const expired = [];
+              const now = Date.now();
+              for (const [k, v] of etagCache) {
+                if (now - v.ts >= ETAG_TTL) expired.push(k);
+                if (expired.length > ETAG_CACHE_MAX / 2) break;
+              }
+              for (const k of expired) etagCache.delete(k);
             }
           }
           return resolve(payload);
@@ -130,7 +137,7 @@ export const getUserRepositories = (token, page, perPage) =>
 export const getUser = (token, username) => request('/users/' + username, { token });
 export const searchRepositories = async (token, query, page, perPage) => {
   const r = await request('/search/repositories?q=' + encodeURIComponent(query) +
-    '&page=' + (page||1) + '&per_page=' + (perPage||10), { token });
+    '&page=' + (page||1) + '&per_page=' + (perPage||100), { token });
   return r.items || [];
 };
 export const getRepositoryDetails = (token, owner, repo) =>
@@ -142,18 +149,18 @@ export const getCompare = (token, owner, repo, base, head) =>
   request('/repos/' + owner + '/' + repo + '/compare/' + base + '...' + head, { token });
 export const getRepositoryIssues = (token, owner, repo, page, perPage) =>
   request('/repos/' + owner + '/' + repo + '/issues?page=' + (page||1) +
-    '&per_page=' + (perPage||10), { token });
+    '&per_page=' + (perPage||100), { token });
 export const getRepositoryPullRequests = (token, owner, repo, page, perPage) =>
   request('/repos/' + owner + '/' + repo + '/pulls?page=' + (page||1) +
-    '&per_page=' + (perPage||10), { token });
+    '&per_page=' + (perPage||100), { token });
 export const getRepositoryContributors = (token, owner, repo, page, perPage) =>
   request('/repos/' + owner + '/' + repo + '/contributors?page=' + (page||1) +
-    '&per_page=' + (perPage||10), { token });
+    '&per_page=' + (perPage||100), { token });
 export const getRepositoryLanguages = (token, owner, repo) =>
   request('/repos/' + owner + '/' + repo + '/languages', { token });
 export const getRepositoryReleases = (token, owner, repo, page, perPage) =>
   request('/repos/' + owner + '/' + repo + '/releases?page=' + (page||1) +
-    '&per_page=' + (perPage||5), { token });
+    '&per_page=' + (perPage||100), { token });
 export const getReleaseAssets = (token, owner, repo, releaseId) =>
   request('/repos/' + owner + '/' + repo + '/releases/' + releaseId + '/assets', { token });
 
@@ -208,10 +215,10 @@ export const getRepoFile = (token, owner, repo, path, ref) =>
 // ─── User issues / PRs (for dashboard) ─────────────────────────────
 export const getUserIssues = (token, page, perPage) =>
   request('/issues?filter=created&sort=updated&direction=desc&page=' + (page||1) +
-    '&per_page=' + (perPage||10), { token });
+    '&per_page=' + (perPage||100), { token });
 export const getUserPullRequests = (token, page, perPage) =>
   request('/search/issues?q=author:@me+type:pr&sort=updated&order=desc&page=' + (page||1) +
-    '&per_page=' + (perPage||10), { token });
+    '&per_page=' + (perPage||100), { token });
 export const getCommitActivity = (token, owner, repo) =>
   request('/repos/' + owner + '/' + repo + '/stats/commit_activity', { token });
 
@@ -275,6 +282,7 @@ export function downloadToFile(url, destPath, token) {
         res.on('data', (chunk) => { bytes += chunk.length; });
         res.pipe(out);
         out.on('finish', () => out.close(() => resolve({ bytes, path: destPath })));
+        out.on('error', reject);
       });
       req.on('error', reject);
     }

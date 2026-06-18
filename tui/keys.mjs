@@ -192,7 +192,7 @@ export function handleKey(key) {
       const action = appState.confirmAction;
       appState.confirmAction = null;
       appState.confirmMessage = '';
-      action();
+      try { action(); } catch (e) { showMessage(e?.message || 'Action failed', 'error'); render(); }
     } else {
       dismissConfirm();
     }
@@ -260,10 +260,6 @@ export function handleKey(key) {
   if (tabState.current === 0) {
     if (key === '\x1b[D' || key === 'H') { dashboard.leftCard(); return; }
     if (key === '\x1b[C' || key === 'L') { dashboard.rightCard(); return; }
-    if (appState.dashboardCardsFocus && (key === '\r' || key === '\n')) {
-      dashboard.openFocusedCard();
-      return;
-    }
     if (key === '\t' && appState.dashboardCardsFocus) {
       dashboard.unfocusCards();
       return;
@@ -394,8 +390,12 @@ function getTabSections() {
 
 function handleEnter() {
   const t = tabState.current;
-  if (t === 0) dashboard.openTrendingRepo();
-  else if (t === 1) repos.enter();
+  if (t === 0) {
+    if (appState.dashboardCardsFocus) { dashboard.openFocusedCard(); return; }
+    dashboard.openTrendingRepo();
+    return;
+  }
+  if (t === 1) repos.enter();
   else if (t === 2) analyze.enter();
   else if (t === 3) settings.enter();
   else if (t === 4) inbox.enter();
@@ -427,7 +427,7 @@ function handleBack() {
   }
   if (t === 4) {
     if (appState.showDetail) {
-      import('./tabs/detail.mjs').then(m => m.closeDetail());
+      import('./tabs/detail.mjs').then(m => m.closeDetail()).catch(() => {});
       return;
     }
   }

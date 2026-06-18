@@ -328,7 +328,7 @@ export function copyRawUrl() {
   const [owner, name] = repoOwnerName();
   if (!owner) return;
   const path = appState.fileViewing ||
-    (appState.filesEntries[appState.filesSelected] || {}).path;
+    ((appState.filesEntries || [])[appState.filesSelected] || {}).path;
   if (!path) return;
   const url = 'https://raw.githubusercontent.com/' + owner + '/' + name +
     '/' + appState.filesRef + '/' + path;

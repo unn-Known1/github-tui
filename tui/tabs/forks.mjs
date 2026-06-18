@@ -172,7 +172,7 @@ export function renderForks(screen, y, maxH) {
     screen.writeStr(starsCol, row, String(fork.stargazers_count || 0), statStyle);
     screen.writeStr(forksCol, row, String(fork.forks_count || 0), statStyle);
     if (pushedCol + 12 < W) {
-      screen.writeStr(pushedCol, row, new Date(fork.pushed_at).toLocaleDateString(), statStyle);
+      screen.writeStr(pushedCol, row, new Date(fork.pushed_at).toISOString().split('T')[0], statStyle);
     }
     if (fork._aheadBehind && aheadCol + 8 < W) {
       const ahead = '+' + fork._aheadBehind.ahead;
