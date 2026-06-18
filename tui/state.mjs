@@ -202,6 +202,10 @@ export const appState = {
 
   // ── Collapsible sections (persisted to disk) ──
   collapsed: {},  // { 'dashboard:profile': true, 'repos:pinned': false, ... }
+
+  // ── Mouse hover state ──
+  hoverRow: -1,
+  hoverCol: -1,
 };
 
 // ────────────────────────────────────────────────────────────────────────────

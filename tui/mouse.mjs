@@ -37,9 +37,21 @@ export function parseMouseEvent(data) {
 
 // Handle a mouse event by dispatching to the appropriate handler.
 export function handleMouseEvent(event) {
-  if (!event || !event.pressed) return;  // Only handle presses
+  if (!event) return;
   
-  const { button, col, row } = event;
+  const { button, col, row, pressed } = event;
+  
+  // Track hover position (for motion events)
+  if (!pressed) {
+    // Motion event (button >= 32 with M suffix means motion)
+    // Update hover state for visual feedback
+    if (appState.hoverRow !== row || appState.hoverCol !== col) {
+      appState.hoverRow = row;
+      appState.hoverCol = col;
+      render();
+    }
+    return;
+  }
   
   // Scroll wheel (buttons 64/65)
   if (button === 64) { scrollUp(); return; }

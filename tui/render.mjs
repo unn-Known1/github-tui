@@ -358,6 +358,17 @@ function doRender() {
   // ── Footer ──
   renderFooter(W, H);
 
+  // ── Hover effect ──
+  if (appState.hoverRow > 0 && appState.hoverRow < H - 1) {
+    // Add subtle highlight to the hovered row
+    for (let x = 0; x < W; x++) {
+      if (screen.styleBuf[appState.hoverRow] && screen.styleBuf[appState.hoverRow][x]) {
+        const existing = screen.styleBuf[appState.hoverRow][x];
+        screen.styleBuf[appState.hoverRow][x] = { ...existing, bg: 'darkGray' };
+      }
+    }
+  }
+
   // ── Overlays (rendered last, on top) ──
   if (appState.confirmAction) renderConfirmDialog(screen);
   if (appState.showOnboarding) renderOnboarding(screen);
