@@ -203,9 +203,6 @@ export const getRepoFile = (token, owner, repo, path, ref) =>
     (ref ? '?ref=' + ref : ''), {
     token, accept: 'application/vnd.github.raw', raw: true,
   });
-export const getRepoCommits = (token, owner, repo, perPage) =>
-  request('/repos/' + owner + '/' + repo + '/commits?per_page=' + (perPage||10), { token });
-
 // ─── User issues / PRs (for dashboard) ─────────────────────────────
 export const getUserIssues = (token, page, perPage) =>
   request('/issues?filter=created&sort=updated&direction=desc&page=' + (page||1) +
@@ -216,22 +213,7 @@ export const getUserPullRequests = (token, page, perPage) =>
 export const getCommitActivity = (token, owner, repo) =>
   request('/repos/' + owner + '/' + repo + '/stats/commit_activity', { token });
 
-// ─── Searches ───────────────────────────────────────────────────────
-export const searchCode = async (token, query, page, perPage) => {
-  const r = await request('/search/code?q=' + encodeURIComponent(query) +
-    '&page=' + (page||1) + '&per_page=' + (perPage||20), { token });
-  return r.items || [];
-};
-export const searchUsers = async (token, query, page, perPage) => {
-  const r = await request('/search/users?q=' + encodeURIComponent(query) +
-    '&page=' + (page||1) + '&per_page=' + (perPage||15), { token });
-  return r.items || [];
-};
-export const searchIssues = async (token, query, page, perPage) => {
-  const r = await request('/search/issues?q=' + encodeURIComponent(query) +
-    '&page=' + (page||1) + '&per_page=' + (perPage||20), { token });
-  return r.items || [];
-};
+
 
 // ─── Actions / Workflows  (CI cockpit foundation) ──────────────────
 export const getWorkflows = (token, owner, repo) =>
@@ -337,6 +319,4 @@ export const requestReview = (token, owner, repo, number, reviewers) =>
     token, method: 'POST', body: { reviewers },
   });
 
-// ─── Cache utilities ────────────────────────────────────────────────
-export function clearEtagCache() { etagCache.clear(); }
-export function etagCacheSize() { return etagCache.size; }
+

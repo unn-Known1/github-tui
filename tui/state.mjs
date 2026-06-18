@@ -54,6 +54,9 @@ export const appState = {
   repoTypeFilter: 'all',            // all|sources|forks|archived|private|public|templates
   repoDensity: 'compact',           // compact|comfortable (description on 2nd line)
   repoStaleOnly: false,             // hide repos pushed within last 6 months
+  reposView: 'own',                 // 'own' | 'starred'
+  starredSelected: 0,
+  starredScroll: 0,
   repoPins: [],                     // [full_name] — sticky at top of list
   reposShowLangFacet: false,        // toggle the language facet sidebar
   reposLangFilter: null,            // null = no language filter
@@ -99,6 +102,10 @@ export const appState = {
   // ── Dashboard widgets ──
   events: [],
   trending: [],
+  trendingPage: 1,
+  trendingHasMore: true,
+  trendingSelected: 0,
+  trendingScroll: 0,
   starred: [],
   dashboardLoaded: false,
   dashboardContributions: null,  // { weeks: [[day, day, ...], ...] } heatmap data

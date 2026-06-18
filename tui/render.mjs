@@ -222,7 +222,10 @@ function statusLine() {
   const sep = ' | ';
   switch (tabState.current) {
     case 0: return 'Tabs: [1-5]' + sep + '[r] Refresh' + sep + '[Ctrl-P] Palette' + sep + '[?] Help';
-    case 1: return 'Sort: [n/S/f/i/u]' + sep + '[/] Filter' + sep + '[t] Type' + sep + '[D] Density';
+    case 1: {
+      if (appState.reposView === 'starred') return '[↑↓jk] Nav' + sep + '[Enter] Analyze' + sep + '[V] Own repos';
+      return 'Sort: [n/S/f/i/u]' + sep + '[/] Filter' + sep + '[t] Type' + sep + '[D] Density' + sep + '[V] Starred';
+    }
     case 2: {
       const v = appState.analyzeView;
       if (v === 'search')  return '[Enter/i] Search' + sep + '[Ctrl-P] Palette' + sep + '[?] Help';

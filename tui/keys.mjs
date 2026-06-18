@@ -234,13 +234,15 @@ export function handleKey(key) {
 
 function handleSpace() {
   const t = tabState.current;
-  if (t === 1) repos.space();
+  if (t === 0) dashboard.loadMoreTrending();
+  else if (t === 1) repos.space();
   else if (t === 2) analyze.space();
   else if (t === 4) inbox.space();
 }
 function handleEnter() {
   const t = tabState.current;
-  if (t === 1) repos.enter();
+  if (t === 0) dashboard.openTrendingRepo();
+  else if (t === 1) repos.enter();
   else if (t === 2) analyze.enter();
   else if (t === 3) settings.enter();
   else if (t === 4) inbox.enter();
@@ -248,6 +250,7 @@ function handleEnter() {
 function handleUp() {
   const t = tabState.current;
   const screen = getScreen();
+  if (t === 0) { dashboard.up(); return; }
   if (t === 1) repos.up(screen);
   else if (t === 2) analyze.up(screen);
   else if (t === 3) settings.up();
@@ -256,6 +259,7 @@ function handleUp() {
 function handleDown() {
   const t = tabState.current;
   const screen = getScreen();
+  if (t === 0) { dashboard.down(); return; }
   if (t === 1) repos.down(screen);
   else if (t === 2) analyze.down(screen);
   else if (t === 3) settings.down();
@@ -298,6 +302,8 @@ export function registerCoreActions() {
         run: () => { setTab(1); repos.keys.L(); } });
   reg({ id: 'repos.stale', label: 'Toggle stale-only filter (no push 6+ months)',
         run: () => { setTab(1); repos.keys.x(); } });
+  reg({ id: 'repos.starred', label: 'View starred repos',
+        run: () => { setTab(1); repos.toggleReposView(); } });
   reg({ id: 'repos.density', label: 'Toggle Repos density (compact / comfortable)',
         run: () => { setTab(1); repos.keys.D(); } });
   reg({ id: 'repos.pin', label: 'Pin / unpin highlighted repo',

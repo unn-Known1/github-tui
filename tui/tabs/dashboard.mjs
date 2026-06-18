@@ -1,6 +1,6 @@
 // Dashboard tab — the home screen.
 
-import { appState, render, startAsync, isStale, showMessage } from '../state.mjs';
+import { appState, render, startAsync, isStale, showMessage, setTab } from '../state.mjs';
 import {
   getUserEvents, getTrendingRepos, getStarredRepos,
   getUserIssues, getUserPullRequests,
@@ -18,7 +18,7 @@ export async function loadDashboardWidgets(force = false) {
     const safe = (p) => p.catch(() => null);
     const [events, trending, starred, issues, prs] = await Promise.all([
       safe(getUserEvents(appState.token, username, 100)),
-      safe(getTrendingRepos(appState.token, 7, 5)),
+      safe(getTrendingRepos(appState.token, 7, 10)),
       safe(getStarredRepos(appState.token, 1, 30)),
       safe(getUserIssues(appState.token, 1, 10)),
       safe(getUserPullRequests(appState.token, 1, 10)),
@@ -134,32 +134,19 @@ function sparkline(data, width) {
   }).join('');
 }
 
-function drawCard(screen, x, y, w, label, value, valueStyle) {
-  if (w < 6) return;
-  screen.writeStr(x, y,     '┌' + '─'.repeat(w - 2) + '┐', color('dim'));
-  screen.setCell(x, y + 1, '│', color('dim'));
-  screen.writeStr(x + 2, y + 1, truncate(label, w - 4), color('dim'));
-  screen.setCell(x + w - 1, y + 1, '│', color('dim'));
-  screen.setCell(x, y + 2, '│', color('dim'));
-  screen.writeStr(x + 2, y + 2, truncate(value, w - 4), valueStyle || color('title'));
-  screen.setCell(x + w - 1, y + 2, '│', color('dim'));
-  screen.writeStr(x, y + 3, '└' + '─'.repeat(w - 2) + '┘', color('dim'));
-}
-
 function sectionHeader(screen, x, y, text) {
   screen.writeStr(x, y, text, color('header'));
 }
 
 // Render the contribution heatmap with intensity gradient.
-function renderHeatmap(screen, leftX, y, splitX, h) {
+function renderHeatmap(screen, leftX, y, rightX, h) {
   const hm = appState.dashboardContributions;
   if (!hm) return;
 
   const dayLabels = ['S', 'M', 'T', 'W', 'T', 'F', 'S'];
-  const maxCellW = Math.floor((splitX - leftX - 4) / hm.weeks);
-  const cellW = Math.max(1, Math.min(2, maxCellW));
+  const heatW = rightX - leftX - 4;
+  const cellW = Math.max(1, Math.min(2, Math.floor(heatW / hm.weeks)));
 
-  // Check if we have any activity.
   const totalEvents = hm.grid.flat().reduce((a, b) => a + b, 0);
   if (totalEvents === 0) {
     screen.writeStr(leftX, y, '(no public activity in last 15 weeks)', color('dim'));
@@ -169,7 +156,6 @@ function renderHeatmap(screen, leftX, y, splitX, h) {
   sectionHeader(screen, leftX, y, 'ACTIVITY (' + totalEvents + ' events)');
   y++;
 
-  // Intensity levels: dim green -> brighter green based on max value.
   const heatStyle = (level) => {
     if (level === 0) return color('dim');
     if (hm.max <= 3) return { fg: 'green' };
@@ -182,13 +168,12 @@ function renderHeatmap(screen, leftX, y, splitX, h) {
 
   const heatChars = [' ', '░', '▒', '▓', '█'];
   for (let row = 0; row < 7; row++) {
-    if (y >= 0 + h) break;
+    if (y >= h) break;
     screen.writeStr(leftX, y, dayLabels[row], color('dim'));
     for (let col = 0; col < hm.weeks; col++) {
       const cx = leftX + 2 + col * cellW;
-      if (cx >= splitX - 1) break;
+      if (cx >= rightX - 1) break;
       const val = hm.grid[row][col];
-      // Map value to 0-4 level, scaled by max.
       const level = val === 0 ? 0
         : hm.max <= 4 ? Math.min(4, val)
         : Math.min(4, Math.ceil((val / hm.max) * 4));
@@ -198,7 +183,6 @@ function renderHeatmap(screen, leftX, y, splitX, h) {
     y++;
   }
 
-  // Legend bar.
   const legend = 'Less ░▒▓█ More';
   screen.writeStr(leftX, y, legend, color('dim'));
 }
@@ -251,7 +235,9 @@ export function renderDashboard(screen, y, h) {
   cards.forEach((c, i) => {
     const cx = margin + i * (cardW + gap);
     if (cardY + 3 >= y + h) return;
-    drawCard(screen, cx, cardY, cardW, c[0], c[1], c[2]);
+    screen.box(cx, cardY, cardW, 3, '');
+    screen.writeStr(cx + 2, cardY + 1, truncate(c[0], cardW - 4), color('dim'));
+    screen.writeStr(cx + 2, cardY + 2, truncate(c[1], cardW - 4), c[2] || color('title'));
   });
 
   // Body: 2 columns with a vertical divider.
@@ -281,12 +267,6 @@ export function renderDashboard(screen, y, h) {
   }
   ly++;
 
-  // Heatmap.
-  if (ly < y + h - 8) {
-    renderHeatmap(screen, leftX, ly, splitX, y + h);
-    ly += 10; // Reserve space for heatmap (7 rows + header + legend + gap)
-  }
-
   // Sparkline with axis labels.
   if (ly < y + h - 4 && appState.dashboardStarHistory.length > 0) {
     sectionHeader(screen, leftX, ly++, 'STARS (30 DAYS)');
@@ -294,7 +274,6 @@ export function renderDashboard(screen, y, h) {
     const spark = sparkline(appState.dashboardStarHistory, sparkW);
     const totalStarsRecent = appState.dashboardStarHistory.reduce((a, b) => a + b, 0);
     screen.writeStr(leftX, ly, spark, color('star'));
-    // Axis labels.
     screen.writeStr(leftX, ly + 1, '30d ago', color('dim'));
     const todayLabel = 'today';
     screen.writeStr(leftX + sparkW - todayLabel.length, ly + 1, todayLabel, color('dim'));
@@ -317,33 +296,6 @@ export function renderDashboard(screen, y, h) {
         const stars = '★' + shortNum(r.stargazers_count || 0);
         screen.writeStr(leftX, ly, r.name.substring(0, splitX - leftX - 12));
         screen.writeStr(splitX - 8, ly, stars, color('star'));
-        ly++;
-      }
-    }
-    ly++;
-  }
-
-  // Language breakdown.
-  if (ly < y + h - 2 && appState.repos.length > 0) {
-    sectionHeader(screen, leftX, ly++, 'LANGUAGES');
-    const langCount = {};
-    for (const r of appState.repos) {
-      if (r.language) langCount[r.language] = (langCount[r.language] || 0) + 1;
-    }
-    const total = Object.values(langCount).reduce((a, b) => a + b, 0);
-    const sorted = Object.entries(langCount).sort((a, b) => b[1] - a[1]).slice(0, 4);
-    const barW = Math.max(6, splitX - leftX - 22);
-    if (sorted.length === 0) {
-      screen.writeStr(leftX, ly++, '(no language metadata)', color('dim'));
-    } else {
-      for (const [lang, count] of sorted) {
-        if (ly >= y + h - 1) break;
-        const pct = count / total;
-        const filled = Math.max(1, Math.round(pct * barW));
-        const bar = '█'.repeat(filled) + '░'.repeat(Math.max(0, barW - filled));
-        screen.writeStr(leftX, ly, lang.substring(0, 10).padEnd(11));
-        screen.writeStr(leftX + 11, ly, bar, color('languageBar'));
-        screen.writeStr(leftX + 12 + barW, ly, String(count), color('dim'));
         ly++;
       }
     }
@@ -422,16 +374,106 @@ export function renderDashboard(screen, y, h) {
     if (appState.trending.length === 0) {
       screen.writeStr(rightX, ry++, appState.dashboardLoaded ? '(none)' : 'Loading...', color('dim'));
     } else {
-      for (const r of appState.trending.slice(0, 5)) {
+      const maxTrending = Math.min(appState.trending.length, Math.max(3, Math.floor(bodyH * 0.3)));
+      for (let i = 0; i < maxTrending && i < appState.trending.length; i++) {
         if (ry >= y + h - 1) break;
-        const name = (r.full_name || '?').substring(0, Math.max(10, rightW - 12));
+        const r = appState.trending[i];
+        const name = (r.full_name || '?').substring(0, Math.max(10, rightW - 16));
         const stars = '★' + shortNum(r.stargazers_count || 0);
-        screen.writeStr(rightX, ry, name);
-        screen.writeStr(rightX + rightW - stars.length - 1, ry, stars, color('star'));
+        const sel = i === appState.trendingSelected;
+        if (sel) {
+          for (let x = rightX - 1; x < rightX + rightW; x++) screen.styleBuf[ry][x] = color('selection');
+        }
+        screen.writeStr(rightX, ry, sel ? '>' : ' ', sel ? color('selection') : null);
+        screen.writeStr(rightX + 2, ry, name, sel ? color('selection') : null);
+        screen.writeStr(rightX + rightW - stars.length - 1, ry, stars, sel ? color('selection') : color('star'));
         ry++;
+      }
+      if (appState.trending.length > maxTrending) {
+        screen.writeStr(rightX, ry, '[Space] Load more  [Enter] Analyze', color('dim'));
+        ry++;
+      } else {
+        screen.writeStr(rightX, ry, '[Enter] Analyze repo', color('dim'));
+        ry++;
+      }
+    }
+  }
+
+  // Full-width sections below columns.
+  const colEnd = Math.max(ly, ry) + 1;
+
+  // Heatmap — full width.
+  if (colEnd + 10 < y + h) {
+    renderHeatmap(screen, leftX, colEnd, W - 4, y + h);
+  }
+
+  // Language breakdown — full width.
+  if (colEnd + 10 < y + h && appState.repos.length > 0) {
+    const langY = colEnd + 10;
+    if (langY < y + h - 2) {
+      sectionHeader(screen, leftX, langY, 'LANGUAGES');
+      const langCount = {};
+      for (const r of appState.repos) {
+        if (r.language) langCount[r.language] = (langCount[r.language] || 0) + 1;
+      }
+      const total = Object.values(langCount).reduce((a, b) => a + b, 0);
+      const sorted = Object.entries(langCount).sort((a, b) => b[1] - a[1]).slice(0, 8);
+      const barW = Math.max(6, W - leftX - 26);
+      let lly = langY + 1;
+      if (sorted.length === 0) {
+        screen.writeStr(leftX, lly, '(no language metadata)', color('dim'));
+      } else {
+        for (const [lang, count] of sorted) {
+          if (lly >= y + h - 1) break;
+          const pct = count / total;
+          const filled = Math.max(1, Math.round(pct * barW));
+          const bar = '█'.repeat(filled) + '░'.repeat(Math.max(0, barW - filled));
+          screen.writeStr(leftX, lly, lang.substring(0, 10).padEnd(11));
+          screen.writeStr(leftX + 11, lly, bar, color('languageBar'));
+          screen.writeStr(leftX + 12 + barW, lly, String(count), color('dim'));
+          lly++;
+        }
       }
     }
   }
 }
 
+export async function loadMoreTrending() {
+  if (!appState.trendingHasMore || !appState.token) return;
+  const gen = startAsync();
+  try {
+    const page = appState.trendingPage + 1;
+    const more = await getTrendingRepos(appState.token, 7, 10);
+    if (isStale(gen)) return;
+    if (Array.isArray(more) && more.length > 0) {
+      appState.trending = [...appState.trending, ...more];
+      appState.trendingPage = page;
+      appState.trendingHasMore = more.length >= 10;
+    } else {
+      appState.trendingHasMore = false;
+    }
+    render();
+  } catch (e) {
+    if (!isStale(gen)) showMessage('Failed to load more trending', 'error');
+  }
+}
+
+export function openTrendingRepo() {
+  const r = appState.trending[appState.trendingSelected];
+  if (!r) return;
+  const [owner, name] = r.full_name.split('/');
+  setTab(2);
+  loadRepoDetails(owner, name);
+}
+
 export const keys = {};
+
+export function up() {
+  appState.trendingSelected = Math.max(0, appState.trendingSelected - 1);
+  render();
+}
+export function down() {
+  const max = Math.max(0, appState.trending.length - 1);
+  appState.trendingSelected = Math.min(max, appState.trendingSelected + 1);
+  render();
+}

@@ -19,19 +19,10 @@ const ATTR = {
   underline: `${ESC}[4m`, inverse: `${ESC}[7m`, strikethrough: `${ESC}[9m`,
 };
 
-// Legacy string style → escape code (backward compat for old callers).
-const LEGACY = {
-  bright: `${ESC}[1m`, dim: `${ESC}[2m`,
-  red: `${ESC}[31m`, green: `${ESC}[32m`, yellow: `${ESC}[33m`,
-  blue: `${ESC}[34m`, magenta: `${ESC}[35m`, cyan: `${ESC}[36m`,
-  white: `${ESC}[37m`,
-};
-
 // Resolve a style value to a compiled escape sequence.
-// Accepts: null, string (legacy), or { fg?, bg?, bold?, dim?, italic?, underline?, inverse?, strikethrough? }.
+// Accepts: null, or { fg?, bg?, bold?, dim?, italic?, underline?, inverse?, strikethrough? }.
 function compileStyle(s) {
   if (!s) return null;
-  if (typeof s === 'string') return LEGACY[s] || null;
   const parts = [];
   if (s.bold)      parts.push(ATTR.bold);
   if (s.dim)       parts.push(ATTR.dim);
@@ -110,30 +101,11 @@ export class Screen {
     }
   }
 
-  fillRect(x, y, w, h, ch = ' ', style = null) {
-    for (let dy = 0; dy < h; dy++) {
-      const row = y + dy;
-      if (row < 0 || row >= this.height) continue;
-      for (let dx = 0; dx < w; dx++) {
-        const col = x + dx;
-        if (col < 0 || col >= this.width) continue;
-        this.charBuf[row][col] = ch;
-        this.styleBuf[row][col] = style;
-      }
-    }
-  }
-
   hline(y, ch = '─', style = null) {
     this.fillRow(y, ch, style);
   }
 
-  vline(x, y, h, ch = '│', style = null) {
-    for (let dy = 0; dy < h; dy++) {
-      this.setCell(x, y + dy, ch, style);
-    }
-  }
-
-  box(x, y, w, h, title = '', style = 'bright') {
+  box(x, y, w, h, title = '', style = { bold: true }) {
     if (h < 2 || w < 4 || y < 0 || y >= this.height) return;
 
     if (title) {

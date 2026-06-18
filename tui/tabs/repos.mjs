@@ -3,7 +3,7 @@
 // language facet, stale filter, density toggle, pins, badges, honest counts.
 
 import { appState, render, startAsync, isStale, showMessage, setTab } from '../state.mjs';
-import { getAuthenticatedUser, getUserRepositories } from '../github.mjs';
+import { getAuthenticatedUser, getUserRepositories, getStarredRepos } from '../github.mjs';
 import { removeToken } from '../config.mjs';
 import { startInput, registerInputHandler } from '../input.mjs';
 import { shortNum, relTime, truncate } from '../utils.mjs';
@@ -221,7 +221,62 @@ function filterTagsLine() {
 
 // ─── Render ───────────────────────────────────────────────────────
 
+function renderStarredList(screen, y, h) {
+  const W = screen.width;
+  const list = appState.starred;
+
+  screen.writeStr(4, y, 'Starred Repositories', color('title'));
+  const countText = list.length + ' repos';
+  screen.writeStr(Math.max(4, W - countText.length - 2), y, countText, color('dim'));
+  screen.hline(y + 1, '─');
+
+  if (list.length === 0) {
+    emptyState(screen, y, h, {
+      icon: '---',
+      title: appState.loading ? 'Loading...' : 'No starred repos',
+      message: appState.loading ? 'Fetching starred repos...' : 'Star repos on GitHub to see them here',
+      hint: '',
+    });
+    return;
+  }
+
+  const headerY = y + 2;
+  screen.writeStr(4, headerY, 'Repo', color('header'));
+  if (W > 40) screen.writeStr(W - 22, headerY, 'Stars', color('header'));
+
+  const maxRows = Math.max(1, h - 5);
+  const start = appState.starredScroll;
+  const rowsToShow = Math.min(maxRows, Math.max(0, list.length - start));
+
+  for (let i = 0; i < rowsToShow; i++) {
+    const r = list[start + i];
+    if (!r) break;
+    const row = headerY + 1 + i;
+    const sel = start + i === appState.starredSelected;
+
+    if (sel) {
+      for (let x = 0; x < W; x++) screen.styleBuf[row][x] = color('selection');
+    }
+
+    screen.writeStr(4, row, sel ? '>' : ' ', sel ? color('selection') : null);
+    const name = (r.full_name || '?').substring(0, Math.max(15, W - 36));
+    screen.writeStr(6, row, name, sel ? color('selection') : null);
+    const stars = '★' + shortNum(r.stargazers_count || 0);
+    screen.writeStr(W - 22, row, stars, sel ? color('selection') : color('star'));
+  }
+
+  const footerY = headerY + 1 + rowsToShow + 1;
+  if (footerY < y + h) {
+    const range = (start + 1) + '-' + Math.min(start + rowsToShow, list.length) + ' of ' + list.length;
+    screen.writeStr(4, footerY, range + '  [V] Back to own repos  [Enter] Analyze', color('dim'));
+  }
+}
+
 export function renderRepos(screen, y, h) {
+  if (appState.reposView === 'starred') {
+    renderStarredList(screen, y, h);
+    return;
+  }
   const W = screen.width;
   let repos = sortRepos(appState.repos, appState.repoSort);
   repos = applyAllFilters(repos);
@@ -433,38 +488,108 @@ function clearAllFilters() {
   render();
 }
 
+export function toggleReposView() {
+  appState.reposView = appState.reposView === 'own' ? 'starred' : 'own';
+  if (appState.reposView === 'starred' && appState.starred.length === 0) {
+    loadStarredRepos();
+  }
+  appState.repoSelected = 0;
+  appState.repoScroll = 0;
+  appState.starredSelected = 0;
+  appState.starredScroll = 0;
+  render();
+}
+
+async function loadStarredRepos() {
+  if (!appState.token) return;
+  const gen = startAsync();
+  appState.loading = true;
+  render();
+  try {
+    const starred = await getStarredRepos(appState.token, 1, 50);
+    if (isStale(gen)) return;
+    appState.starred = Array.isArray(starred) ? starred : [];
+    showMessage('Loaded ' + appState.starred.length + ' starred repos', 'success');
+  } catch (e) {
+    if (!isStale(gen)) showMessage('Failed to load starred repos: ' + e.message, 'error');
+  }
+  appState.loading = false;
+  if (!isStale(gen)) render();
+}
+
 export const keys = {
-  '/': () => startInput('Filter: ', 'filter'),
+  '/': () => { if (appState.reposView === 'own') startInput('Filter: ', 'filter'); },
   'c': clearAllFilters,
-  'n': () => toggleRepoSort('name'),
-  'S': () => toggleRepoSort('stars'),
-  'f': () => toggleRepoSort('forks'),
-  'i': () => toggleRepoSort('issues'),
-  'u': () => toggleRepoSort('updated'),
-  't': cycleTypeFilter,
-  'L': () => startInput('Language: ', 'lang-filter'),
-  'x': toggleStale,
-  'D': toggleDensity,
-  'P': togglePinCurrent,
-  'g': () => { appState.repoSelected = 0; appState.repoScroll = 0; render(); },
+  'n': () => { if (appState.reposView === 'own') toggleRepoSort('name'); },
+  'S': () => { if (appState.reposView === 'own') toggleRepoSort('stars'); },
+  'f': () => { if (appState.reposView === 'own') toggleRepoSort('forks'); },
+  'i': () => { if (appState.reposView === 'own') toggleRepoSort('issues'); },
+  'u': () => { if (appState.reposView === 'own') toggleRepoSort('updated'); },
+  't': () => { if (appState.reposView === 'own') cycleTypeFilter(); },
+  'L': () => { if (appState.reposView === 'own') startInput('Language: ', 'lang-filter'); },
+  'x': () => { if (appState.reposView === 'own') toggleStale(); },
+  'D': () => { if (appState.reposView === 'own') toggleDensity(); },
+  'P': () => { if (appState.reposView === 'own') togglePinCurrent(); },
+  'V': toggleReposView,
+  'g': () => {
+    if (appState.reposView === 'own') { appState.repoSelected = 0; appState.repoScroll = 0; }
+    else { appState.starredSelected = 0; appState.starredScroll = 0; }
+    render();
+  },
 };
 
 export function up(screen) {
+  if (appState.reposView === 'starred') {
+    if (appState.starredSelected > 0) appState.starredSelected--;
+    if (appState.starredSelected < appState.starredScroll) appState.starredScroll = appState.starredSelected;
+    render();
+    return;
+  }
   if (appState.repoSelected > 0) appState.repoSelected--;
   if (appState.repoSelected < appState.repoScroll) appState.repoScroll = appState.repoSelected;
   render();
 }
 export function down(screen) {
+  if (appState.reposView === 'starred') {
+    const total = appState.starred.length;
+    appState.starredSelected = Math.min(total - 1, appState.starredSelected + 1);
+    const v = visibleRows(screen);
+    if (appState.starredSelected >= appState.starredScroll + v) appState.starredScroll = appState.starredSelected - v + 1;
+    render();
+    return;
+  }
   const total = applyAllFilters(sortRepos(appState.repos, appState.repoSort)).length;
   appState.repoSelected = Math.min(total - 1, appState.repoSelected + 1);
   const v = visibleRows(screen);
   if (appState.repoSelected >= appState.repoScroll + v) appState.repoScroll = appState.repoSelected - v + 1;
   render();
 }
-export const space = loadMoreRepos;
-export const enter = openCurrentInAnalyze;
+export function space() {
+  if (appState.reposView === 'starred') return;
+  loadMoreRepos();
+}
+export function enter() {
+  if (appState.reposView === 'starred') {
+    const r = appState.starred[appState.starredSelected];
+    if (r) {
+      const [owner, name] = r.full_name.split('/');
+      setTab(2);
+      loadRepoDetails(owner, name);
+    }
+    return;
+  }
+  openCurrentInAnalyze();
+}
 
 export function bottom(screen) {
+  if (appState.reposView === 'starred') {
+    const total = appState.starred.length;
+    appState.starredSelected = Math.max(0, total - 1);
+    const v = visibleRows(screen);
+    appState.starredScroll = Math.max(0, total - v);
+    render();
+    return;
+  }
   const total = applyAllFilters(sortRepos(appState.repos, appState.repoSort)).length;
   appState.repoSelected = Math.max(0, total - 1);
   const v = visibleRows(screen);

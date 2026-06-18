@@ -13,8 +13,6 @@ export function register(action) {
   actions.push(action);
 }
 
-export function listActions() { return actions.slice(); }
-
 function score(query, label) {
   if (!query) return 0;
   const q = query.toLowerCase();

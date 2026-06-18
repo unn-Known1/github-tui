@@ -422,8 +422,8 @@ function renderFileViewer(screen, y, maxH) {
   for (let i = 0; i < rows && start + i < lines.length; i++) {
     const row = y + 2 + i;
     const lnNum = String(start + i + 1).padStart(lineNumW, ' ');
-    screen.writeStr(4, row, lnNum, 'dim');
-    screen.writeStr(4 + lineNumW + 1, row, '│', 'dim');
+    screen.writeStr(4, row, lnNum, color('dim'));
+    screen.writeStr(4 + lineNumW + 1, row, '│', color('dim'));
     let ln = lines[start + i] || '';
     const lineStyle = decorateLine(ln, appState.fileViewing);
     screen.writeStr(4 + lineNumW + 3, row,
@@ -441,10 +441,10 @@ function renderFileViewer(screen, y, maxH) {
 function decorateLine(ln, path) {
   if (!path) return null;
   const ext = (path.split('.').pop() || '').toLowerCase();
-  if (/^\s*(#|\/\/)/.test(ln)) return 'dim';
-  if (/^\s*```/.test(ln)) return 'dim';
+  if (/^\s*(#|\/\/)/.test(ln)) return color('dim');
+  if (/^\s*```/.test(ln)) return color('dim');
   if (ext === 'md') {
-    if (/^#{1,6}\s/.test(ln)) return 'bright';
+    if (/^#{1,6}\s/.test(ln)) return { bold: true };
     if (/^\s*[-*+]\s/.test(ln)) return color('accent');
   }
   if (['js','mjs','ts','tsx','jsx','py','go','rs','java','c','cpp','h'].includes(ext)) {

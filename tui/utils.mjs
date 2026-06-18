@@ -130,12 +130,6 @@ export function notificationToHtmlUrl(apiUrl) {
   return url;
 }
 
-// Generic in-memory + on-disk cache for ETag-aware fetches.
-// Returns { data, etag, fetchedAt }.
-export function makeCacheKey(...parts) {
-  return parts.filter(Boolean).join(':').replace(/[^\w:.-]+/g, '_');
-}
-
 // ─── CWD safety + git shell-outs (added in W1 — file explorer) ─────
 
 import { resolve, normalize, join, dirname } from 'path';

@@ -15,7 +15,6 @@ export const TOKEN_FILE = join(CONFIG_DIR, 'token');
 // New in v0.3 — on-disk stores for the feature roadmap.
 export const BOOKMARKS_FILE = join(CONFIG_DIR, 'bookmarks.json');
 export const SAVED_SEARCHES_FILE = join(CONFIG_DIR, 'saved-searches.json');
-export const KEYS_FILE = join(CONFIG_DIR, 'keys.json');
 export const THEME_FILE = join(CONFIG_DIR, 'theme');
 export const CACHE_DIR = join(CONFIG_DIR, 'cache');
 
