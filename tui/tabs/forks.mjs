@@ -20,7 +20,7 @@ export function sortForks(forks, sort) {
   sorted.sort((a, b) => {
     let va, vb;
     switch (sort.field) {
-      case 'pushed': va = new Date(a.pushed_at).getTime(); vb = new Date(b.pushed_at).getTime(); break;
+      case 'pushed': va = a.pushed_at ? new Date(a.pushed_at).getTime() : 0; vb = b.pushed_at ? new Date(b.pushed_at).getTime() : 0; break;
       case 'stars':  va = a.stargazers_count || 0; vb = b.stargazers_count || 0; break;
       case 'name':   va = (a.full_name||'').toLowerCase(); vb = (b.full_name||'').toLowerCase(); break;
       default: va = 0; vb = 0;

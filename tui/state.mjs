@@ -206,9 +206,12 @@ export const appState = {
   // ── Collapsible sections (persisted to disk) ──
   collapsed: {},  // { 'dashboard:profile': true, 'repos:pinned': false, ... }
 
-  // ── Mouse hover state ──
-  hoverRow: -1,
-  hoverCol: -1,
+  // Section header positions (populated by collapsibleHeader during render, consumed by mouse).
+  _sectionHeaders: {},  // { 'dashboard:profile': { x: 2, y: 7 }, ... }
+
+  // ── Mouse cursor position (0-based screen coords) ──
+  _mouseSx: -1,
+  _mouseSy: -1,
 };
 
 // ────────────────────────────────────────────────────────────────────────────

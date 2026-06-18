@@ -61,6 +61,9 @@ export function handleInputKey(key) {
     return true;
   }
 
+  // Allow Ctrl-C to quit even in input mode.
+  if (key === '\x03') { appState.inputMode = null; appState.inputBuffer = ''; appState.inputPrompt = ''; appState.inputContext = null; appState.inputMask = false; return false; }
+
   // Printable ASCII + above. We accept multi-byte UTF-8 too.
   if (key.length >= 1 && (key.charCodeAt(0) >= 32 || key.charCodeAt(0) > 127)) {
     appState.inputBuffer += key;

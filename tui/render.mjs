@@ -116,6 +116,8 @@ export function collapsibleHeader(screen, x, y, section, label, hint) {
     const hx = W - hint.length - 2;
     if (hx > x + label.length + 6) screen.writeStr(hx, y, hint, { dim: true });
   }
+  // Record position for mouse click detection.
+  appState._sectionHeaders[section] = { x, y };
   return !collapsed;
 }
 
@@ -358,17 +360,6 @@ function doRender() {
   // ── Footer ──
   renderFooter(W, H);
 
-  // ── Hover effect ──
-  if (appState.hoverRow > 0 && appState.hoverRow < H - 1) {
-    // Add subtle highlight to the hovered row
-    for (let x = 0; x < W; x++) {
-      if (screen.styleBuf[appState.hoverRow] && screen.styleBuf[appState.hoverRow][x]) {
-        const existing = screen.styleBuf[appState.hoverRow][x];
-        screen.styleBuf[appState.hoverRow][x] = { ...existing, bg: 'darkGray' };
-      }
-    }
-  }
-
   // ── Overlays (rendered last, on top) ──
   if (appState.confirmAction) renderConfirmDialog(screen);
   if (appState.showOnboarding) renderOnboarding(screen);
@@ -387,8 +378,10 @@ function renderConfirmDialog(screen) {
 
   // Dim backdrop.
   const backdropStyle = color('modalBackdrop');
-  for (let yy = 0; yy < H; yy++) {
-    for (let xx = 0; xx < W; xx++) screen.styleBuf[yy][xx] = backdropStyle;
+  if (backdropStyle) {
+    for (let yy = 0; yy < H; yy++) {
+      for (let xx = 0; xx < W; xx++) screen.styleBuf[yy][xx] = backdropStyle;
+    }
   }
 
   const boxW = Math.min(60, W - 4);

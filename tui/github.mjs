@@ -242,7 +242,7 @@ export const getFileCommits = (token, owner, repo, path, perPage) =>
 // straight to disk (so we don't buffer a 200 MB zip in memory).
 export function getZipballUrl(owner, repo, ref) {
   const r = ref || 'main';
-  const prefix = r.startsWith('v') || r.match(/^\d+\./) ? 'refs/tags' : 'refs/heads';
+  const prefix = r.match(/^v?\d+\.\d+/) ? 'refs/tags' : 'refs/heads';
   return 'https://codeload.github.com/' + owner + '/' + repo +
     '/zip/' + prefix + '/' + r;
 }

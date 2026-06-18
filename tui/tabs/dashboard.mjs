@@ -146,54 +146,6 @@ function sectionHeader(screen, x, y, text, hint, section) {
   return true;
 }
 
-function renderHeatmap(screen, leftX, y, rightX) {
-  const hm = appState.dashboardContributions;
-  if (!hm) return y;
-
-  const dayLabels = ['S', 'M', 'T', 'W', 'T', 'F', 'S'];
-  const heatW = rightX - leftX - 4;
-  const cellW = Math.max(1, Math.min(2, Math.floor(heatW / hm.weeks)));
-
-  const totalEvents = hm.grid.flat().reduce((a, b) => a + b, 0);
-  if (totalEvents === 0) {
-    screen.writeStr(leftX, y, '(no public activity in last 15 weeks)', { dim: true });
-    return y + 1;
-  }
-
-  sectionHeader(screen, leftX, y, '◧ ACTIVITY · ' + totalEvents + ' EVENTS');
-  y++;
-
-  const heatStyle = (level) => {
-    if (level === 0) return { dim: true };
-    if (hm.max <= 3) return { fg: 'green' };
-    const ratio = level / hm.max;
-    if (ratio < 0.25) return { fg: 'green', dim: true };
-    if (ratio < 0.5)  return { fg: 'green' };
-    if (ratio < 0.75) return { fg: 'green', bold: true };
-    return { fg: 'green', bold: true };
-  };
-
-  const heatChars = [' ', '░', '▒', '▓', '█'];
-  for (let row = 0; row < 7; row++) {
-    screen.writeStr(leftX, y, dayLabels[row], { dim: true });
-    for (let col = 0; col < hm.weeks; col++) {
-      const cx = leftX + 2 + col * cellW;
-      if (cx >= rightX - 1) break;
-      const val = hm.grid[row][col];
-      const level = val === 0 ? 0
-        : hm.max <= 4 ? Math.min(4, val)
-        : Math.min(4, Math.ceil((val / hm.max) * 4));
-      const ch = heatChars[level].repeat(cellW);
-      screen.writeStr(cx, y, ch, heatStyle(level));
-    }
-    y++;
-  }
-
-  const legend = 'Less  ░ ▒ ▓ █  More';
-  screen.writeStr(leftX, y, legend, { dim: true });
-  return y + 1;
-}
-
 export function renderDashboard(screen, y, h) {
   const W = screen.width;
   const user = appState.user;
@@ -685,7 +637,7 @@ export function rightCard() {
 }
 
 // ── Collapsible sections ──
-const DASHBOARD_SECTIONS = ['profile', 'stars', 'topRepos', 'activity', 'languages'];
+const DASHBOARD_SECTIONS = ['profile', 'stars', 'topRepos', 'activity', 'languages', 'issues', 'prs', 'stale', 'trending'];
 
 export function getSections() {
   return DASHBOARD_SECTIONS.map(s => 'dashboard:' + s);

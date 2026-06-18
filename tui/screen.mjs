@@ -43,7 +43,11 @@ function strWidth(s) {
   for (let i = 0; i < s.length; i++) {
     const c = s.charCodeAt(i);
     // Skip ANSI escapes that leaked in (defensive — shouldn't happen).
-    if (c === 0x1b) { while (i < s.length && s.charCodeAt(i) !== 0x6d) i++; continue; }
+    if (c === 0x1b) {
+      i++;
+      while (i < s.length && !(s.charCodeAt(i) >= 0x40 && s.charCodeAt(i) <= 0x7e)) i++;
+      continue;
+    }
     w++;
   }
   return w;

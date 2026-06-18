@@ -3,7 +3,7 @@
 // All real logic lives in tui/*.mjs. This file just wires lifecycle events.
 
 import { appState, tabState, showMessage, loadCollapsed } from './tui/state.mjs';
-import { enableMouse, disableMouse, parseMouseEvent, handleMouseEvent } from './tui/mouse.mjs';
+import { enableMouse, disableMouse } from './tui/mouse.mjs';
 import { loadToken } from './tui/config.mjs';
 import { loadTheme } from './tui/theme.mjs';
 import { initScreen, getScreen, render } from './tui/render.mjs';

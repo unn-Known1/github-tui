@@ -1010,7 +1010,20 @@ export const keys = {
     if (appState.analyzeView === 'forks') toggleForkSort('stars');
     else if (isFilesPane()) files.keys.s();
   },
-  'S': () => { if (isFilesPane()) files.keys.S(); },
+  'S': () => {
+    if (appState.analyzeView === 'details') {
+      if (appState.detailsPane === 'security') {
+        appState.detailsPane = 'overview';
+      } else if (isFilesPane()) {
+        files.keys.S();
+      } else {
+        appState.detailsPane = 'security';
+        appState.detailsScroll = 0;
+        loadSecurity();
+      }
+      render();
+    }
+  },
   'Z': () => { if (isFilesPane()) files.keys.Z(); },
   'C': () => { if (isFilesPane()) files.keys.C(); },
   'G': () => { if (isFilesPane()) files.keys.G(); },
@@ -1080,18 +1093,7 @@ export const keys = {
       render();
     }
   },
-  'S': () => {
-    if (appState.analyzeView === 'details') {
-      if (appState.detailsPane === 'security') {
-        appState.detailsPane = 'overview';
-      } else {
-        appState.detailsPane = 'security';
-        appState.detailsScroll = 0;
-        loadSecurity();
-      }
-      render();
-    }
-  },
+
 };
 
 function isFilesPane() {
@@ -1101,7 +1103,9 @@ function isFilesPane() {
 export function up(screen) {
   if (isFilesPane()) { files.up(); return; }
   if (appState.analyzeView === 'details' && appState.detailsPane !== 'overview') {
-    appState.detailsScroll = Math.max(0, appState.detailsScroll - 1); render(); return;
+    appState.detailsScroll = Math.max(0, appState.detailsScroll - 1);
+    if (appState.detailsPane === 'packages') appState.selectedAsset = appState.detailsScroll;
+    render(); return;
   }
   if (appState.analyzeView === 'results' && appState.searchResults.length > 0) {
     if (appState.selectedRepo > appState.searchScroll) appState.selectedRepo--;
@@ -1125,6 +1129,7 @@ export function down(screen) {
       listLen = (appState._readmeText || '').split(/\r?\n/).length;
     else listLen = 0;
     appState.detailsScroll = Math.min(Math.max(0, listLen - 1), appState.detailsScroll + 1);
+    if (appState.detailsPane === 'packages') appState.selectedAsset = appState.detailsScroll;
     render(); return;
   }
   if (appState.analyzeView === 'results') {
@@ -1174,7 +1179,7 @@ export function enter() {
         openDetail('pull_request', owner, name, pr.number);
       }
     } else if (appState.detailsPane === 'packages') {
-      const asset = appState.repoReleaseAssets[appState.detailsScroll];
+      const asset = appState.repoReleaseAssets[appState.selectedAsset];
       if (asset) downloadAsset(asset);
     } else {
       loadForks();
@@ -1189,7 +1194,7 @@ export function space() {
 }
 
 // ── Collapsible sections ──
-const ANALYZE_SECTIONS = ['overview', 'issues', 'prs', 'readme', 'files', 'packages', 'traffic', 'milestones', 'labels'];
+const ANALYZE_SECTIONS = ['overview', 'issues', 'prs', 'readme', 'files', 'packages', 'traffic', 'milestones', 'labels', 'checks', 'security'];
 
 export function getSections() {
   return ANALYZE_SECTIONS.map(s => 'analyze:' + s);

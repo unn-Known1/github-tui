@@ -4,6 +4,7 @@
 
 import { existsSync, readFileSync, writeFileSync } from 'fs';
 import { THEME_FILE } from './config.mjs';
+import { appState } from './state.mjs';
 
 const B = {
   title: { fg: 'white', bold: true },
@@ -326,6 +327,7 @@ export function getThemeName() { return active; }
 export function setTheme(name) {
   if (!THEMES[name]) return false;
   active = name;
+  appState.themeName = name;
   try { writeFileSync(THEME_FILE, name); } catch {}
   return true;
 }

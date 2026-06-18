@@ -224,7 +224,7 @@ function buildSystemLines(screenW) {
     ['Token file',  TOKEN_FILE.replace(process.env.HOME || '', '~'), null],
     ['Node',        process.version,                   null],
     ['Platform',    process.platform + ' ' + process.arch, null],
-    ['Terminal',    (screenW || 80) + '×24', null],
+    ['Terminal',    (screenW || 80) + '×' + (process.stdout.rows || 24), null],
   ];
   if (lastRateLimit.remaining !== null) {
     const resetIn = lastRateLimit.reset
@@ -244,7 +244,7 @@ function buildSystemLines(screenW) {
 export const keys = {
   'r': () => {
     showMessage('Refreshing...', 'info');
-    import('../repos.mjs').then(m => m.loadUserData());
+    import('./repos.mjs').then(m => m.loadUserData());
   },
   'g': () => { appState.settingsCursor = 0; render(); },
 };

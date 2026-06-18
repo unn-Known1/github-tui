@@ -6,7 +6,7 @@ import { color } from '../theme.mjs';
 import { APP_VERSION, CONFIG_DIR, TOKEN_FILE } from '../config.mjs';
 import { listThemes } from '../theme.mjs';
 import { startInput } from '../input.mjs';
-import { writeFileSync, existsSync } from 'fs';
+import { writeFileSync, existsSync, mkdirSync } from 'fs';
 import { join } from 'path';
 import { submitLogin } from './settings.mjs';
 
@@ -93,7 +93,6 @@ export function isFirstRun() {
 
 export function markWelcomeSeen() {
   try {
-    const { mkdirSync } = require('fs'); // not strictly needed but safe
     writeFileSync(WELCOME_SEEN_FILE, '1');
   } catch {}
 }

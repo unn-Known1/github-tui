@@ -128,13 +128,11 @@ function quit() {
 // Main entry — process.stdin pipes every keystroke through here.
 // ──────────────────────────────────────────────────────────────────
 export function handleKey(key) {
-  // 0. Mouse events.
-  if (key.startsWith('\x1b[<')) {
-    const mouseEvent = parseMouseEvent(key);
-    if (mouseEvent) {
-      handleMouseEvent(mouseEvent);
-      return;
-    }
+  // 0. Mouse events (SGR or legacy X10 format).
+  const mouseEvent = parseMouseEvent(key);
+  if (mouseEvent) {
+    handleMouseEvent(mouseEvent);
+    return;
   }
 
   // 1. Palette captures all keys first.
@@ -215,8 +213,24 @@ export function handleKey(key) {
       return;
     }
     case 'q': case '\x03': quit(); return;
-    case '\t': setTab((tabState.current + 1) % TABS.length); return;
-    case '\x1b[Z': setTab((tabState.current - 1 + TABS.length) % TABS.length); return;
+    case '\t':
+      if (tabState.current === 0) {
+        if (appState.dashboardCardsFocus) {
+          dashboard.unfocusCards();
+        } else {
+          dashboard.focusCards();
+        }
+      } else {
+        setTab((tabState.current + 1) % TABS.length);
+      }
+      return;
+    case '\x1b[Z':
+      if (tabState.current === 0 && appState.dashboardCardsFocus) {
+        dashboard.unfocusCards();
+      } else {
+        setTab((tabState.current - 1 + TABS.length) % TABS.length);
+      }
+      return;
     case '?': appState.showHelp = true; render(); return;
     case '\x10':
     case ':': palette.open(); return;
