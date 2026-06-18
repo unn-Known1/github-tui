@@ -14,6 +14,8 @@ import { color } from '../theme.mjs';
 import { emptyState } from '../render.mjs';
 import { loadForks, loadMoreForks, renderForks, toggleForkSort } from './forks.mjs';
 import * as files from './files.mjs';
+import { openDetail } from './detail.mjs';
+import { addSavedSearch } from '../store.mjs';
 
 const SEARCH_PER_PAGE = 15;
 
@@ -43,6 +45,15 @@ export async function submitSearch(value) {
   if (!isStale(gen)) render();
 }
 registerInputHandler('search', submitSearch);
+
+registerInputHandler('save-search', (label) => {
+  const v = (label || '').trim();
+  if (!v) return;
+  const query = appState.searchQuery;
+  if (!query) { showMessage('No search query to save', 'warning'); return; }
+  addSavedSearch(v, query);
+  showMessage('Saved search: ' + v, 'success');
+});
 
 export async function loadMoreSearchResults() {
   if (!appState.searchHasMore) return;
@@ -193,68 +204,68 @@ function renderResultsList(screen, y, h) {
 }
 
 function renderIssuesPane(screen, y, maxH) {
-  const W = screen.width;
-  const items = appState.repoIssues;
-  screen.writeStr(4, y, 'Open Issues (' + items.length + ')', color('header'));
-  if (items.length === 0) { screen.writeStr(4, y + 2, '(no open issues)', color('dim')); return; }
-  const start = appState.detailsScroll;
-  const rows = Math.max(1, maxH - 3);
-
-  // Responsive column positions.
-  const numW = 7;
-  const titleCol = 12;
-  const authorCol = Math.max(titleCol + 20, W - 24);
-  const labelCol = Math.max(authorCol + 14, W - 10);
-
-  for (let i = 0; i < rows && start + i < items.length; i++) {
-    const it = items[start + i];
-    const row = y + 2 + i;
-    const num = '#' + it.number;
-    const labels = (it.labels || []).map(l => l.name).slice(0, 2).join(', ');
-    screen.writeStr(4, row, num.padEnd(numW), color('issue'));
-    screen.writeStr(titleCol, row, truncate(it.title, authorCol - titleCol - 2));
-    if (authorCol + 12 < W) {
-      screen.writeStr(authorCol, row, truncate((it.user && it.user.login) || '', 12), color('dim'));
-    }
-    if (labelCol + 8 < W && labels) {
-      screen.writeStr(labelCol, row, truncate(labels, 8), color('trending'));
-    }
-  }
-  if (items.length > rows) {
-    screen.writeStr(4, y + 2 + rows,
-      (start + 1) + '-' + Math.min(start + rows, items.length) + ' of ' + items.length +
-      '  [↑↓] scroll', color('dim'));
-  }
+  renderIssuePRList(screen, y, maxH, {
+    title: 'Open Issues',
+    items: appState.repoIssues,
+    emptyMsg: '(no open issues)',
+    numColor: color('issue'),
+    getCols: (W) => ({
+      numW: 7, titleCol: 12,
+      authorCol: Math.max(32, W - 24),
+      extraCol: Math.max(46, W - 10),
+    }),
+    renderExtra: (screen, item, col, W, row) => {
+      const labels = (item.labels || []).map(l => l.name).slice(0, 2).join(', ');
+      if (col + 8 < W && labels) {
+        screen.writeStr(col, row, truncate(labels, 8), color('trending'));
+      }
+    },
+  });
 }
 
 function renderPRsPane(screen, y, maxH) {
+  renderIssuePRList(screen, y, maxH, {
+    title: 'Open Pull Requests',
+    items: appState.repoPullRequests,
+    emptyMsg: '(no open PRs)',
+    numColor: color('pr'),
+    getCols: (W) => ({
+      numW: 7, titleCol: 12,
+      authorCol: Math.max(32, W - 24),
+      extraCol: Math.max(46, W - 10),
+    }),
+    renderExtra: (screen, item, col, W, row) => {
+      if (col + 8 < W) {
+        const branch = ((item.head && item.head.ref) || '').substring(0, 8);
+        screen.writeStr(col, row, branch, color('trending'));
+      }
+    },
+  });
+}
+
+function renderIssuePRList(screen, y, maxH, opts) {
   const W = screen.width;
-  const items = appState.repoPullRequests;
-  screen.writeStr(4, y, 'Open Pull Requests (' + items.length + ')', color('header'));
-  if (items.length === 0) { screen.writeStr(4, y + 2, '(no open PRs)', color('dim')); return; }
+  const items = opts.items;
+  screen.writeStr(4, y, opts.title + ' (' + items.length + ')', color('header'));
+  if (items.length === 0) { screen.writeStr(4, y + 2, opts.emptyMsg, color('dim')); return; }
   const start = appState.detailsScroll;
   const rows = Math.max(1, maxH - 3);
-
-  const numW = 7;
-  const titleCol = 12;
-  const authorCol = Math.max(titleCol + 20, W - 24);
-  const branchCol = Math.max(authorCol + 14, W - 10);
+  const cols = opts.getCols(W);
 
   for (let i = 0; i < rows && start + i < items.length; i++) {
-    const pr = items[start + i];
+    const item = items[start + i];
     const row = y + 2 + i;
-    const num = '#' + pr.number;
-    const draft = pr.draft ? '[draft] ' : '';
-    screen.writeStr(4, row, num.padEnd(numW), color('pr'));
-    screen.writeStr(titleCol, row, truncate(draft + (pr.title || '?'), authorCol - titleCol - 2),
-      pr.draft ? color('dim') : null);
-    if (authorCol + 12 < W) {
-      screen.writeStr(authorCol, row, truncate((pr.user && pr.user.login) || '', 12), color('dim'));
+    const num = '#' + item.number;
+    screen.writeStr(4, row, num.padEnd(cols.numW), opts.numColor);
+    const draft = item.draft ? '[draft] ' : '';
+    screen.writeStr(cols.titleCol, row,
+      truncate(draft + (item.title || '?'), cols.authorCol - cols.titleCol - 2),
+      item.draft ? color('dim') : null);
+    if (cols.authorCol + 12 < W) {
+      screen.writeStr(cols.authorCol, row,
+        truncate((item.user && item.user.login) || '', 12), color('dim'));
     }
-    if (branchCol + 8 < W) {
-      const branch = ((pr.head && pr.head.ref) || '').substring(0, 8);
-      screen.writeStr(branchCol, row, branch, color('trending'));
-    }
+    opts.renderExtra(screen, item, cols.extraCol, W, row);
   }
   if (items.length > rows) {
     screen.writeStr(4, y + 2 + rows,
@@ -412,6 +423,10 @@ export function renderAnalyze(screen, y, h) {
 }
 
 export function handleBack() {
+  if (appState.showDetail) {
+    import('./detail.mjs').then(m => m.closeDetail());
+    return;
+  }
   if (isFilesPane()) {
     files.backOrLeave().then((handled) => {
       if (!handled) {
@@ -553,7 +568,21 @@ export function enter() {
       loadRepoDetails(owner, name);
     }
   } else if (v === 'details' && appState.repoDetails) {
-    loadForks();
+    if (appState.detailsPane === 'issues') {
+      const issue = appState.repoIssues[appState.detailsScroll];
+      if (issue) {
+        const [owner, name] = appState.repoDetails.full_name.split('/');
+        openDetail('issue', owner, name, issue.number);
+      }
+    } else if (appState.detailsPane === 'prs') {
+      const pr = appState.repoPullRequests[appState.detailsScroll];
+      if (pr) {
+        const [owner, name] = appState.repoDetails.full_name.split('/');
+        openDetail('pull_request', owner, name, pr.number);
+      }
+    } else {
+      loadForks();
+    }
   } else if (v === 'search') {
     startInput('Search repos: ', 'search');
   }

@@ -13,6 +13,7 @@ import { renderSettings } from './tabs/settings.mjs';
 import { renderInbox } from './tabs/inbox.mjs';
 import * as help from './tabs/help.mjs';
 import { renderPalette } from './palette.mjs';
+import { renderDetail } from './tabs/detail.mjs';
 
 let screen;
 
@@ -107,6 +108,7 @@ function doRender() {
   screen.hline(3, '─');
 
   // ── Tab strip ──
+  const tabY = HEADER_HEIGHT - 2;  // Row 5 when HEADER_HEIGHT = 7
   const tabWidth = Math.floor((W - 2) / TABS.length);
   TABS.forEach((tab, i) => {
     const isActive = i === tabState.current;
@@ -119,14 +121,14 @@ function doRender() {
       // Active tab: background fill + bright text.
       const selStyle = color('chipActive');
       for (let xx = bx; xx < bx + tabWidth && xx < W; xx++) {
-        screen.styleBuf[5][xx] = selStyle;
+        screen.styleBuf[tabY][xx] = selStyle;
       }
-      screen.writeStr(tx, 5, label, selStyle);
+      screen.writeStr(tx, tabY, label, selStyle);
     } else {
-      screen.writeStr(tx, 5, label, color('tabBar'));
+      screen.writeStr(tx, tabY, label, color('tabBar'));
     }
   });
-  screen.hline(6, '─');
+  screen.hline(tabY + 1, '─');
 
   const contentY = HEADER_HEIGHT;
   const contentH = H - HEADER_HEIGHT - FOOTER_HEIGHT;
@@ -180,6 +182,7 @@ function doRender() {
 
   // ── Overlays (rendered last, on top) ──
   if (appState.showHelp) help.render(screen);
+  if (appState.showDetail) renderDetail(screen);
   if (appState.showPalette) renderPalette(screen);
 
   screen.render();
@@ -215,6 +218,7 @@ function renderConfirmDialog(screen) {
 function statusLine() {
   if (appState.inputMode) return '[ESC] Cancel  [Enter] Confirm';
   if (appState.confirmAction) return '[y] Confirm  [n] Cancel';
+  if (appState.showDetail) return '[↑↓] scroll  [Esc] close  [c] comment  [r] react  [x] close/reopen  [M] merge';
   const sep = ' | ';
   switch (tabState.current) {
     case 0: return 'Tabs: [1-5]' + sep + '[r] Refresh' + sep + '[Ctrl-P] Palette' + sep + '[?] Help';

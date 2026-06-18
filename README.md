@@ -4,6 +4,11 @@ A fast, zero-dependency terminal user interface for GitHub — five tabs, a comm
 
 ![status](https://img.shields.io/badge/status-active-success) ![node](https://img.shields.io/badge/node-%E2%89%A518-blue) ![deps](https://img.shields.io/badge/deps-0-green) ![license](https://img.shields.io/badge/license-MIT-blue)
 
+## GitHub / User
+- Remote: `https://github.com/unn-Known1/Multi-Agent-Book-Architect`
+- Author: unn-Known1
+- Email: ptelgm.yt@gmail.com
+
 ## ✨ Highlights
 
 - 🏠 **Real Dashboard** — greeting + 5 stat cards (★ stars, ⑂ forks, ◆ languages, ⏱ account age, ⚠ stale repos), profile mini, **contribution heatmap**, **star history sparkline**, top repos, language bar chart, live activity feed, **recent issues/PRs**, stale repos alert, trending-this-week, unread-notifications badge, **quick actions bar**.
@@ -11,7 +16,7 @@ A fast, zero-dependency terminal user interface for GitHub — five tabs, a comm
 - 🗂️ **File explorer** *(new)* — `F` on Analyze details opens a real in-terminal repo browser. Walk the tree, view files with line numbers + naive syntax coloring, switch branches, **save individual files** (`s`), **save whole folders** recursively (`S`), **download zipballs** (`Z`) streamed straight to disk, **`git clone`** into your CWD (`C`), **`gh repo clone`** for private repos (`G`), copy raw URLs (`y`) or file contents (`Y`) to clipboard.
 - 🔍 **Analyze any public repo** — search, 2-column detail view (metadata + languages bar + top contributors + latest releases), pane tabs `[O] Overview / [i] Issues / [P] PRs / [R] README / [F] Files`, parallel ahead/behind compares on forks.
 - 📥 **Inbox triage** — color-coded notification types, mark-as-read (`m`) / mark-all (`M`) / unsubscribe (`u`) / filter cycle (`f`: all/unread/mentions/review), repo-grouped summary.
-- 🎨 **Themes** — `default`, `highContrast`, `dracula`, `solarized` — persisted across sessions.
+- 🎨 **Themes** — `default`, `highContrast`, `dracula`, `solarized`, `nord`, `monokai`, `gruvbox` — persisted across sessions.
 - ⚡ **Command Palette** — `Ctrl-P` or `:` opens a fuzzy-search modal listing every action.
 - 📖 **README viewer** — `R` on the details pane renders the repo's README in-terminal with naive Markdown styling.
 - ★ **Star anywhere** — `s` toggles a GitHub star on the highlighted repo (search results / details / forks / your repos).
@@ -20,6 +25,8 @@ A fast, zero-dependency terminal user interface for GitHub — five tabs, a comm
 - 💾 **ETag caching** — repeated GETs return 304 and don't cost any rate-limit budget.
 - 🔐 **Secure local auth** — PAT stored at `~/.github-tui/token` with `chmod 600`; masked while typing; auto-cleared on first 401.
 - 🖥️ **Diff-based renderer** — only changed cells are redrawn; resizes adaptively.
+- 📝 **Issue/PR detail popup** *(new)* — `Enter` on an issue or PR opens a full detail view with rendered body, labels, comments tab, and PR files tab. Comment (`c`), react (`r`), close/reopen (`x`), merge PR (`M`) — all from the TUI.
+- 🔀 **PR diff viewer** *(new)* — Files tab in the detail popup shows changed files with `+/-` stats. Select a file to view its unified diff with syntax-colored additions/deletions.
 
 ## 🚀 Run
 
@@ -81,12 +88,27 @@ Your current token scopes are shown in the Settings → System panel so you can 
 | Key | Action |
 |---|---|
 | `i` | Open the search prompt (from details: toggle Issues pane) |
-| `Enter` | View details → from details: view Forks |
+| `Enter` | View details → from details: view Forks / **open Issue/PR detail popup** |
 | `P` | Toggle PRs pane (on details view) |
 | `O` | Reset to Overview pane (on details view) |
 | `R` | Open the README pane (renders Markdown in-terminal) |
 | `F` | Open the **File explorer** pane *(new)* |
 | `Space` | Load more search results or more forks |
+
+### Issue/PR Detail Popup
+
+| Key | Action |
+|---|---|
+| `Enter` on issue/PR | Open detail popup |
+| `Esc` / `h` | Close popup (or back from diff view) |
+| `↑↓` `j`/`k` | Scroll content |
+| `Enter` (on body tab) | Cycle to next tab (Body → Comments → Files) |
+| `c` | **Comment** on the issue/PR |
+| `r` | **React** — pick an emoji reaction |
+| `x` | **Close** or **Reopen** the issue/PR |
+| `M` | **Merge** the PR (with confirmation) |
+| `y` | Copy the issue/PR URL to clipboard |
+| `g` / `G` | Jump to top / bottom |
 
 ### Files pane (Analyze → `F`)
 
@@ -126,7 +148,7 @@ Your current token scopes are shown in the Settings → System panel so you can 
 
 ## 🗂️ Project Layout
 
-The app is split into 15 focused modules. Adding a new tab is: create one file, register it in `state.mjs`, import it in `render.mjs` and `keys.mjs`. The command palette picks up new actions automatically when you call `palette.register({ id, label, run })`.
+The app is split into 22 focused modules. Adding a new tab is: create one file, register it in `state.mjs`, import it in `render.mjs` and `keys.mjs`. The command palette picks up new actions automatically when you call `palette.register({ id, label, run })`.
 
 ```
 .
@@ -135,12 +157,12 @@ The app is split into 15 focused modules. Adding a new tab is: create one file, 
 ├── VISION.md                        # Roadmap + persona-driven brainstorm
 └── tui/
     ├── screen.mjs                   # Diff-based terminal renderer
-    ├── github.mjs                   # HTTPS client + ETag cache + ~42 endpoints + streaming downloader
+    ├── github.mjs                   # HTTPS client + ETag cache + 55+ endpoints + streaming downloader
     ├── config.mjs                   # Constants + token I/O + JSON store helpers
     ├── utils.mjs                    # Pure helpers (time, format, OSC-52, openUrl, safeCwdJoin, runCommand)
     ├── state.mjs                    # Single appState + async-stale guard + message bus
     ├── input.mjs                    # Modal text input + handler registry
-    ├── theme.mjs                    # 4 themes — persisted to ~/.github-tui/theme
+    ├── theme.mjs                    # 7 themes — persisted to ~/.github-tui/theme
     ├── store.mjs                    # Bookmarks + saved searches + pins (on-disk JSON)
     ├── palette.mjs                  # Command palette (Ctrl-P) with fuzzy match
     ├── render.mjs                   # Top-level render: chrome + dispatch to tabs
@@ -149,6 +171,7 @@ The app is split into 15 focused modules. Adding a new tab is: create one file, 
         ├── dashboard.mjs            # Home screen with widgets
         ├── repos.mjs                # Your repositories (selection, badges, filters, pins, density)
         ├── analyze.mjs              # Search + details + Issues/PRs/README/Files panes
+        ├── detail.mjs               # Issue/PR detail popup with comments, reactions, diff viewer
         ├── files.mjs                # In-terminal file explorer with save / clone / zipball
         ├── forks.mjs                # Forks sub-view with concurrent ahead/behind
         ├── settings.mjs             # Settings + System info panel
@@ -214,7 +237,8 @@ Every tab module exports `render(screen, y, h)`, an optional `keys` map for tab-
 - Token is stored in plaintext on disk (locked down with file permissions; OS keychain integration is on the roadmap).
 - Mostly read-only client today — actions ship in waves:
   - ✅ **shipped:** star/unstar, bookmark, pin, save file, save folder, zipball, `git clone`, `gh clone`, notification mark/unsubscribe.
-  - ❌ **pending (v0.4):** commenting on issues/PRs, merging, reviewing.
+  - ✅ **shipped (v0.5):** commenting on issues/PRs, reactions, close/reopen, merge PRs, PR diff viewer.
+  - ❌ **pending (v0.6):** review approve/request-changes, assign labels/milestone/assignee.
 - Only the GitHub REST v3 API is used (no GraphQL yet).
 - Requires a true TTY — won't run when stdin is piped.
 - The naive file-viewer syntax coloring is style-only — no real lexer. Adequate for reading, not editing.
@@ -227,10 +251,13 @@ Every tab module exports `render(screen, y, h)`, an optional `keys` map for tab-
 
 **Shipped in v0.4 (this update):** Dashboard enhancements — contribution heatmap (15-week grid), star history sparkline (30-day trend), recent issues/PRs activity, stale repos alert (60+ days), quick actions bar.
 
-**Next up (v0.5 — "Review from terminal"):**
-- In-TUI Issue/PR detail popup with rendered body
-- Comment / react / close-reopen / merge actions
-- PR diff viewer
+**Shipped in v0.5 (this update):** Issue/PR detail popup with rendered body, labels, comments, and file diffs. Comment from TUI, emoji reactions, close/reopen, merge PRs with confirmation. PR diff viewer with unified diff and syntax coloring. Inbox notifications open detail popup for issues/PRs.
+
+**Next up (v0.6 — "Cache & Offline"):**
+- Disk-backed ETag cache (survives restarts)
+- Offline banner; "last-synced" timestamps per tab
+- Background prefetch of starred repos
+- Hard rate-limit-budget mode
 
 **Later (v0.5+):**
 - User-editable keybindings (`~/.github-tui/keys.json`)

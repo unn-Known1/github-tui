@@ -25,7 +25,6 @@ import {
 } from '../utils.mjs';
 import { color } from '../theme.mjs';
 import { join } from 'path';
-import { writeFileSync, existsSync, mkdirSync } from 'fs';
 
 // Limit how big a single file we'll fetch into memory (the API caps at 1MB).
 const MAX_VIEW_BYTES = 1_000_000;

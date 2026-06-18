@@ -9,6 +9,7 @@ const USER_AGENT = 'GitHub-TUI';
 export const lastRateLimit = { remaining: null, limit: null, reset: null };
 export const lastScopes = { scopes: [], accepted: [] };
 const etagCache = new Map();
+const ETAG_CACHE_MAX = 500;
 
 function buildOptions(path, token, method, body) {
   const headers = {
@@ -87,6 +88,11 @@ export function request(path, opts) {
           }
           if (method === 'GET' && res.headers.etag) {
             etagCache.set(`${method}:${path}`, { etag: res.headers.etag, body: payload });
+            // Evict oldest entries when cache exceeds limit.
+            if (etagCache.size > ETAG_CACHE_MAX) {
+              const first = etagCache.keys().next().value;
+              etagCache.delete(first);
+            }
           }
           return resolve(payload);
         }
@@ -150,7 +156,8 @@ export const getRepositoryReleases = (token, owner, repo, page, perPage) =>
     '&per_page=' + (perPage||5), { token });
 
 // ─── Notifications ──────────────────────────────────────────────────
-export const getNotifications = (token) => request('/notifications', { token });
+export const getNotifications = (token, page, perPage) =>
+  request('/notifications?page=' + (page||1) + '&per_page=' + (perPage||50), { token });
 export const markNotificationRead = (token, threadId) =>
   request('/notifications/threads/' + threadId, { token, method: 'PATCH' });
 export const markAllNotificationsRead = (token) =>
@@ -250,47 +257,85 @@ export const getFileCommits = (token, owner, repo, path, perPage) =>
 // file-tree pane to hand the URL to a streaming download routine that writes
 // straight to disk (so we don't buffer a 200 MB zip in memory).
 export function getZipballUrl(owner, repo, ref) {
+  const r = ref || 'main';
+  const prefix = r.startsWith('v') || r.match(/^\d+\./) ? 'refs/tags' : 'refs/heads';
   return 'https://codeload.github.com/' + owner + '/' + repo +
-    '/zip/refs/heads/' + (ref || 'main');
+    '/zip/' + prefix + '/' + r;
 }
 
 // Download an arbitrary URL straight to a local file path, streaming.
 // Used for zipballs. Requires only built-in https.
+import { createWriteStream } from 'fs';
 export function downloadToFile(url, destPath, token) {
   return new Promise((resolve, reject) => {
-    import('https').then(httpsMod => import('fs').then(fsMod => {
-      const https = httpsMod.default;
-      const fs = fsMod.default;
-      const out = fs.createWriteStream(destPath);
-      let bytes = 0;
-      function get(u, redirectsLeft) {
-        const u2 = new URL(u);
-        const headers = { 'User-Agent': USER_AGENT };
-        if (token) headers['Authorization'] = 'token ' + token;
-        const req = https.get({
-          hostname: u2.hostname,
-          path: u2.pathname + u2.search,
-          headers,
-        }, (res) => {
-          if (res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) {
-            if (redirectsLeft <= 0) return reject(new Error('Too many redirects'));
-            res.resume();
-            return get(res.headers.location, redirectsLeft - 1);
-          }
-          if (res.statusCode !== 200) {
-            res.resume();
-            return reject(new Error('Download HTTP ' + res.statusCode));
-          }
-          res.on('data', (chunk) => { bytes += chunk.length; });
-          res.pipe(out);
-          out.on('finish', () => out.close(() => resolve({ bytes, path: destPath })));
-        });
-        req.on('error', reject);
-      }
-      get(url, 5);
-    }).catch(reject)).catch(reject);
+    const out = createWriteStream(destPath);
+    let bytes = 0;
+    function get(u, redirectsLeft) {
+      const u2 = new URL(u);
+      const headers = { 'User-Agent': USER_AGENT };
+      if (token) headers['Authorization'] = 'token ' + token;
+      const req = https.get({
+        hostname: u2.hostname,
+        path: u2.pathname + u2.search,
+        headers,
+      }, (res) => {
+        if (res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) {
+          if (redirectsLeft <= 0) return reject(new Error('Too many redirects'));
+          res.resume();
+          return get(res.headers.location, redirectsLeft - 1);
+        }
+        if (res.statusCode !== 200) {
+          res.resume();
+          return reject(new Error('Download HTTP ' + res.statusCode));
+        }
+        res.on('data', (chunk) => { bytes += chunk.length; });
+        res.pipe(out);
+        out.on('finish', () => out.close(() => resolve({ bytes, path: destPath })));
+      });
+      req.on('error', reject);
+    }
+    get(url, 5);
   });
 }
+
+// ─── Issue / PR detail, comments, actions ──────────────────────────
+export const getIssue = (token, owner, repo, number) =>
+  request('/repos/' + owner + '/' + repo + '/issues/' + number, { token });
+export const getPullRequest = (token, owner, repo, number) =>
+  request('/repos/' + owner + '/' + repo + '/pulls/' + number, { token });
+export const getIssueComments = (token, owner, repo, number, page, perPage) =>
+  request('/repos/' + owner + '/' + repo + '/issues/' + number +
+    '/comments?page=' + (page||1) + '&per_page=' + (perPage||20), { token });
+export const getPullRequestReviews = (token, owner, repo, number) =>
+  request('/repos/' + owner + '/' + repo + '/pulls/' + number + '/reviews', { token });
+export const getPullRequestFiles = (token, owner, repo, number, page, perPage) =>
+  request('/repos/' + owner + '/' + repo + '/pulls/' + number +
+    '/files?page=' + (page||1) + '&per_page=' + (perPage||30), { token });
+export const postComment = (token, owner, repo, number, body) =>
+  request('/repos/' + owner + '/' + repo + '/issues/' + number + '/comments', {
+    token, method: 'POST', body: { body },
+  });
+export const createReaction = (token, owner, repo, issueNumber, content) =>
+  request('/repos/' + owner + '/' + repo + '/issues/' + issueNumber +
+    '/reactions', { token, method: 'POST', body: { content },
+    accept: 'application/vnd.github.squirrel-girl-preview+json',
+  });
+export const closeIssue = (token, owner, repo, number) =>
+  request('/repos/' + owner + '/' + repo + '/issues/' + number, {
+    token, method: 'PATCH', body: { state: 'closed' },
+  });
+export const reopenIssue = (token, owner, repo, number) =>
+  request('/repos/' + owner + '/' + repo + '/issues/' + number, {
+    token, method: 'PATCH', body: { state: 'open' },
+  });
+export const mergePullRequest = (token, owner, repo, number, mergeMethod) =>
+  request('/repos/' + owner + '/' + repo + '/pulls/' + number + '/merge', {
+    token, method: 'PUT', body: { merge_method: mergeMethod || 'merge' },
+  });
+export const requestReview = (token, owner, repo, number, reviewers) =>
+  request('/repos/' + owner + '/' + repo + '/pulls/' + number + '/requested_reviewers', {
+    token, method: 'POST', body: { reviewers },
+  });
 
 // ─── Cache utilities ────────────────────────────────────────────────
 export function clearEtagCache() { etagCache.clear(); }

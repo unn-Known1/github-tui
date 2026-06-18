@@ -9,8 +9,10 @@ import {
 import { relTime, notifTypeColor, notificationToHtmlUrl, openUrl, truncate } from '../utils.mjs';
 import { color } from '../theme.mjs';
 import { emptyState } from '../render.mjs';
+import { openDetail } from './detail.mjs';
 
 const FILTERS = ['all', 'unread', 'mentions', 'review'];
+const INBOX_PER_PAGE = 50;
 
 export async function loadNotifications() {
   if (!appState.token) {
@@ -19,16 +21,37 @@ export async function loadNotifications() {
   }
   const gen = startAsync();
   appState.loading = true;
+  appState.inboxPage = 1;
   render();
   try {
-    const notes = await getNotifications(appState.token);
+    const notes = await getNotifications(appState.token, 1, INBOX_PER_PAGE);
     if (isStale(gen)) return;
     appState.notifications = Array.isArray(notes) ? notes : [];
+    appState.inboxHasMore = notes.length >= INBOX_PER_PAGE;
     appState.inboxScroll = 0;
     appState.selectedNotification = 0;
     showMessage('Loaded ' + appState.notifications.length + ' notifications', 'success');
   } catch (e) {
     if (!isStale(gen)) showMessage(e.message || 'Failed to load notifications', 'error');
+  }
+  appState.loading = false;
+  if (!isStale(gen)) render();
+}
+
+export async function loadMoreNotifications() {
+  if (!appState.inboxHasMore || !appState.token) return;
+  const gen = startAsync();
+  appState.loading = true;
+  render();
+  try {
+    const page = appState.inboxPage + 1;
+    const more = await getNotifications(appState.token, page, INBOX_PER_PAGE);
+    if (isStale(gen)) return;
+    appState.notifications = [...appState.notifications, ...more];
+    appState.inboxPage = page;
+    appState.inboxHasMore = more.length >= INBOX_PER_PAGE;
+  } catch (e) {
+    if (!isStale(gen)) showMessage(e.message || 'Failed to load more', 'error');
   }
   appState.loading = false;
   if (!isStale(gen)) render();
@@ -94,9 +117,21 @@ export function cycleFilter() {
 export async function openCurrent() {
   const n = selected();
   if (!n) return;
-  const url = notificationToHtmlUrl(n.subject && n.subject.url);
-  const r = await openUrl(url);
-  if (r.ok) showMessage('Opened ' + url, 'success');
+  // Try to open detail popup for issues/PRs
+  const type = n.subject && n.subject.type;
+  const url = n.subject && n.subject.url;
+  if ((type === 'Issue' || type === 'PullRequest') && url) {
+    // Parse owner/repo/number from API URL
+    const match = url.match(/\/repos\/([^/]+)\/([^/]+)\/(?:issues|pulls)\/(\d+)/);
+    if (match) {
+      const [, owner, repo, num] = match;
+      openDetail(type === 'PullRequest' ? 'pull_request' : 'issue', owner, repo, parseInt(num, 10));
+      return;
+    }
+  }
+  const htmlUrl = notificationToHtmlUrl(url);
+  const r = await openUrl(htmlUrl);
+  if (r.ok) showMessage('Opened ' + htmlUrl, 'success');
   else showMessage(r.error || 'Open failed', 'error');
 }
 
@@ -245,3 +280,4 @@ export function down(screen) {
   render();
 }
 export const enter = openCurrent;
+export function space() { loadMoreNotifications(); }

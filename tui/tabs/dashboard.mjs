@@ -435,4 +435,3 @@ export function renderDashboard(screen, y, h) {
 }
 
 export const keys = {};
-export const render_ = renderDashboard;

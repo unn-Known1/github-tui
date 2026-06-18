@@ -79,7 +79,7 @@ export const appState = {
   selectedRepo: 0,
   searchScroll: 0,
   analyzeView: 'search',  // 'search' | 'results' | 'details' | 'forks'
-  detailsPane: 'overview', // 'overview' | 'issues' | 'prs'
+  detailsPane: 'overview', // 'overview' | 'issues' | 'prs' | 'readme' | 'files'
   detailsScroll: 0,
   repoDetails: null,
   repoLanguages: null,
@@ -113,6 +113,8 @@ export const appState = {
   inboxScroll: 0,
   selectedNotification: 0,
   inboxFilter: 'all',    // 'all' | 'unread' | 'mentions' | 'review'
+  inboxPage: 1,
+  inboxHasMore: true,
 
   // ── Settings ──
   settingsCursor: 0,
@@ -135,8 +137,30 @@ export const appState = {
   inputMode: null,       // null | 'input'
   inputBuffer: '',
   inputPrompt: '',
-  inputContext: null,    // 'login' | 'search' | 'filter' | 'palette' | ...
+  inputContext: null,    // 'login' | 'search' | 'filter' | 'palette' | 'comment' | ...
   inputMask: false,
+
+  // ── Issue/PR detail popup ──
+  showDetail: false,
+  detailType: null,      // 'issue' | 'pull_request'
+  detailOwner: '',
+  detailRepo: '',
+  detailNumber: 0,
+  detailData: null,
+  detailComments: [],
+  detailReviews: [],
+  detailFiles: [],
+  detailScroll: 0,
+  detailTab: 'body',     // 'body' | 'comments' | 'files'
+  detailFileCursor: 0,
+  detailLoading: false,
+  detailReactionPicker: false,
+  detailReactionCursor: 0,
+  detailDiffView: false,   // true when viewing a file diff
+  detailDiffFile: null,    // the file object being diffed
+  detailDiffContent: '',   // the raw diff content
+  detailDiffScroll: 0,
+  detailDiffVisibleH: 0,   // visible height for diff scrolling
 
   // ── Theme & bookmarks (v0.3+) ──
   themeName: 'default',

@@ -109,10 +109,13 @@ export async function loadUserData() {
     appState.user = await getAuthenticatedUser(appState.token);
     if (isStale(gen)) return;
     if (appState.user) {
+      // Load first page immediately, then fetch remaining pages in background.
       appState.repos = await getUserRepositories(appState.token, 1, REPOS_PER_PAGE);
       appState.reposPage = 1;
       appState.reposHasMore = appState.repos.length >= REPOS_PER_PAGE;
       if (isStale(gen)) return;
+      // Background: load all remaining pages for accurate stats.
+      loadAllReposBackground(gen);
       loadDashboardWidgets().catch(() => {});
     }
   } catch (e) {
@@ -131,6 +134,24 @@ export async function loadUserData() {
     }
   }
   appState.loading = false;
+  if (!isStale(gen)) render();
+}
+
+// Fetch all remaining repo pages in background so stats are accurate.
+async function loadAllReposBackground(gen) {
+  let page = 2;
+  while (appState.reposHasMore) {
+    try {
+      const more = await getUserRepositories(appState.token, page, REPOS_PER_PAGE);
+      if (isStale(gen)) return;
+      appState.repos = [...appState.repos, ...more];
+      appState.reposPage = page;
+      appState.reposHasMore = more.length >= REPOS_PER_PAGE;
+      page++;
+    } catch {
+      break;
+    }
+  }
   if (!isStale(gen)) render();
 }
 
@@ -174,7 +195,10 @@ registerInputHandler('lang-filter', (value) => {
 // ─── Action helpers ───────────────────────────────────────────────
 export function visibleRows(screen) {
   const compact = appState.repoDensity === 'compact';
-  return Math.max(1, Math.floor((screen.height - 18) / (compact ? 1 : 2)));
+  // Layout: 3 header lines + 1 filter chips line + 1 column headers line + 1 footer line = 6
+  // Plus 2 lines for status bar and tab strip overhead.
+  const overhead = 8;
+  return Math.max(1, Math.floor((screen.height - overhead) / (compact ? 1 : 2)));
 }
 
 function badgeChar(r) {

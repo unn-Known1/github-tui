@@ -122,9 +122,12 @@ export function notifTypeColor(type) {
 // Convert an api.github.com notification subject URL to a browser URL.
 export function notificationToHtmlUrl(apiUrl) {
   if (!apiUrl) return null;
-  return apiUrl
-    .replace('api.github.com/repos', 'github.com')
-    .replace('/pulls/', '/pull/');
+  let url = apiUrl.replace('api.github.com/repos', 'github.com');
+  // Only convert /pulls/ to /pull/ for actual PR URLs.
+  if (url.includes('/pulls/')) {
+    url = url.replace('/pulls/', '/pull/');
+  }
+  return url;
 }
 
 // Generic in-memory + on-disk cache for ETag-aware fetches.
@@ -143,7 +146,11 @@ import { mkdirSync, existsSync, writeFileSync, statSync } from 'fs';
 export function safeCwdJoin(relPath) {
   const cwd = process.cwd();
   const target = resolve(cwd, normalize(relPath));
-  if (!target.startsWith(cwd + (cwd.endsWith('/') ? '' : '/')) && target !== cwd) {
+  // Normalize both paths to forward slashes for cross-platform comparison.
+  const normCwd = cwd.replace(/\\/g, '/');
+  const normTarget = target.replace(/\\/g, '/');
+  const suffix = normCwd.endsWith('/') ? '' : '/';
+  if (!normTarget.startsWith(normCwd + suffix) && normTarget !== normCwd) {
     throw new Error('Path escapes CWD: ' + relPath);
   }
   return target;

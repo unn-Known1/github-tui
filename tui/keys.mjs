@@ -17,7 +17,8 @@ import * as repos     from './tabs/repos.mjs';
 import * as analyze   from './tabs/analyze.mjs';
 import * as settings  from './tabs/settings.mjs';
 import * as inbox     from './tabs/inbox.mjs';
-import { addBookmark, removeBookmark, isBookmarked } from './store.mjs';
+import * as detail    from './tabs/detail.mjs';
+import { addBookmark, removeBookmark, isBookmarked, addSavedSearch, removeSavedSearch } from './store.mjs';
 import { starRepo, unstarRepo, isStarred } from './github.mjs';
 import { getScreen } from './render.mjs';
 
@@ -125,6 +126,20 @@ export function handleKey(key) {
   // 1. Palette captures all keys first.
   if (palette.handleKey(key)) return;
 
+  // 1b. Detail popup captures keys when open.
+  if (appState.showDetail) {
+    if (key === '\x1b' || key === 'h' || key === '\x7f') { detail.handleBack(); return; }
+    if (key === '\r' || key === '\n') { detail.enter(); return; }
+    if (key === '\x1b[A' || key === 'k') { detail.up(); return; }
+    if (key === '\x1b[B' || key === 'j') { detail.down(); return; }
+    const mod = detail;
+    if (mod.keys && typeof mod.keys[key] === 'function') {
+      mod.keys[key]();
+      return;
+    }
+    return;
+  }
+
   // 2. Help overlay swallows the next key, whatever it is.
   if (appState.showHelp) {
     appState.showHelp = false;
@@ -221,6 +236,7 @@ function handleSpace() {
   const t = tabState.current;
   if (t === 1) repos.space();
   else if (t === 2) analyze.space();
+  else if (t === 4) inbox.space();
 }
 function handleEnter() {
   const t = tabState.current;
@@ -317,4 +333,37 @@ export function registerCoreActions() {
             showMessage('No repos to create issues for', 'warning');
           }
         } });
+
+  reg({ id: 'detail.comment', label: 'Comment on current issue/PR',
+        run: () => { if (appState.showDetail) detail.openCommentInput(); } });
+  reg({ id: 'detail.close', label: 'Close / Reopen current issue/PR',
+        run: () => { if (appState.showDetail) detail.closeOrReopen(); } });
+  reg({ id: 'detail.merge', label: 'Merge current PR',
+        run: () => { if (appState.showDetail) detail.mergePR(); } });
+  reg({ id: 'detail.react', label: 'Add reaction to current issue/PR',
+        run: () => { if (appState.showDetail) detail.toggleReactionPicker(); } });
+
+  // Saved searches
+  reg({ id: 'search.save', label: 'Save current search query...',
+        run: () => {
+          if (!appState.searchQuery) { showMessage('No search query to save', 'warning'); return; }
+          startInput('Label for this search: ', 'save-search');
+        } });
+  appState.savedSearches.forEach(s => {
+    reg({ id: 'search.run.' + s.id, label: 'Run saved search: ' + s.label,
+          hint: s.query,
+          run: () => {
+            setTab(2);
+            appState.analyzeView = 'search';
+            submitSearch(s.query);
+          } });
+    reg({ id: 'search.delete.' + s.id, label: 'Delete saved search: ' + s.label,
+          run: () => {
+            removeSavedSearch(s.id);
+            appState.savedSearches = appState.savedSearches.filter(x => x.id !== s.id);
+            showMessage('Deleted saved search: ' + s.label, 'success');
+          } });
+  });
 }
+
+import { submitSearch } from './tabs/analyze.mjs';

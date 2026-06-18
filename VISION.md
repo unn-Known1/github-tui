@@ -28,31 +28,34 @@
 
 | Capability | State | Notes |
 |---|---|---|
-| Modular architecture (`tui/` split) | ✅ shipped v0.3 | 14 modules; tab modules export `render` + `keys` + dispatchers |
-| Dashboard with widgets | ✅ shipped v0.2 | Greeting, stat cards, activity feed, trending, languages bar |
-| Repos browser (sort + filter + paginate) | ✅ shipped v0.2 | `/` filter, `c` clear, aggregate header stats |
+| Modular architecture (`tui/` split) | ✅ shipped v0.3 | 22 modules; tab modules export `render` + `keys` + dispatchers |
+| Dashboard with widgets | ✅ shipped v0.4 | Greeting, stat cards, activity feed, trending, languages bar, heatmap, sparkline |
+| Repos browser (sort + filter + paginate) | ✅ shipped v0.3 | `/` filter, `c` clear, aggregate header stats, density toggle, pins |
 | Analyze: search → details → forks | ✅ shipped v0.2 | 2-column details with languages/contributors/releases |
 | Issues & PRs sub-panes (read-only) | ✅ shipped v0.2 | Toggle via `i` / `P` / `O` on details |
+| Issue / PR detail popup | ✅ shipped v0.5 | Full detail view with rendered body, labels, comments, file diffs |
+| Comment / react / close-reopen / merge | ✅ shipped v0.5 | POST endpoints + confirmation modals |
+| PR diff viewer | ✅ shipped v0.5 | Unified diff with syntax-colored additions/deletions |
 | README viewer pane | ✅ shipped v0.3 | `R` opens it; naive Markdown styling |
 | Forks ahead/behind compares (parallel) | ✅ shipped v0.2 | 5-worker concurrent pool |
 | Inbox: list + open in browser | ✅ shipped v0.2 | Color-coded types, by-repo summary, relative time |
 | Inbox: mark-as-read / all / unsubscribe | ✅ shipped v0.3 | Keys `m`/`M`/`u` |
 | Inbox: filter cycle | ✅ shipped v0.3 | `f` cycles all → unread → mentions → review |
+| Inbox: pagination | ✅ shipped v0.5 | `Space` loads more notifications |
+| File explorer | ✅ shipped v0.3 | Tree browsing, save/clone/zipball, branch picker |
 | Settings panel with system info | ✅ shipped v0.2 | Version, paths, Node, platform, terminal |
 | Token scope inspector | ✅ shipped v0.3 | `lastScopes` from `x-oauth-scopes` |
 | Secure local auth (chmod 600 + masked + 401 auto-clear) | ✅ shipped v0.2 | |
 | Live API rate-limit indicator | ✅ shipped v0.2 | Top-right + Settings detail |
 | ETag-aware caching | ✅ shipped v0.3 | In-memory; auto `If-None-Match` |
-| Command palette (Ctrl-P / `:`) | ✅ shipped v0.3 | ~25 registered actions, fuzzy match |
-| Themes (default/highContrast/dracula/solarized) | ✅ shipped v0.3 | Persisted to `~/.github-tui/theme` |
+| Command palette (Ctrl-P / `:`) | ✅ shipped v0.3 | ~30 registered actions, fuzzy match |
+| Themes (7 themes) | ✅ shipped v0.5 | default/highContrast/dracula/solarized/nord/monokai/gruvbox |
 | Bookmarks store | ✅ shipped v0.3 | `b` toggles; `~/.github-tui/bookmarks.json` |
-| Star / unstar from anywhere | ✅ shipped v0.3 | `s` |
+| Star / unstar from anywhere | ✅ shipped v0.3 | `*` |
 | OSC-52 clipboard copy | ✅ shipped v0.3 | `y` |
-| Help overlay (`?`) | ✅ shipped v0.2 | Updated for all v0.3 keys |
+| Help overlay (`?`) | ✅ shipped v0.5 | Updated for all v0.5 keys including detail popup |
 | Saved searches | 🟡 store ready | `store.mjs` exposes API; needs UI surface |
 | Disk-backed cache (beyond ETag) | 🔲 planned v0.6 | Survives restarts; offline mode |
-| Issue / PR detail popup | 🔲 planned v0.4 | Foundation: API endpoints already there |
-| Comment / react / approve / merge | 🔲 planned v0.4 | Needs POST endpoints + confirmation modals |
 | Workflows / Actions CI tab | 🔲 planned v0.7 | API ready in `github.mjs`; no UI yet |
 | File-tree browser + file viewer | 🔲 planned v0.8 | `getRepoContents` / `getRepoFile` ready |
 | Code search across orgs | 🔲 planned v0.8 | `searchCode` ready |
@@ -439,34 +442,29 @@ Real sequences a user runs through, end-to-end. Status reflects today.
 ## 🗓️ Phased Roadmap
 
 ### v0.3 — "Modular foundations + power-user inbox" ✅ SHIPPED
-- Modular refactor: 14 focused modules under `tui/` with one file per tab.
+- Modular refactor: 22 focused modules under `tui/` with one file per tab.
 - Command palette (`Ctrl-P` / `:`) with fuzzy match and self-registering actions.
-- Themes: `default`, `highContrast`, `dracula`, `solarized` — persisted to disk.
-- Inbox triage: `m` mark read, `M` mark all, `u` unsubscribe, `f` filter cycle.
+- Themes: `default`, `highContrast`, `dracula`, `solarized`, `nord`, `monokai`, `gruvbox` — persisted to disk.
+- Inbox triage: `m` mark read, `M` mark all, `u` unsubscribe, `f` filter cycle, `Space` load more.
 - README viewer pane (`R`) with naive Markdown styling.
 - OSC-52 clipboard copy (`y`) — works over SSH and tmux.
 - Bookmarks store (`b`) — `~/.github-tui/bookmarks.json` with chmod 600.
-- Star / unstar (`s`) on currently-pointed-at repo.
+- Star / unstar (`*`) on currently-pointed-at repo.
 - ETag-aware caching — automatic `If-None-Match` for free 304s.
 - Token-scope inspector in Settings system panel.
-- New API endpoints ready for next milestones: workflows, code/user/issue search, file browser, raw README.
+- File explorer with tree browsing, save/clone/zipball, branch picker.
+- Dashboard enhancements: contribution heatmap, star history sparkline, recent issues/PRs.
+- New API endpoints ready for next milestones: workflows, code/user/issue search.
 
-### v0.4 — "Review from terminal" *(next)*
-- In-TUI Issue/PR detail popup with rendered body.
-- Comment / react / close-reopen / merge actions (with confirmation modal).
-- PR diff viewer (file list + unified diff).
-- Re-request review, assign reviewers.
-- Stuck-PR audit recipe (R8 from workflow recipes).
+### v0.4 / v0.5 — "Review from terminal + Customisation" ✅ SHIPPED
+- In-TUI Issue/PR detail popup with rendered body, labels, comments, file diffs.
+- Comment / react (emoji picker) / close-reopen / merge actions (with confirmation modal).
+- PR diff viewer (file list + unified diff with syntax coloring).
+- Inbox notifications open detail popup for issues/PRs.
+- 7 themes (added nord, monokai, gruvbox).
+- Help overlay updated for all new keybindings.
 
-### v0.5 — "Customisation"
-- User-editable keybindings via `~/.github-tui/keys.json`.
-- More themes (monokai, nord, gruvbox).
-- Vim-style command mode (`:open foo/bar`, `:repos`).
-- Bookmarks tab (dedicated UI on top of the store).
-- Saved searches surface in palette.
-- i18n scaffolding.
-
-### v0.6 — "Cache & Offline"
+### v0.6 — "Cache & Offline" *(next)*
 - Disk-backed ETag cache (survives restarts).
 - Offline banner; "last-synced" timestamps per tab.
 - Background prefetch of starred repos.

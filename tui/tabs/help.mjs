@@ -2,6 +2,7 @@
 
 import { appState } from '../state.mjs';
 import { color } from '../theme.mjs';
+import { truncate } from '../utils.mjs';
 
 export function render(screen) {
   const W = screen.width;
@@ -59,6 +60,16 @@ export function render(screen) {
     '  u                Unsubscribe',
     '  f                Cycle filter',
     '',
+    '--- Issue/PR Detail ---',
+    '  Enter on issue/PR Open detail popup',
+    '  Esc              Close popup',
+    '  c                Comment',
+    '  r                React (pick emoji)',
+    '  x                Close / Reopen',
+    '  M                Merge PR',
+    '  y                Copy URL',
+    '  g / G            Jump top / bottom',
+    '',
     'Press any key to close',
   ];
 
@@ -111,11 +122,6 @@ export function render(screen) {
   if (scrollOffset > 0) {
     screen.writeStr(x0 + boxW - 4, y0 + boxH - 2, '...', color('dim'));
   }
-}
-
-function truncate(s, n) {
-  if (s.length <= n) return s;
-  return s.slice(0, n - 1) + '...';
 }
 
 export const keys = {};

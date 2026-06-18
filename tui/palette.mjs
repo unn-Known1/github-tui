@@ -34,7 +34,7 @@ export function filter(query) {
     .map(a => ({ a, s: score(query, a.label) }))
     .filter(x => x.s >= 0)
     .sort((a, b) => b.s - a.s)
-    .slice(0, 12)
+    .slice(0, 15)
     .map(x => x.a);
 }
 
@@ -68,11 +68,11 @@ export function handleKey(key) {
     appState.paletteCursor = 0;
     render(); return true;
   }
-  if (key === '\x1b[A') {
+  if (key === '\x1b[A' || key === 'k') {
     appState.paletteCursor = Math.max(0, appState.paletteCursor - 1);
     render(); return true;
   }
-  if (key === '\x1b[B') {
+  if (key === '\x1b[B' || key === 'j') {
     const max = Math.max(0, filter(appState.paletteQuery).length - 1);
     appState.paletteCursor = Math.min(max, appState.paletteCursor + 1);
     render(); return true;
