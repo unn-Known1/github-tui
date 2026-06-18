@@ -101,6 +101,10 @@ const B = {
   heatmapLow: { fg: 'green', dim: true },
   heatmapMid: { fg: 'green' },
   heatmapHigh: { fg: 'green', bold: true },
+  // New panes
+  traffic: { fg: 'cyan' },
+  milestone: { fg: 'yellow' },
+  label: { fg: 'magenta' },
 };
 
 const O = (o) => ({ ...B, ...o });

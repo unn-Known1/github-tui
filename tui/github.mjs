@@ -340,4 +340,9 @@ export const getRepoMilestones = (token, owner, repo, page, perPage) =>
   request('/repos/' + owner + '/' + repo + '/milestones?page=' + (page||1) +
     '&per_page=' + (perPage||20), { token });
 
+// ─── Labels ─────────────────────────────────────────────────────────
+export const getRepoLabels = (token, owner, repo, page, perPage) =>
+  request('/repos/' + owner + '/' + repo + '/labels?page=' + (page||1) +
+    '&per_page=' + (perPage||100), { token });
+
 

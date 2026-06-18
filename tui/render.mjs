@@ -287,7 +287,7 @@ function statusLine() {
       const v = appState.analyzeView;
       if (v === 'search')  return ' [i] Search public repo' + sep + '[?] Help' + sep + '[Ctrl-P] Palette';
       if (v === 'results') return ' [↑↓jk] Nav' + sep + '[Enter] View' + sep + '[Space] More' + sep + '[Esc] Back';
-      if (v === 'details') return ' [Enter] Forks/Issue' + sep + '[O] Overview' + sep + '[i] Issues' + sep + '[P] PRs' + sep + '[R] README' + sep + '[F] Files';
+      if (v === 'details') return ' [Enter] Forks/Issue' + sep + '[O] Overview' + sep + '[i] Issues' + sep + '[P] PRs' + sep + '[R] README' + sep + '[F] Files' + sep + '[T] Traffic' + sep + '[M] Milestones' + sep + '[L] Labels';
       if (v === 'forks')   return ' [↑↓jk] Nav' + sep + '[Space] More' + sep + '[p/s/n] Sort' + sep + '[Esc] Back';
       return '';
     }

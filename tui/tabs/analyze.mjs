@@ -10,7 +10,7 @@ import {
   getReleaseAssets, getReadme,
   getRepoTrafficViews, getRepoTrafficClones,
   getRepoTrafficPopularPaths, getRepoTrafficPopularReferrers,
-  getRepoMilestones,
+  getRepoMilestones, getRepoLabels,
 } from '../github.mjs';
 import { startInput, registerInputHandler } from '../input.mjs';
 import { shortNum, truncate } from '../utils.mjs';
@@ -388,6 +388,66 @@ function renderMilestonesPane(screen, y, maxH) {
   }
 }
 
+export async function loadLabels() {
+  const repo = appState.repoDetails;
+  if (!repo) return;
+  const gen = startAsync();
+  appState.loading = true;
+  appState.repoLabels = [];
+  render();
+  try {
+    const [owner, name] = repo.full_name.split('/');
+    const labels = await getRepoLabels(appState.token, owner, name);
+    if (isStale(gen)) return;
+    appState.repoLabels = Array.isArray(labels) ? labels : [];
+  } catch (e) {
+    if (!isStale(gen)) showMessage('Failed to load labels: ' + e.message, 'error');
+  }
+  appState.loading = false;
+  if (!isStale(gen)) render();
+}
+
+function renderLabelsPane(screen, y, maxH) {
+  const W = screen.width;
+  const labels = appState.repoLabels;
+  sectionHeader(screen, 2, y, '🏷️  LABELS (' + labels.length + ')');
+  y++;
+
+  if (labels.length === 0) {
+    screen.writeStr(2, y++, 'No labels found', { dim: true });
+    return;
+  }
+
+  for (const l of labels) {
+    if (y >= y + maxH - 1) break;
+    const name = truncate(l.name || '', 25);
+    const desc = truncate(l.description || '', 35);
+    const colorHex = l.color || 'ededed';
+    screen.writeStr(2, y, '██', { fg: mapLabelColor(colorHex) });
+    screen.writeStr(5, y, name, { fg: 'white' });
+    if (desc && 32 + desc.length < W) {
+      screen.writeStr(32, y, desc, { dim: true });
+    }
+    y++;
+  }
+}
+
+function mapLabelColor(hex) {
+  const h = hex.replace('#', '');
+  const r = parseInt(h.substring(0, 2), 16);
+  const g = parseInt(h.substring(2, 4), 16);
+  const b = parseInt(h.substring(4, 6), 16);
+  if (r > 180 && g < 100 && b < 100) return 'red';
+  if (r < 100 && g > 180 && b < 100) return 'green';
+  if (r < 100 && g < 100 && b > 180) return 'blue';
+  if (r > 180 && g > 180 && b < 100) return 'yellow';
+  if (r > 180 && g < 100 && b > 180) return 'magenta';
+  if (r < 100 && g > 180 && b > 180) return 'cyan';
+  if (r > 200 && g > 200 && b > 200) return 'white';
+  if (r < 80 && g < 80 && b < 80) return 'darkGray';
+  return 'white';
+}
+
 function renderPackagesPane(screen, y, maxH) {
   const W = screen.width;
   const assets = appState.repoReleaseAssets;
@@ -647,6 +707,7 @@ function renderRepoDetails(screen, y, maxH) {
     ['packages', 'Packages',                                    'A'],
     ['traffic',  'Traffic',                                     'T'],
     ['milestones', 'Milestones',                                'M'],
+    ['labels',   'Labels',                                      'L'],
   ];
   let px = 2;
   for (const [id, label, k] of panes) {
@@ -665,6 +726,7 @@ function renderRepoDetails(screen, y, maxH) {
   if (appState.detailsPane === 'packages') { renderPackagesPane(screen, y + 3, maxH - 3); return; }
   if (appState.detailsPane === 'traffic') { renderTrafficPane(screen, y + 3, maxH - 3); return; }
   if (appState.detailsPane === 'milestones') { renderMilestonesPane(screen, y + 3, maxH - 3); return; }
+  if (appState.detailsPane === 'labels') { renderLabelsPane(screen, y + 3, maxH - 3); return; }
 
   // Overview pane: 2-column layout.
   const leftWidth = Math.min(48, Math.floor(W / 2));
@@ -870,6 +932,18 @@ export const keys = {
         appState.detailsPane = 'milestones';
         appState.detailsScroll = 0;
         loadMilestones();
+      }
+      render();
+    }
+  },
+  'L': () => {
+    if (appState.analyzeView === 'details') {
+      if (appState.detailsPane === 'labels') {
+        appState.detailsPane = 'overview';
+      } else {
+        appState.detailsPane = 'labels';
+        appState.detailsScroll = 0;
+        loadLabels();
       }
       render();
     }

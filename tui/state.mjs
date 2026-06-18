@@ -97,6 +97,7 @@ export const appState = {
   repoTrafficPopularPaths: [],
   repoTrafficPopularReferrers: [],
   repoMilestones: [],
+  repoLabels: [],
 
   // ── Forks sub-view ──
   forks: [],
