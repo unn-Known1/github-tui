@@ -26,6 +26,7 @@ import * as help      from './tabs/help.mjs';
 import { addBookmark, removeBookmark, isBookmarked, addSavedSearch, removeSavedSearch } from './store.mjs';
 import { starRepo, unstarRepo, isStarred } from './github.mjs';
 import { getScreen } from './render.mjs';
+import { parseMouseEvent, handleMouseEvent } from './mouse.mjs';
 
 const tabModules = [dashboard, repos, analyze, settings, inbox];
 
@@ -127,6 +128,15 @@ function quit() {
 // Main entry — process.stdin pipes every keystroke through here.
 // ──────────────────────────────────────────────────────────────────
 export function handleKey(key) {
+  // 0. Mouse events.
+  if (key.startsWith('\x1b[<')) {
+    const mouseEvent = parseMouseEvent(key);
+    if (mouseEvent) {
+      handleMouseEvent(mouseEvent);
+      return;
+    }
+  }
+
   // 1. Palette captures all keys first.
   if (palette.handleKey(key)) return;
 

@@ -3,6 +3,7 @@
 // All real logic lives in tui/*.mjs. This file just wires lifecycle events.
 
 import { appState, tabState, showMessage, loadCollapsed } from './tui/state.mjs';
+import { enableMouse, disableMouse, parseMouseEvent, handleMouseEvent } from './tui/mouse.mjs';
 import { loadToken } from './tui/config.mjs';
 import { loadTheme } from './tui/theme.mjs';
 import { initScreen, getScreen, render } from './tui/render.mjs';
@@ -33,9 +34,13 @@ async function main() {
     process.exit(1);
   }
 
-  // Hide cursor; clear on exit.
+  // Hide cursor; enable mouse; clear on exit.
   process.stdout.write('\x1b[?25l');
-  const cleanup = () => process.stdout.write('\x1b[?25h\x1b[2J\x1b[H');
+  enableMouse();
+  const cleanup = () => {
+    disableMouse();
+    process.stdout.write('\x1b[?25h\x1b[2J\x1b[H');
+  };
   process.on('exit', cleanup);
   process.on('SIGINT',  () => { cleanup(); process.exit(0); });
   process.on('SIGTERM', () => { cleanup(); process.exit(0); });
