@@ -8,6 +8,8 @@ import {
   getRepositoryLanguages, getRepositoryContributors,
   getRepositoryReleases, getRepositoryIssues, getRepositoryPullRequests,
   getReleaseAssets, getReadme,
+  getRepoTrafficViews, getRepoTrafficClones,
+  getRepoTrafficPopularPaths, getRepoTrafficPopularReferrers,
 } from '../github.mjs';
 import { startInput, registerInputHandler } from '../input.mjs';
 import { shortNum, truncate } from '../utils.mjs';
@@ -238,6 +240,105 @@ function formatBytes(bytes) {
   if (bytes < 1024) return bytes + ' B';
   if (bytes < 1048576) return (bytes / 1024).toFixed(1) + ' KB';
   return (bytes / 1048576).toFixed(1) + ' MB';
+}
+
+export async function loadTraffic() {
+  const repo = appState.repoDetails;
+  if (!repo) return;
+  const gen = startAsync();
+  appState.loading = true;
+  appState.repoTraffic = null;
+  appState.repoTrafficClones = null;
+  appState.repoTrafficPopularPaths = [];
+  appState.repoTrafficPopularReferrers = [];
+  render();
+  try {
+    const [owner, name] = repo.full_name.split('/');
+    const safe = (p) => p.catch(() => null);
+    const [views, clones, paths, referrers] = await Promise.all([
+      safe(getRepoTrafficViews(appState.token, owner, name)),
+      safe(getRepoTrafficClones(appState.token, owner, name)),
+      safe(getRepoTrafficPopularPaths(appState.token, owner, name)),
+      safe(getRepoTrafficPopularReferrers(appState.token, owner, name)),
+    ]);
+    if (isStale(gen)) return;
+    appState.repoTraffic = views;
+    appState.repoTrafficClones = clones;
+    appState.repoTrafficPopularPaths = Array.isArray(paths) ? paths : [];
+    appState.repoTrafficPopularReferrers = Array.isArray(referrers) ? referrers : [];
+  } catch (e) {
+    if (!isStale(gen)) showMessage('Failed to load traffic: ' + e.message, 'error');
+  }
+  appState.loading = false;
+  if (!isStale(gen)) render();
+}
+
+function renderTrafficPane(screen, y, maxH) {
+  const W = screen.width;
+  const views = appState.repoTraffic;
+  const clones = appState.repoTrafficClones;
+  sectionHeader(screen, 2, y, '📊 TRAFFIC');
+  y++;
+
+  if (!views && !clones) {
+    screen.writeStr(2, y++, 'Loading traffic...', { dim: true });
+    return;
+  }
+
+  if (!views || (views.count === 0 && (!clones || clones.count === 0))) {
+    screen.writeStr(2, y++, 'No traffic data available', { dim: true });
+    screen.writeStr(2, y++, '(Traffic requires push access)', { dim: true });
+    return;
+  }
+
+  // Views summary
+  if (views) {
+    screen.writeStr(2, y, 'Views:', { fg: 'cyan', bold: true });
+    screen.writeStr(10, y, String(views.count || 0), { fg: 'white' });
+    screen.writeStr(20, y, 'unique:', { dim: true });
+    screen.writeStr(28, y, String(views.uniques || 0), { fg: 'white' });
+    y++;
+  }
+
+  // Clones summary
+  if (clones) {
+    screen.writeStr(2, y, 'Clones:', { fg: 'cyan', bold: true });
+    screen.writeStr(10, y, String(clones.count || 0), { fg: 'white' });
+    screen.writeStr(20, y, 'unique:', { dim: true });
+    screen.writeStr(28, y, String(clones.uniques || 0), { fg: 'white' });
+    y++;
+  }
+
+  y++;
+
+  // Popular paths
+  const paths = appState.repoTrafficPopularPaths;
+  if (paths.length > 0) {
+    sectionHeader(screen, 2, y, 'Popular Paths');
+    y++;
+    for (const p of paths.slice(0, 5)) {
+      if (y >= y + maxH - 1) break;
+      screen.writeStr(4, y, truncate(p.path || '', 30));
+      screen.writeStr(36, y, String(p.count || 0), { dim: true });
+      screen.writeStr(44, y, String(p.uniques || 0) + ' unique', { dim: true });
+      y++;
+    }
+    y++;
+  }
+
+  // Popular referrers
+  const referrers = appState.repoTrafficPopularReferrers;
+  if (referrers.length > 0) {
+    sectionHeader(screen, 2, y, 'Popular Referrers');
+    y++;
+    for (const r of referrers.slice(0, 5)) {
+      if (y >= y + maxH - 1) break;
+      screen.writeStr(4, y, truncate(r.referrer || '', 30));
+      screen.writeStr(36, y, String(r.count || 0), { dim: true });
+      screen.writeStr(44, y, String(r.uniques || 0) + ' unique', { dim: true });
+      y++;
+    }
+  }
 }
 
 function renderPackagesPane(screen, y, maxH) {
@@ -497,6 +598,7 @@ function renderRepoDetails(screen, y, maxH) {
     ['readme',   'README',                                      'R'],
     ['files',    'Files',                                       'F'],
     ['packages', 'Packages',                                    'A'],
+    ['traffic',  'Traffic',                                     'T'],
   ];
   let px = 2;
   for (const [id, label, k] of panes) {
@@ -513,6 +615,7 @@ function renderRepoDetails(screen, y, maxH) {
   if (appState.detailsPane === 'readme') { renderReadmePane(screen, y + 3, maxH - 3); return; }
   if (appState.detailsPane === 'files')  { files.renderFilesPane(screen, y + 3, maxH - 3); return; }
   if (appState.detailsPane === 'packages') { renderPackagesPane(screen, y + 3, maxH - 3); return; }
+  if (appState.detailsPane === 'traffic') { renderTrafficPane(screen, y + 3, maxH - 3); return; }
 
   // Overview pane: 2-column layout.
   const leftWidth = Math.min(48, Math.floor(W / 2));
@@ -698,6 +801,18 @@ export const keys = {
     }
   },
   'n': () => { if (appState.analyzeView === 'forks') toggleForkSort('name'); },
+  'T': () => {
+    if (appState.analyzeView === 'details') {
+      if (appState.detailsPane === 'traffic') {
+        appState.detailsPane = 'overview';
+      } else {
+        appState.detailsPane = 'traffic';
+        appState.detailsScroll = 0;
+        loadTraffic();
+      }
+      render();
+    }
+  },
 };
 
 function isFilesPane() {

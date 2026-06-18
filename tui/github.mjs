@@ -325,4 +325,14 @@ export const requestReview = (token, owner, repo, number, reviewers) =>
 export const getRateLimit = (token) =>
   request('/rate_limit', { token });
 
+// ─── Traffic ────────────────────────────────────────────────────────
+export const getRepoTrafficViews = (token, owner, repo) =>
+  request('/repos/' + owner + '/' + repo + '/traffic/views', { token });
+export const getRepoTrafficClones = (token, owner, repo) =>
+  request('/repos/' + owner + '/' + repo + '/traffic/clones', { token });
+export const getRepoTrafficPopularPaths = (token, owner, repo) =>
+  request('/repos/' + owner + '/' + repo + '/traffic/popular/paths', { token });
+export const getRepoTrafficPopularReferrers = (token, owner, repo) =>
+  request('/repos/' + owner + '/' + repo + '/traffic/popular/referrers', { token });
+
 

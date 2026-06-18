@@ -92,6 +92,10 @@ export const appState = {
   selectedAsset: 0,
   repoIssues: [],
   repoPullRequests: [],
+  repoTraffic: null,
+  repoTrafficClones: null,
+  repoTrafficPopularPaths: [],
+  repoTrafficPopularReferrers: [],
 
   // ── Forks sub-view ──
   forks: [],
