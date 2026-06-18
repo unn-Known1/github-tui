@@ -11,6 +11,7 @@ import { renderRepos } from './tabs/repos.mjs';
 import { renderAnalyze } from './tabs/analyze.mjs';
 import { renderSettings } from './tabs/settings.mjs';
 import { renderInbox } from './tabs/inbox.mjs';
+import { renderActions } from './tabs/actions.mjs';
 import * as help from './tabs/help.mjs';
 import { renderPalette } from './palette.mjs';
 import { renderDetail } from './tabs/detail.mjs';
@@ -67,6 +68,12 @@ export function buildBreadcrumb() {
     case 4:
       segments.push('Inbox');
       if (appState.inboxFilter !== 'all') segments.push(appState.inboxFilter);
+      break;
+    case 5:
+      segments.push('Actions');
+      if (appState.actionsView === 'runs' && appState.actionsRepos[appState.actionsRepoSelected]) {
+        segments.push(appState.actionsRepos[appState.actionsRepoSelected].full_name);
+      }
       break;
   }
   return segments;
@@ -310,6 +317,12 @@ function statusLine() {
     }
     case 3: return ' [↑↓] Nav' + sep + '[Enter] Select' + sep + '[Ctrl-P] Palette' + sep + '[?] Help';
     case 4: return ' [↑↓jk] Nav' + sep + '[Enter] Open' + sep + '[m] Read' + sep + '[M] All' + sep + '[f] Filter' + sep + '[u] Unsubscribe';
+    case 5: {
+      if (appState.actionsView === 'runs') {
+        return ' [Enter] Open in browser' + sep + '[r] Re-run' + sep + '[x] Cancel' + sep + '[Esc] Back' + sep + '[?] Help';
+      }
+      return ' [↑↓jk] Nav' + sep + '[Enter] View runs' + sep + '[?] Help';
+    }
   }
   return '';
 }
@@ -355,6 +368,7 @@ function doRender() {
     case 2: renderAnalyze(screen, contentY, contentH); break;
     case 3: renderSettings(screen, contentY, contentH); break;
     case 4: renderInbox(screen, contentY, contentH); break;
+    case 5: renderActions(screen, contentY, contentH); break;
   }
 
   // ── Footer ──
@@ -367,6 +381,7 @@ function doRender() {
   if (appState.showHelp) help.render(screen);
   if (appState.showDetail) renderDetail(screen);
   if (appState.showPalette) renderPalette(screen);
+  if (appState.showBookmarks) renderBookmarksOverlay(screen);
 
   screen.render();
 }
@@ -420,6 +435,45 @@ function renderConfirmDialog(screen) {
   const hy = y + boxH - 2;
   const hx = Math.max(x + 2, Math.floor((W - hint.length) / 2));
   screen.writeStr(hx, hy, hint, color('accent'));
+}
+
+function renderBookmarksOverlay(screen) {
+  const W = screen.width, H = screen.height;
+  const bm = appState.bookmarks;
+  const backdropStyle = color('modalBackdrop');
+  for (let yy = 0; yy < H; yy++) {
+    for (let xx = 0; xx < W; xx++) screen.styleBuf[yy][xx] = backdropStyle;
+  }
+  const boxW = Math.min(70, W - 4);
+  const boxH = Math.min(bm.length + 5, H - 4);
+  const x = Math.floor((W - boxW) / 2);
+  const y = Math.floor((H - boxH) / 2);
+  for (let yy = y; yy < y + boxH; yy++) {
+    for (let xx = x; xx < x + boxW; xx++) screen.setCell(xx, yy, ' ', null);
+  }
+  screen.box(x, y, boxW, boxH, 'Bookmarks (' + bm.length + ')');
+  if (bm.length === 0) {
+    screen.writeStr(x + 2, y + 2, 'No bookmarks. Press [b] on any repo to add one.', color('dim'));
+    return;
+  }
+  const maxVisible = boxH - 4;
+  for (let i = 0; i < maxVisible && i < bm.length; i++) {
+    const idx = appState.bookmarksScroll + i;
+    if (idx >= bm.length) break;
+    const b = bm[idx];
+    const sel = idx === appState.bookmarksCursor;
+    const row = y + 2 + i;
+    if (sel) {
+      for (let xx = x + 1; xx < x + boxW - 1; xx++) screen.styleBuf[row][xx] = color('selection');
+    }
+    const prefix = sel ? '▶ ' : '  ';
+    const name = truncate(b.full_name || '?', boxW - 14);
+    const stars = b.stars ? '★' + b.stars : '';
+    screen.writeStr(x + 1, row, prefix + name, sel ? color('selection') : { fg: 'white' });
+    if (stars) screen.writeStr(x + boxW - stars.length - 2, row, stars, sel ? color('selection') : { fg: 'yellow' });
+  }
+  const hintY = y + boxH - 2;
+  screen.writeStr(x + 2, hintY, '[Enter] Open  [d] Delete  [y] Copy URL  [Esc] Close', { dim: true });
 }
 
 bindRender(doRender);

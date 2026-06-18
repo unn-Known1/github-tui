@@ -12,9 +12,10 @@ import {
   getRepoTrafficPopularPaths, getRepoTrafficPopularReferrers,
   getRepoMilestones, getRepoLabels, getRepoCheckRuns, getRepoCheckSuites,
   getRepoDependabotAlerts,
+  searchUsers, searchCode, getUser,
 } from '../github.mjs';
 import { startInput, registerInputHandler } from '../input.mjs';
-import { shortNum, truncate } from '../utils.mjs';
+import { shortNum, truncate, openUrl } from '../utils.mjs';
 import { color } from '../theme.mjs';
 import { emptyState } from '../render.mjs';
 import { loadForks, loadMoreForks, renderForks, toggleForkSort } from './forks.mjs';
@@ -54,6 +55,83 @@ export async function submitSearch(value) {
 }
 registerInputHandler('search', submitSearch);
 
+const USER_SEARCH_PER_PAGE = 20;
+const CODE_SEARCH_PER_PAGE = 15;
+
+export async function submitUserSearch(value) {
+  const query = (value || '').trim();
+  if (!query) return;
+  const gen = startAsync();
+  appState.loading = true;
+  appState.searchQuery = query;
+  appState.searchType = 'users';
+  appState.selectedRepo = 0;
+  appState.searchScroll = 0;
+  appState.userSearchPage = 1;
+  appState.analyzeView = 'results';
+  render();
+  try {
+    const results = await searchUsers(appState.token, query, 1, USER_SEARCH_PER_PAGE);
+    if (isStale(gen)) return;
+    appState.userSearchResults = results;
+    appState.userSearchHasMore = results.length >= USER_SEARCH_PER_PAGE;
+    if (results.length === 0) showMessage('No users found', 'warning');
+  } catch (e) {
+    if (!isStale(gen)) showMessage(e.message || 'User search failed', 'error');
+  }
+  appState.loading = false;
+  if (!isStale(gen)) render();
+}
+
+export async function submitCodeSearch(value) {
+  const query = (value || '').trim();
+  if (!query) return;
+  const gen = startAsync();
+  appState.loading = true;
+  appState.searchQuery = query;
+  appState.searchType = 'code';
+  appState.selectedRepo = 0;
+  appState.searchScroll = 0;
+  appState.codeSearchPage = 1;
+  appState.analyzeView = 'results';
+  render();
+  try {
+    const results = await searchCode(appState.token, query, 1, CODE_SEARCH_PER_PAGE);
+    if (isStale(gen)) return;
+    appState.codeSearchResults = results;
+    appState.codeSearchHasMore = results.length >= CODE_SEARCH_PER_PAGE;
+    if (results.length === 0) showMessage('No code results found', 'warning');
+  } catch (e) {
+    if (!isStale(gen)) showMessage(e.message || 'Code search failed', 'error');
+  }
+  appState.loading = false;
+  if (!isStale(gen)) render();
+}
+
+registerInputHandler('user-search', submitUserSearch);
+registerInputHandler('code-search', submitCodeSearch);
+
+async function openUserProfile(login) {
+  if (!login) return;
+  const gen = startAsync();
+  appState.loading = true;
+  render();
+  try {
+    const user = await getUser(appState.token, login);
+    if (isStale(gen)) return;
+    if (user && user.html_url) {
+      showMessage('@' + login + ': ' + (user.name || '') + ' — ' + user.public_repos + ' repos, ' + user.followers + ' followers', 'info', 5000);
+      openUrl(user.html_url).then(res => {
+        if (!res.ok) showMessage(res.error || 'Open failed', 'error');
+      });
+    }
+  } catch (e) {
+    if (!isStale(gen)) showMessage('Failed to load user: ' + e.message, 'error');
+  }
+  appState.loading = false;
+  if (!isStale(gen)) render();
+}
+
 registerInputHandler('save-search', (label) => {
   const v = (label || '').trim();
   if (!v) return;
@@ -64,18 +142,40 @@ registerInputHandler('save-search', (label) => {
 });
 
 export async function loadMoreSearchResults() {
-  if (!appState.searchHasMore) return;
+  const type = appState.searchType || 'repos';
   const gen = startAsync();
   appState.loading = true;
   render();
   try {
-    const page = appState.searchPage + 1;
-    const more = await searchRepositories(
-      appState.token, appState.searchQuery, page, SEARCH_PER_PAGE);
+    const page = type === 'users' ? appState.userSearchPage + 1
+      : type === 'code' ? appState.codeSearchPage + 1
+      : appState.searchPage + 1;
+    let more;
+    if (type === 'users') {
+      if (!appState.userSearchHasMore) { appState.loading = false; render(); return; }
+      more = await searchUsers(appState.token, appState.searchQuery, page, USER_SEARCH_PER_PAGE);
+    } else if (type === 'code') {
+      if (!appState.codeSearchHasMore) { appState.loading = false; render(); return; }
+      more = await searchCode(appState.token, appState.searchQuery, page, CODE_SEARCH_PER_PAGE);
+    } else {
+      if (!appState.searchHasMore) { appState.loading = false; render(); return; }
+      more = await searchRepositories(appState.token, appState.searchQuery, page, SEARCH_PER_PAGE);
+    }
     if (isStale(gen)) return;
-    appState.searchResults = [...appState.searchResults, ...more];
-    appState.searchPage = page;
-    appState.searchHasMore = more.length >= SEARCH_PER_PAGE;
+    if (type === 'users') {
+      appState.userSearchResults = [...appState.userSearchResults, ...more];
+      appState.userSearchPage = page;
+      appState.userSearchHasMore = more.length >= USER_SEARCH_PER_PAGE;
+    } else if (type === 'code') {
+      appState.codeSearchResults = [...appState.codeSearchResults, ...more];
+      appState.codeSearchPage = page;
+      appState.codeSearchHasMore = more.length >= CODE_SEARCH_PER_PAGE;
+    } else {
+      appState.searchResults = [...appState.searchResults, ...more];
+      appState.searchPage = page;
+      appState.searchHasMore = more.length >= SEARCH_PER_PAGE;
+    }
+    if (more.length === 0) showMessage('No more results', 'info');
   } catch (e) {
     if (!isStale(gen)) showMessage(e.message || 'Failed to load more', 'error');
   }
@@ -664,33 +764,47 @@ function renderSearchInput(screen, y, h) {
 
 function renderResultsList(screen, y, h) {
   const W = screen.width;
-  screen.writeStr(2, y + 2, 'Search:', { fg: 'white', bold: true });
-  screen.writeStr(10, y + 2, appState.searchQuery || '', { fg: 'cyan' });
+  const type = appState.searchType || 'repos';
+  const typeLabel = type === 'repos' ? 'REPOS' : type === 'users' ? 'USERS' : 'CODE';
+  screen.writeStr(2, y + 1, 'Search ' + typeLabel + ':', { fg: 'white', bold: true });
+  screen.writeStr(14 + typeLabel.length, y + 1, appState.searchQuery || '', { fg: 'cyan' });
+  const hint = type === 'repos' ? '[i] Search repos   [u] Search users   [C] Search code'
+    : type === 'users' ? '[i] Search repos   [u] Search users   [C] Search code'
+    : '[i] Search repos   [u] Search users   [C] Search code';
+  screen.writeStr(2, y + 2, hint, { dim: true });
 
   const listY = y + 4;
   const maxVisible = Math.max(1, Math.min(8, h - 10));
-  if (appState.searchResults.length === 0) {
+
+  if (type === 'users') {
+    renderUserResults(screen, listY, h, W, maxVisible);
+  } else if (type === 'code') {
+    renderCodeResults(screen, listY, h, W, maxVisible);
+  } else {
+    renderRepoResults(screen, listY, h, W, maxVisible);
+  }
+}
+
+function renderRepoResults(screen, listY, h, W, maxVisible) {
+  const results = appState.searchResults;
+  if (results.length === 0) {
     emptyState(screen, listY, h - 4, {
-      icon: '○',
-      title: 'No results found',
-      message: 'Try different keywords or check the spelling',
-      hint: '[Esc] Back to search',
+      icon: '○', title: 'No repos found',
+      message: 'Try different keywords',
+      hint: '[Esc] Back',
     });
     return;
   }
-
-  sectionHeader(screen, 2, listY, '◫ RESULTS', '[' + appState.searchResults.length + ']');
+  sectionHeader(screen, 2, listY, '◫ REPOSITORIES', '[' + results.length + ']');
   screen.hline(listY + 1, '─', { dim: true });
   const start = appState.searchScroll;
-  for (let i = 0; i < maxVisible && start + i < appState.searchResults.length; i++) {
-    const repo = appState.searchResults[start + i];
+  for (let i = 0; i < maxVisible && start + i < results.length; i++) {
+    const repo = results[start + i];
     const row = listY + 2 + i;
     const sel = start + i === appState.selectedRepo;
-
     if (sel) {
       for (let x = 0; x < W; x++) screen.styleBuf[row][x] = color('selection');
     }
-
     screen.writeStr(2, row, sel ? '▶' : '  ', sel ? color('selection') : color('dim'));
     screen.writeStr(5, row, truncate(repo.full_name, 30), sel ? color('selection') : color('repoName'));
     const stats = '★' + shortNum(repo.stargazers_count) +
@@ -700,10 +814,76 @@ function renderResultsList(screen, y, h) {
   }
   const countY = listY + 2 + maxVisible;
   if (countY < y + h) {
-    const total = appState.searchResults.length;
     const pageInfo = appState.searchHasMore || appState.searchPage > 1
       ? '   Page ' + appState.searchPage + '   [PgUp/PgDn]' : '';
-    screen.writeStr(2, countY, total + ' results' + pageInfo, { dim: true });
+    screen.writeStr(2, countY, results.length + ' results' + pageInfo, { dim: true });
+  }
+}
+
+function renderUserResults(screen, listY, h, W, maxVisible) {
+  const results = appState.userSearchResults;
+  if (results.length === 0) {
+    emptyState(screen, listY, h - 4, {
+      icon: '○', title: 'No users found',
+      message: 'Try different keywords',
+      hint: '[Esc] Back',
+    });
+    return;
+  }
+  sectionHeader(screen, 2, listY, '◫ USERS', '[' + results.length + ']');
+  screen.hline(listY + 1, '─', { dim: true });
+  const start = appState.searchScroll;
+  for (let i = 0; i < maxVisible && start + i < results.length; i++) {
+    const user = results[start + i];
+    const row = listY + 2 + i;
+    const sel = start + i === appState.selectedRepo;
+    if (sel) {
+      for (let x = 0; x < W; x++) screen.styleBuf[row][x] = color('selection');
+    }
+    screen.writeStr(2, row, sel ? '▶' : '  ', sel ? color('selection') : color('dim'));
+    screen.writeStr(5, row, truncate(user.login || '?', 20), sel ? color('selection') : { fg: 'cyan', bold: true });
+    const type = user.type || '';
+    screen.writeStr(28, row, type, sel ? color('selection') : color('dim'));
+  }
+  const countY = listY + 2 + maxVisible;
+  if (countY < y + h) {
+    const pageInfo = appState.userSearchHasMore || appState.userSearchPage > 1
+      ? '   Page ' + appState.userSearchPage + '   [PgUp/PgDn]' : '';
+    screen.writeStr(2, countY, results.length + ' results' + pageInfo, { dim: true });
+  }
+}
+
+function renderCodeResults(screen, listY, h, W, maxVisible) {
+  const results = appState.codeSearchResults;
+  if (results.length === 0) {
+    emptyState(screen, listY, h - 4, {
+      icon: '○', title: 'No code results found',
+      message: 'Try different search terms',
+      hint: '[Esc] Back',
+    });
+    return;
+  }
+  sectionHeader(screen, 2, listY, '◫ CODE', '[' + results.length + ']');
+  screen.hline(listY + 1, '─', { dim: true });
+  const start = appState.searchScroll;
+  for (let i = 0; i < maxVisible && start + i < results.length; i++) {
+    const item = results[start + i];
+    const row = listY + 2 + i;
+    const sel = start + i === appState.selectedRepo;
+    if (sel) {
+      for (let x = 0; x < W; x++) screen.styleBuf[row][x] = color('selection');
+    }
+    const path = truncate(item.path || '?', 25);
+    const repo = item.repository ? item.repository.full_name : '?';
+    screen.writeStr(2, row, sel ? '▶' : '  ', sel ? color('selection') : color('dim'));
+    screen.writeStr(5, row, path, sel ? color('selection') : { fg: 'white' });
+    screen.writeStr(32, row, truncate(repo, W - 35), sel ? color('selection') : { fg: 'cyan' });
+  }
+  const countY = listY + 2 + maxVisible;
+  if (countY < y + h) {
+    const pageInfo = appState.codeSearchHasMore || appState.codeSearchPage > 1
+      ? '   Page ' + appState.codeSearchPage + '   [PgUp/PgDn]' : '';
+    screen.writeStr(2, countY, results.length + ' results' + pageInfo, { dim: true });
   }
 }
 
@@ -1031,7 +1211,23 @@ export const keys = {
     }
   },
   'Z': () => { if (isFilesPane()) files.keys.Z(); },
-  'C': () => { if (isFilesPane()) files.keys.C(); },
+  'C': () => {
+    if (isFilesPane()) files.keys.C();
+    else if (appState.analyzeView === 'search' || appState.analyzeView === 'results') {
+      appState.searchType = 'code';
+      appState.analyzeView = 'search';
+      render();
+      startInput('Search code: ', 'code-search');
+    }
+  },
+  'u': () => {
+    if (appState.analyzeView === 'search' || appState.analyzeView === 'results') {
+      appState.searchType = 'users';
+      appState.analyzeView = 'search';
+      render();
+      startInput('Search users: ', 'user-search');
+    }
+  },
   'G': () => { if (isFilesPane()) files.keys.G(); },
   'B': () => { if (isFilesPane()) files.keys.B(); },
   'Y': () => { if (isFilesPane()) files.keys.Y(); },
@@ -1113,10 +1309,14 @@ export function up(screen) {
     if (appState.detailsPane === 'packages') appState.selectedAsset = appState.detailsScroll;
     render(); return;
   }
-  if (appState.analyzeView === 'results' && appState.searchResults.length > 0) {
-    if (appState.selectedRepo > appState.searchScroll) appState.selectedRepo--;
-    else if (appState.searchScroll > 0) { appState.searchScroll--; appState.selectedRepo--; }
-    render(); return;
+  if (appState.analyzeView === 'results') {
+    const list = getResultList();
+    if (list && list.length > 0) {
+      if (appState.selectedRepo > appState.searchScroll) appState.selectedRepo--;
+      else if (appState.searchScroll > 0) { appState.searchScroll--; appState.selectedRepo--; }
+      render();
+    }
+    return;
   }
   if (appState.analyzeView === 'forks' && appState.forks.length > 0) {
     if (appState.selectedFork > appState.forkScroll) appState.selectedFork--;
@@ -1139,13 +1339,14 @@ export function down(screen) {
     render(); return;
   }
   if (appState.analyzeView === 'results') {
+    const list = getResultList();
     const maxVisible = Math.max(1, Math.min(8, screen.height - 16));
-    if (appState.searchResults.length > 0) {
+    if (list && list.length > 0) {
       if (appState.selectedRepo < appState.searchScroll + maxVisible - 1) {
-        appState.selectedRepo = Math.min(appState.searchResults.length - 1, appState.selectedRepo + 1);
-      } else if (appState.searchScroll + maxVisible < appState.searchResults.length) {
+        appState.selectedRepo = Math.min(list.length - 1, appState.selectedRepo + 1);
+      } else if (appState.searchScroll + maxVisible < list.length) {
         appState.searchScroll++;
-        appState.selectedRepo = Math.min(appState.searchResults.length - 1, appState.selectedRepo + 1);
+        appState.selectedRepo = Math.min(list.length - 1, appState.selectedRepo + 1);
       }
       render();
     }
@@ -1165,11 +1366,27 @@ export function down(screen) {
 export function enter() {
   if (isFilesPane()) { files.enter(); return; }
   const v = appState.analyzeView;
-  if (v === 'results' && appState.searchResults.length > 0) {
-    const repo = appState.searchResults[appState.selectedRepo];
-    if (repo) {
-      const [owner, name] = repo.full_name.split('/');
-      loadRepoDetails(owner, name);
+  const type = appState.searchType || 'repos';
+  if (v === 'results') {
+    if (type === 'users') {
+      const user = appState.userSearchResults[appState.selectedRepo];
+      if (user && user.login) {
+        openUserProfile(user.login);
+      }
+    } else if (type === 'code') {
+      const item = appState.codeSearchResults[appState.selectedRepo];
+      if (item && item.html_url) {
+        openUrl(item.html_url).then(res => {
+          if (res.ok) showMessage('Opened in browser', 'success');
+          else showMessage(res.error || 'Open failed', 'error');
+        });
+      }
+    } else if (appState.searchResults.length > 0) {
+      const repo = appState.searchResults[appState.selectedRepo];
+      if (repo) {
+        const [owner, name] = repo.full_name.split('/');
+        loadRepoDetails(owner, name);
+      }
     }
   } else if (v === 'details' && appState.repoDetails) {
     if (appState.detailsPane === 'issues') {
@@ -1194,6 +1411,13 @@ export function enter() {
     startInput('Search repos: ', 'search');
   }
 }
+function getResultList() {
+  const type = appState.searchType || 'repos';
+  if (type === 'users') return appState.userSearchResults;
+  if (type === 'code') return appState.codeSearchResults;
+  return appState.searchResults;
+}
+
 export function space() {
   if (appState.analyzeView === 'results') loadMoreSearchResults();
   else if (appState.analyzeView === 'forks') loadMoreForks();

@@ -2,6 +2,7 @@
 // v0.5+ design: cleaner section cards, focus-aware stat cards, breadcrumb-aware.
 
 import { appState, render, startAsync, isStale, showMessage, setTab, confirm } from '../state.mjs';
+import { startInput, registerInputHandler } from '../input.mjs';
 import {
   getUserEvents, getTrendingRepos, getStarredRepos,
   getUserIssues, getUserPullRequests, searchRepositories,
@@ -459,15 +460,19 @@ export function renderDashboard(screen, y, h) {
   }
 
   if (ry < y + h - 2) {
+    const trendingList = getFilteredTrending();
     const trendingVisible = sectionHeader(screen, rightX, ry, 'TRENDING THIS WEEK', null, 'dashboard:trending');
+    if (appState.dashboardFilter) {
+      screen.writeStr(rightX + 24, ry, 'filter: "' + appState.dashboardFilter + '"', { dim: true, fg: 'yellow' });
+    }
     ry++;
-    if (appState.trending.length === 0) {
+    if (trendingList.length === 0) {
       screen.writeStr(rightX, ry++, appState.dashboardLoaded ? '(none)' : 'Loading...', { dim: true });
     } else {
-      const maxTrending = Math.min(appState.trending.length, Math.max(3, Math.floor((y + h - bodyY) * 0.30)));
-      for (let i = 0; i < maxTrending && i < appState.trending.length; i++) {
+      const maxTrending = Math.min(trendingList.length, Math.max(3, Math.floor((y + h - bodyY) * 0.30)));
+      for (let i = 0; i < maxTrending && i < trendingList.length; i++) {
         if (ry >= y + h - 1) break;
-        const r = appState.trending[i];
+        const r = trendingList[i];
         const sel = i === appState.trendingSelected;
         if (sel) {
           for (let x = rightX; x < rightX + rightW; x++) screen.styleBuf[ry][x] = { bg: 'blue', fg: 'white', bold: true };
@@ -518,8 +523,9 @@ export async function loadMoreTrending() {
 }
 
 export function openTrendingRepo() {
-  if (appState.trending.length === 0) return;
-  const r = appState.trending[appState.trendingSelected] || appState.trending[0];
+  const trendingList = getFilteredTrending();
+  if (trendingList.length === 0) return;
+  const r = trendingList[appState.trendingSelected] || trendingList[0];
   const [owner, name] = r.full_name.split('/');
   setTab(2);
   loadRepoDetails(owner, name);
@@ -531,8 +537,9 @@ export function trendingUp() {
 }
 
 export function trendingDown() {
+  const trendingList = getFilteredTrending();
   appState.trendingSelected = Math.min(
-    appState.trending.length - 1,
+    trendingList.length - 1,
     appState.trendingSelected + 1
   );
   render();
@@ -605,7 +612,23 @@ export function openFocusedCard() {
   }
 }
 
+registerInputHandler('dashboard-filter', (value) => {
+  appState.dashboardFilter = (value || '').trim();
+  appState.trendingSelected = 0;
+  showMessage(appState.dashboardFilter
+    ? 'Filtering trending: "' + appState.dashboardFilter + '"'
+    : 'Trending filter cleared', 'info');
+  render();
+});
+
+function getFilteredTrending() {
+  const q = (appState.dashboardFilter || '').trim().toLowerCase();
+  if (!q) return appState.trending;
+  return appState.trending.filter(r => (r.full_name || '').toLowerCase().includes(q));
+}
+
 export const keys = {
+  '/': () => startInput('Filter trending: ', 'dashboard-filter'),
   'n': () => {
     const repos = appState.repos;
     if (repos.length > 0) {

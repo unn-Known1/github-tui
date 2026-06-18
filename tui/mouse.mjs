@@ -1,6 +1,6 @@
 // Mouse support — parse terminal mouse events and dispatch to handlers.
 
-import { appState, tabState, setTab, render, TABS, toggleCollapse } from './state.mjs';
+import { appState, tabState, setTab, render, TABS, toggleCollapse, showMessage } from './state.mjs';
 import { getScreen, HEADER_HEIGHT } from './render.mjs';
 
 export function enableMouse() {
@@ -94,8 +94,78 @@ function handleClick(col, row) {
   // Collapsible section headers — check exact arrow position.
   if (handleCollapsibleClick(sx, sy)) return;
 
+  // Log click for double-click detection on dashboard trending.
+  if (tabState.current === 0 && appState._lastClickTime) {
+    const now = Date.now();
+    if (now - appState._lastClickTime < 400 && appState._lastClickX === sx && appState._lastClickY === sy) {
+      // Double click — open trending repo or stat card
+      if (handleDblClick(sx, sy)) { appState._lastClickTime = 0; return; }
+    }
+    appState._lastClickTime = now;
+    appState._lastClickX = sx;
+    appState._lastClickY = sy;
+  } else {
+    appState._lastClickTime = Date.now();
+    appState._lastClickX = sx;
+    appState._lastClickY = sy;
+  }
+
   // Content-area click (list items, stat cards, etc.).
   handleContentClick(sx, sy);
+}
+
+function handleDblClick(sx, sy) {
+  const screen = getScreen();
+  if (!screen) return false;
+  const W = screen.width, H = screen.height;
+  const y = HEADER_HEIGHT + 2;
+  const h = H - HEADER_HEIGHT - 2 - 2;
+  const cardW = Math.min(16, Math.max(10, Math.floor((W - 2) / 5) - 2));
+  const gap = 2;
+  const cardY = y + 1;
+  const cardH = 4;
+  const bodyY = cardY + cardH + 2;
+  const splitX = Math.floor(W / 2);
+  const rightX = splitX + 2;
+
+  // Double-click stat card → drill in
+  if (sy >= cardY && sy < cardY + cardH) {
+    const col = Math.floor((sx - 1) / (cardW + gap));
+    if (col === 4) {
+      // Stale → repos with stale filter
+      setTab(1);
+      appState.repoStaleOnly = true;
+      appState.repoScroll = 0;
+      appState.repoSelected = 0;
+      showMessage('Showing stale repos', 'info');
+      render();
+      return true;
+    }
+    if (col === 0 || col === 1) {
+      setTab(1);
+      render();
+      return true;
+    }
+    return false;
+  }
+
+  // Double-click trending repo → open in Analyze
+  if (sx >= rightX && sy >= bodyY) {
+    const th = appState._sectionHeaders['dashboard:trending'];
+    if (th && th.y > 0 && sy > th.y) {
+      const listIdx = sy - th.y - 1;
+      if (listIdx >= 0 && listIdx < appState.trending.length) {
+        const r = appState.trending[listIdx];
+        if (r && r.full_name) {
+          const [owner, name] = r.full_name.split('/');
+          setTab(2);
+          import('./tabs/analyze.mjs').then(a => a.loadRepoDetails(owner, name));
+          return true;
+        }
+      }
+    }
+  }
+  return false;
 }
 
 // ── Tab bar ───────────────────────────────────────────────────
@@ -310,7 +380,7 @@ function dispatchInboxClick(sy) {
   const itemIdx = sy - HEADER_HEIGHT - 2 + scroll;
   if (itemIdx >= 0 && itemIdx < appState.notifications.length) {
     appState.inboxScroll = Math.max(0, itemIdx - 5);
-    appState.inboxCursor = itemIdx;
+    appState.selectedNotification = itemIdx;
     render();
   }
 }
@@ -329,6 +399,12 @@ function scrollUp() {
     if (appState.detailsScroll > 0) { appState.detailsScroll--; render(); }
   } else if (t === 4) {
     if (appState.inboxScroll > 0) { appState.inboxScroll--; render(); }
+  } else if (t === 5) {
+    if (appState.actionsView === 'repos') {
+      if (appState.actionsRepoScroll > 0) { appState.actionsRepoScroll--; render(); }
+    } else {
+      if (appState.actionsScroll > 0) { appState.actionsScroll--; render(); }
+    }
   }
 }
 
@@ -350,5 +426,13 @@ function scrollDown() {
   } else if (t === 4) {
     const maxV = Math.max(1, screen.height - 12);
     if (appState.inboxScroll + maxV < appState.notifications.length) { appState.inboxScroll++; render(); }
+  } else if (t === 5) {
+    if (appState.actionsView === 'repos') {
+      const maxV = Math.max(1, screen.height - 12);
+      if (appState.actionsRepoScroll + maxV < appState.actionsRepos.length) { appState.actionsRepoScroll++; render(); }
+    } else {
+      appState.actionsScroll++;
+      render();
+    }
   }
 }

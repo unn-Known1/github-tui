@@ -371,4 +371,35 @@ export const getUserFollowing = (token, page, perPage) =>
 export const getRepoDependabotAlerts = (token, owner, repo, state) =>
   request('/repos/' + owner + '/' + repo + '/dependabot/alerts' + (state ? '?state=' + state : ''), { token });
 
+// ─── User search ──────────────────────────────────────────────────
+export async function searchUsers(token, query, page, perPage) {
+  const r = await request('/search/users?q=' + encodeURIComponent(query) +
+    '&page=' + (page||1) + '&per_page=' + (perPage||20), { token });
+  return r.items || [];
+}
+
+// ─── Code search ──────────────────────────────────────────────────
+export async function searchCode(token, query, page, perPage) {
+  const r = await request('/search/code?q=' + encodeURIComponent(query) +
+    '&page=' + (page||1) + '&per_page=' + (perPage||20), { token });
+  return r.items || [];
+}
+
+// ─── Repo subscription (watch/unwatch) ─────────────────────────────
+export const getSubscription = (token, owner, repo) =>
+  request('/repos/' + owner + '/' + repo + '/subscription', { token });
+export const setSubscription = (token, owner, repo, subscribed, ignored) =>
+  request('/repos/' + owner + '/' + repo + '/subscription', {
+    token, method: 'PUT', body: { subscribed, ignored: ignored || false },
+  });
+export const deleteSubscription = (token, owner, repo) =>
+  request('/repos/' + owner + '/' + repo + '/subscription', { token, method: 'DELETE' });
+
+// ─── Create issue ─────────────────────────────────────────────────
+export const createIssue = (token, owner, repo, title, body, labels, assignees) =>
+  request('/repos/' + owner + '/' + repo + '/issues', {
+    token, method: 'POST',
+    body: { title, body: body || '', labels: labels || [], assignees: assignees || [] },
+  });
+
 

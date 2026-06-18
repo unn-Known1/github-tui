@@ -26,6 +26,7 @@ export const TABS = [
   { key: '3', label: 'Analyze' },
   { key: '4', label: 'Settings' },
   { key: '5', label: 'Inbox' },
+  { key: '6', label: 'Actions' },
 ];
 export const tabState = { current: 0 };
 
@@ -81,7 +82,14 @@ export const appState = {
   searchHasMore: true,
   selectedRepo: 0,
   searchScroll: 0,
+  searchType: 'repos',    // 'repos' | 'users' | 'code'
   analyzeView: 'search',  // 'search' | 'results' | 'details' | 'forks'
+  userSearchResults: [],   // user search results
+  codeSearchResults: [],   // code search results
+  codeSearchPage: 1,
+  codeSearchHasMore: true,
+  userSearchPage: 1,
+  userSearchHasMore: true,
   detailsPane: 'overview', // 'overview' | 'issues' | 'prs' | 'readme' | 'files'
   detailsScroll: 0,
   repoDetails: null,
@@ -118,6 +126,7 @@ export const appState = {
   trendingPage: 1,
   trendingHasMore: true,
   trendingSelected: 0,
+  dashboardFilter: '',
   starred: [],
   starredPage: 1,
   starredHasMore: false,
@@ -131,11 +140,23 @@ export const appState = {
   dashboardSelectedCard: 0,      // 0..4 stat-card focus for keyboard nav
   dashboardCardsFocus: false,    // true when keyboard focus is on a stat card
 
+  // ── Actions / CI ──
+  actionsView: 'repos',     // 'repos' | 'runs'
+  actionsRepos: [],         // repos with workflow runs loaded
+  actionsRuns: [],          // workflow runs for selected repo
+  actionsSelected: 0,
+  actionsScroll: 0,
+  actionsRepoSelected: 0,
+  actionsRepoScroll: 0,
+  actionsLoading: false,
+  actionsFilter: '',
+
   // ── Inbox ──
   notifications: [],
   inboxScroll: 0,
   selectedNotification: 0,
   inboxFilter: 'all',    // 'all' | 'unread' | 'mentions' | 'review'
+  inboxTextFilter: '',
   inboxPage: 1,
   inboxHasMore: true,
 
@@ -198,6 +219,9 @@ export const appState = {
   // ── Theme & bookmarks (v0.3+) ──
   themeName: 'default',
   bookmarks: [],         // [{ id, full_name, url, tags, addedAt }]
+  showBookmarks: false,  // bookmarks browser overlay
+  bookmarksCursor: 0,
+  bookmarksScroll: 0,
   savedSearches: [],     // [{ id, label, query }]
 
   // ── Rate-limit mirror (also lives in github.mjs but mirrored for render)

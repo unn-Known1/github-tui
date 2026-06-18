@@ -14,7 +14,7 @@ import * as palette from './palette.mjs';
 import * as onboarding from './tabs/onboarding.mjs';
 import { handleInputKey } from './input.mjs';
 import { copyToClipboard, openUrl, notificationToHtmlUrl } from './utils.mjs';
-import { startInput } from './input.mjs';
+import { startInput, registerInputHandler } from './input.mjs';
 
 import * as dashboard from './tabs/dashboard.mjs';
 import * as repos     from './tabs/repos.mjs';
@@ -22,13 +22,14 @@ import * as analyze   from './tabs/analyze.mjs';
 import * as settings  from './tabs/settings.mjs';
 import * as inbox     from './tabs/inbox.mjs';
 import * as detail    from './tabs/detail.mjs';
+import * as actions   from './tabs/actions.mjs';
 import * as help      from './tabs/help.mjs';
-import { addBookmark, removeBookmark, isBookmarked, addSavedSearch, removeSavedSearch } from './store.mjs';
-import { starRepo, unstarRepo, isStarred } from './github.mjs';
+import { addBookmark, removeBookmark, isBookmarked, addSavedSearch, removeSavedSearch, loadBookmarks } from './store.mjs';
+import { starRepo, unstarRepo, isStarred, createIssue, getSubscription, setSubscription, deleteSubscription } from './github.mjs';
 import { getScreen } from './render.mjs';
 import { parseMouseEvent, handleMouseEvent } from './mouse.mjs';
 
-const tabModules = [dashboard, repos, analyze, settings, inbox];
+const tabModules = [dashboard, repos, analyze, settings, inbox, actions];
 
 // ──────────────────────────────────────────────────────────────────
 // Context helpers — figure out what the user is pointing at.
@@ -89,6 +90,23 @@ async function toggleStar() {
   } catch (e) { showMessage(e.message || 'Star failed', 'error'); }
 }
 
+async function toggleWatch() {
+  const r = currentRepoForAction();
+  if (!r || !appState.token) { showMessage('Login + select a repo first', 'warning'); return; }
+  const [owner, name] = r.full_name.split('/');
+  try {
+    let sub;
+    try { sub = await getSubscription(appState.token, owner, name); } catch (e) { sub = null; }
+    if (sub && sub.subscribed) {
+      await deleteSubscription(appState.token, owner, name);
+      showMessage('Unwatched ' + r.full_name, 'info');
+    } else {
+      await setSubscription(appState.token, owner, name, true);
+      showMessage('Watching ' + r.full_name + ' (all activity)', 'success');
+    }
+  } catch (e) { showMessage(e.message || 'Watch toggle failed', 'error'); }
+}
+
 function toggleBookmark() {
   const r = currentRepoForAction();
   if (!r) { showMessage('Select a repo first', 'warning'); return; }
@@ -116,6 +134,8 @@ function refreshCurrent() {
     analyze.loadRepoDetails(o, n);
   } else if (t === 4) {
     inbox.loadNotifications();
+  } else if (t === 5) {
+    actions.loadActionsRepos();
   }
 }
 
@@ -141,6 +161,51 @@ export function handleKey(key) {
   // 1a. Onboarding / What's new captures all keys.
   if (appState.showOnboarding || appState.showWelcome) {
     onboarding.handleOnboardingKey(key);
+    return;
+  }
+
+  // 1aa. Bookmarks overlay.
+  if (appState.showBookmarks) {
+    if (key === '\x1b' || key === 'q' || key === 'b') { appState.showBookmarks = false; render(); return; }
+    if (key === '\x1b[A' || key === 'k') {
+      appState.bookmarksCursor = Math.max(0, appState.bookmarksCursor - 1);
+      render(); return;
+    }
+    if (key === '\x1b[B' || key === 'j') {
+      const max = appState.bookmarks.length - 1;
+      appState.bookmarksCursor = Math.min(max, appState.bookmarksCursor + 1);
+      render(); return;
+    }
+    if (key === '\r' || key === '\n') {
+      const bm = appState.bookmarks[appState.bookmarksCursor];
+      if (bm && bm.url) {
+        openUrl(bm.url).then(res => {
+          if (res.ok) showMessage('Opened ' + bm.full_name, 'success');
+          else showMessage(res.error || 'Open failed', 'error');
+        });
+      }
+      appState.showBookmarks = false;
+      render();
+      return;
+    }
+    if (key === 'd' || key === 'D') {
+      const bm = appState.bookmarks[appState.bookmarksCursor];
+      if (bm) {
+        removeBookmark(bm.id || bm.full_name);
+        appState.bookmarks = loadBookmarks();
+        appState.bookmarksCursor = Math.min(appState.bookmarksCursor, Math.max(0, appState.bookmarks.length - 1));
+        showMessage('Removed bookmark: ' + bm.full_name, 'info');
+      }
+      render();
+      return;
+    }
+    if (key === 'y') {
+      const bm = appState.bookmarks[appState.bookmarksCursor];
+      if (bm && bm.url && copyToClipboard(bm.url)) showMessage('Copied URL', 'success');
+      else showMessage('Clipboard copy failed', 'error');
+      render();
+      return;
+    }
     return;
   }
 
@@ -204,11 +269,14 @@ export function handleKey(key) {
 
   // 4. Tab-switch + globals.
   switch (key) {
-    case '1': case '2': case '3': case '4': case '5': {
+    case '1': case '2': case '3': case '4': case '5': case '6': {
       const i = parseInt(key, 10) - 1;
       setTab(i);
       if (i === 4 && appState.notifications.length === 0 && appState.token) {
         inbox.loadNotifications();
+      }
+      if (i === 5 && appState.actionsRepos.length === 0 && appState.token) {
+        actions.loadActionsRepos();
       }
       return;
     }
@@ -255,6 +323,15 @@ export function handleKey(key) {
 
   // 5. Global star toggle.
   if (key === '*' && currentRepoForAction()) { toggleStar(); return; }
+
+  // 5a. Global watch toggle.
+  if (key === 'W' && currentRepoForAction()) { toggleWatch(); return; }
+
+  // 5b. Actions tab per-tab keys.
+  if (tabState.current === 5 && appState.actionsView === 'runs') {
+    if (key === 'r' || key === 'R') { actions.rerunSelected(); return; }
+    if (key === 'x' || key === 'X') { actions.cancelSelected(); return; }
+  }
 
   // 6. Dashboard stat-card focus.
   if (tabState.current === 0) {
@@ -323,6 +400,15 @@ function handleTop() {
     appState.selectedNotification = 0;
     appState.inboxScroll = 0;
     render();
+  } else if (t === 5) {
+    if (appState.actionsView === 'repos') {
+      appState.actionsRepoSelected = 0;
+      appState.actionsRepoScroll = 0;
+    } else {
+      appState.actionsSelected = 0;
+      appState.actionsScroll = 0;
+    }
+    render();
   }
 }
 function handleBottom() {
@@ -344,10 +430,9 @@ function handleBottom() {
     }
     render();
   } else if (t === 4) {
-    const list = appState.notifications;
-    appState.selectedNotification = Math.max(0, list.length - 1);
-    const maxVisible = Math.max(1, screen.height - 12);
-    appState.inboxScroll = Math.max(0, list.length - maxVisible);
+    inbox.bottom(screen);
+  } else if (t === 5) {
+    actions.bottom(screen);
     render();
   }
 }
@@ -399,6 +484,7 @@ function handleEnter() {
   else if (t === 2) analyze.enter();
   else if (t === 3) settings.enter();
   else if (t === 4) inbox.enter();
+  else if (t === 5) actions.enter();
 }
 function handleUp() {
   const t = tabState.current;
@@ -408,6 +494,7 @@ function handleUp() {
   else if (t === 2) analyze.up(screen);
   else if (t === 3) settings.up();
   else if (t === 4) inbox.up();
+  else if (t === 5) actions.up();
 }
 function handleDown() {
   const t = tabState.current;
@@ -417,6 +504,7 @@ function handleDown() {
   else if (t === 2) analyze.down(screen);
   else if (t === 3) settings.down();
   else if (t === 4) inbox.down(screen);
+  else if (t === 5) actions.down();
 }
 function handleBack() {
   const t = tabState.current;
@@ -431,6 +519,7 @@ function handleBack() {
       return;
     }
   }
+  if (t === 5) { actions.goBack(); return; }
   setTab(0);
 }
 
@@ -456,6 +545,7 @@ export function registerCoreActions() {
   reg({ id: 'quit',    label: 'Quit application',             hint: 'q', run: quit });
 
   reg({ id: 'star.toggle',     label: 'Star / unstar current repo',         hint: '*', run: toggleStar });
+  reg({ id: 'watch.toggle',    label: 'Watch / unwatch current repo',       hint: 'W', run: toggleWatch });
   reg({ id: 'bookmark.toggle', label: 'Bookmark / unbookmark current repo', hint: 'b', run: toggleBookmark });
 
   reg({ id: 'repos.sort.name',    label: 'Sort repos by name',    run: () => { setTab(1); repos.keys.n(); } });
@@ -500,14 +590,8 @@ export function registerCoreActions() {
   reg({ id: 'settings.logout', label: 'Log out', run: () => confirm('Log out of GitHub?', settings.handleLogout, 'Log Out') });
   reg({ id: 'dashboard.refresh', label: 'Refresh dashboard widgets',
         run: () => dashboard.loadDashboardWidgets(true) });
-  reg({ id: 'dashboard.new-issue', label: 'Dashboard: Create new issue',
-        run: () => {
-          if (appState.repos.length > 0) {
-            openUrl(appState.repos[0].html_url + '/issues/new');
-          } else {
-            showMessage('No repos to create issues for', 'warning');
-          }
-        } });
+  reg({ id: 'dashboard.new-issue', label: 'Create new issue from TUI',
+        run: startCreateIssue });
 
   reg({ id: 'detail.comment', label: 'Comment on current issue/PR',
         run: () => { if (appState.showDetail) detail.openCommentInput(); } });
@@ -517,6 +601,27 @@ export function registerCoreActions() {
         run: () => { if (appState.showDetail) detail.mergePR(); } });
   reg({ id: 'detail.react', label: 'Add reaction to current issue/PR',
         run: () => { if (appState.showDetail) detail.toggleReactionPicker(); } });
+
+  // Bookmarks browser
+  reg({ id: 'bookmarks.browse', label: 'Browse bookmarks',
+        run: () => {
+          appState.bookmarks = loadBookmarks();
+          appState.showBookmarks = true;
+          appState.bookmarksCursor = 0;
+          appState.bookmarksScroll = 0;
+          render();
+        } });
+  reg({ id: 'bookmarks.export', label: 'Export bookmarks to Markdown',
+        run: () => {
+          const bm = appState.bookmarks;
+          if (bm.length === 0) { showMessage('No bookmarks to export', 'warning'); return; }
+          const md = '# Bookmarks\n\n' + bm.map(b => `- [${b.full_name}](${b.url})`).join('\n');
+          if (copyToClipboard(md)) showMessage('Copied bookmarks as Markdown', 'success');
+          else showMessage('Clipboard copy failed', 'error');
+        } });
+
+  reg({ id: 'actions.refresh', label: 'Actions: load workflow runs',
+        run: () => { setTab(5); actions.loadActionsRepos(); } });
 
   // Saved searches
   reg({ id: 'search.save', label: 'Save current search query...',
@@ -542,3 +647,60 @@ export function registerCoreActions() {
 }
 
 import { submitSearch } from './tabs/analyze.mjs';
+
+// ── Create Issue Workflow ─────────────────────────────────────────
+// Temporary state for multi-step issue creation.
+let _issueRepoIndex = 0;
+let _issueTitle = '';
+let _issueBody = '';
+
+registerInputHandler('issue-title', async (value) => {
+  const title = (value || '').trim();
+  if (!title) { showMessage('Issue title cannot be empty', 'error'); return; }
+  _issueTitle = title;
+  startInput('Issue body (optional, Enter to skip): ', 'issue-body');
+});
+
+registerInputHandler('issue-body', async (value) => {
+  const body = (value || '').trim();
+  _issueBody = body;
+  const repos = appState.repos;
+  if (!repos[_issueRepoIndex]) { showMessage('No repo selected', 'error'); return; }
+  const repo = repos[_issueRepoIndex];
+  const [owner, name] = repo.full_name.split('/');
+  try {
+    const result = await createIssue(appState.token, owner, name, _issueTitle, _issueBody);
+    if (result && result.html_url) {
+      showMessage('Created issue: ' + result.title, 'success');
+    } else {
+      showMessage('Issue created', 'success');
+    }
+  } catch (e) {
+    showMessage(e.message || 'Failed to create issue', 'error');
+  }
+  _issueTitle = '';
+  _issueBody = '';
+});
+
+registerInputHandler('issue-pick-repo', (value) => {
+  const idx = parseInt(value, 10);
+  const repos = appState.repos;
+  if (isNaN(idx) || idx < 0 || idx >= repos.length) {
+    showMessage('Invalid repo number', 'error');
+    _issueTitle = '';
+    _issueBody = '';
+    return;
+  }
+  _issueRepoIndex = idx;
+  startInput('Issue title: ', 'issue-title');
+});
+
+function startCreateIssue() {
+  const repos = appState.repos;
+  if (!appState.token) { showMessage('Login first', 'warning'); return; }
+  if (repos.length === 0) { showMessage('No repos loaded', 'warning'); return; }
+  // Show repo picker in status bar.
+  const names = repos.map((r, i) => i + ': ' + r.name).join('  ');
+  showMessage('Available repos: ' + names, 'info', 5000);
+  startInput('Enter repo number (0-' + (repos.length - 1) + '): ', 'issue-pick-repo');
+}

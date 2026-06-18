@@ -10,6 +10,7 @@ import { relTime, notifTypeColor, notificationToHtmlUrl, openUrl, truncate } fro
 import { color } from '../theme.mjs';
 import { emptyState } from '../render.mjs';
 import { openDetail } from './detail.mjs';
+import { startInput, registerInputHandler } from '../input.mjs';
 
 const FILTERS = ['all', 'unread', 'mentions', 'review'];
 const INBOX_PER_PAGE = 50;
@@ -102,13 +103,21 @@ export function pageDown() {
 }
 
 function filtered() {
-  const list = appState.notifications;
+  let list = appState.notifications;
   switch (appState.inboxFilter) {
-    case 'unread':   return list.filter(n => n.unread);
-    case 'mentions': return list.filter(n => n.reason === 'mention');
-    case 'review':   return list.filter(n => n.reason === 'review_requested');
-    default:         return list;
+    case 'unread':   list = list.filter(n => n.unread); break;
+    case 'mentions': list = list.filter(n => n.reason === 'mention'); break;
+    case 'review':   list = list.filter(n => n.reason === 'review_requested'); break;
   }
+  const q = (appState.inboxTextFilter || '').trim().toLowerCase();
+  if (q) {
+    list = list.filter(n => {
+      const title = (n.subject && n.subject.title || '').toLowerCase();
+      const repo = (n.repository && n.repository.full_name || '').toLowerCase();
+      return title.includes(q) || repo.includes(q);
+    });
+  }
+  return list;
 }
 
 function selected() {
@@ -309,17 +318,36 @@ export function renderInbox(screen, y, h) {
   const infoY = headerY + 2 + Math.min(maxRows, list.length) + 1;
   if (infoY < y + h) {
     screen.writeStr(2, infoY,
-      '[r] Refresh   [m] Mark read   [M] Mark all   [f] Filter   [u] Unsubscribe   [Enter] Open', { dim: true });
+      '[/] Search   [r] Refresh   [m] Mark read   [M] Mark all   [f] Filter   [u] Unsubscribe   [Enter] Open', { dim: true });
   }
 }
 
+registerInputHandler('inbox-filter', (value) => {
+  appState.inboxTextFilter = (value || '').trim();
+  appState.inboxScroll = 0;
+  appState.selectedNotification = 0;
+  showMessage(appState.inboxTextFilter
+    ? 'Filtering: "' + appState.inboxTextFilter + '"'
+    : 'Filter cleared', 'info');
+  render();
+});
+
 export const keys = {
+  '/': () => startInput('Search notifications: ', 'inbox-filter'),
   'm': markCurrentRead,
   'M': markAllRead,
   'u': unsubscribeCurrent,
   'f': cycleFilter,
   'g': () => { appState.selectedNotification = 0; appState.inboxScroll = 0; render(); },
 };
+
+export function bottom(screen) {
+  const list = filtered();
+  appState.selectedNotification = Math.max(0, list.length - 1);
+  const maxVisible = Math.max(1, (screen ? screen.height : process.stdout.rows || 24) - 12);
+  appState.inboxScroll = Math.max(0, list.length - maxVisible);
+  render();
+}
 
 export function up() {
   const list = filtered();
