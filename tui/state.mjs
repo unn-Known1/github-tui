@@ -102,6 +102,7 @@ export const appState = {
   repoCheckSuites: [],
   userFollowers: [],
   userFollowing: [],
+  repoDependabotAlerts: [],
 
   // ── Forks sub-view ──
   forks: [],

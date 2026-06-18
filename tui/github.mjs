@@ -359,4 +359,8 @@ export const getUserFollowers = (token, page, perPage) =>
 export const getUserFollowing = (token, page, perPage) =>
   request('/user/following?page=' + (page||1) + '&per_page=' + (perPage||30), { token });
 
+// ─── Security (Dependabot) ────────────────────────────────────────
+export const getRepoDependabotAlerts = (token, owner, repo, state) =>
+  request('/repos/' + owner + '/' + repo + '/dependabot/alerts' + (state ? '?state=' + state : ''), { token });
+
 

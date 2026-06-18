@@ -11,6 +11,7 @@ import {
   getRepoTrafficViews, getRepoTrafficClones,
   getRepoTrafficPopularPaths, getRepoTrafficPopularReferrers,
   getRepoMilestones, getRepoLabels, getRepoCheckRuns, getRepoCheckSuites,
+  getRepoDependabotAlerts,
 } from '../github.mjs';
 import { startInput, registerInputHandler } from '../input.mjs';
 import { shortNum, truncate } from '../utils.mjs';
@@ -553,6 +554,53 @@ function renderPackagesPane(screen, y, maxH) {
   }
 }
 
+export async function loadSecurity() {
+  const repo = appState.repoDetails;
+  if (!repo) return;
+  const gen = startAsync();
+  appState.loading = true;
+  appState.repoDependabotAlerts = [];
+  render();
+  try {
+    const [owner, name] = repo.full_name.split('/');
+    const alerts = await getRepoDependabotAlerts(appState.token, owner, name);
+    if (isStale(gen)) return;
+    appState.repoDependabotAlerts = Array.isArray(alerts) ? alerts : [];
+  } catch (e) {
+    if (!isStale(gen)) showMessage('Failed to load security alerts: ' + e.message, 'error');
+  }
+  appState.loading = false;
+  if (!isStale(gen)) render();
+}
+
+function renderSecurityPane(screen, y, maxH) {
+  const W = screen.width;
+  const alerts = appState.repoDependabotAlerts;
+  sectionHeader(screen, 2, y, '🔒 SECURITY (' + alerts.length + ' alerts)');
+  y++;
+
+  if (alerts.length === 0) {
+    screen.writeStr(2, y++, 'No Dependabot alerts found', { dim: true });
+    return;
+  }
+
+  for (const alert of alerts) {
+    if (y >= y + maxH - 1) break;
+    const severity = alert.security_advisory?.severity || '?';
+    const severityIcon = severity === 'critical' ? '🔴' : severity === 'high' ? '🟠' : severity === 'medium' ? '🟡' : '⚪';
+    const pkg = alert.dependency?.package?.name || '?';
+    const summary = truncate(alert.security_advisory?.summary || '?', 30);
+    const state = alert.state || '?';
+    screen.writeStr(2, y, severityIcon);
+    screen.writeStr(5, y, truncate(pkg, 15), { fg: 'white' });
+    screen.writeStr(22, y, summary, { dim: true });
+    if (54 + state.length < W) {
+      screen.writeStr(54, y, state, { dim: true });
+    }
+    y++;
+  }
+}
+
 function sectionHeader(screen, x, y, text, hint) {
   screen.writeStr(x, y, text, { fg: 'cyan', bold: true });
   if (hint) {
@@ -777,6 +825,7 @@ function renderRepoDetails(screen, y, maxH) {
     ['milestones', 'Milestones',                                'M'],
     ['labels',   'Labels',                                      'L'],
     ['checks',   'Checks',                                      'K'],
+    ['security', 'Security',                                    'S'],
   ];
   let px = 2;
   for (const [id, label, k] of panes) {
@@ -797,6 +846,7 @@ function renderRepoDetails(screen, y, maxH) {
   if (appState.detailsPane === 'milestones') { renderMilestonesPane(screen, y + 3, maxH - 3); return; }
   if (appState.detailsPane === 'labels') { renderLabelsPane(screen, y + 3, maxH - 3); return; }
   if (appState.detailsPane === 'checks') { renderChecksPane(screen, y + 3, maxH - 3); return; }
+  if (appState.detailsPane === 'security') { renderSecurityPane(screen, y + 3, maxH - 3); return; }
 
   // Overview pane: 2-column layout.
   const leftWidth = Math.min(48, Math.floor(W / 2));
@@ -1026,6 +1076,18 @@ export const keys = {
         appState.detailsPane = 'checks';
         appState.detailsScroll = 0;
         loadChecks();
+      }
+      render();
+    }
+  },
+  'S': () => {
+    if (appState.analyzeView === 'details') {
+      if (appState.detailsPane === 'security') {
+        appState.detailsPane = 'overview';
+      } else {
+        appState.detailsPane = 'security';
+        appState.detailsScroll = 0;
+        loadSecurity();
       }
       render();
     }
