@@ -185,19 +185,20 @@ Every tab module exports `render(screen, y, h)`, an optional `keys` map for tab-
 
 ### 1 · Dashboard
 - Time-of-day greeting (`Good morning/afternoon/evening, <you>`) with 🔔 unread badge.
-- 5 stat cards: ★ Total Stars, ⑂ Total Forks, ◆ Distinct Languages, ⏱ Account Age, ⚠ Stale Repos.
+- 5 stat cards: ★ Total Stars, ⑂ Total Forks, ◆ Distinct Languages, ⏱ Account Age, ⚠ Stale Repos. `Tab` to focus, `←/→` to move, `Enter` to drill in (e.g. Stale → Repos with stale filter).
 - **Left:** profile mini (`@login`, email, followers, public/private repos), **contribution heatmap** (15-week grid from PushEvents), **star history sparkline** (last 30 days), top 5 repos by stars, language bar chart across all your repos.
 - **Right:** Recent Activity feed (last ~10 events with colored icons per type + relative timestamps), **Recent Issues** (across your repos), **Recent Pull Requests** (across your repos), **Stale Repos Alert** (60+ days no push), 🔥 Trending This Week (top 5 public repos created in last 7 days, sorted by stars).
-- **Quick Actions Bar** at bottom: `n` New Issue, `s` Star Repo, `b` Bookmark, `o` Open Browser.
+- **Recent repos** at the bottom — quick re-open of any repo you analyzed.
 
 ### 2 · Repos
 - Header shows aggregate **★/⑂/⚡** totals across all your repos plus archived count.
+- **Dismissible filter chips** above the list — each chip has an `✕` to remove just that filter. `c` still clears all in one go.
 - Sortable columns and a substring filter (`/`).
 - **Type cycle (`t`)** lets you jump straight to sources / forks / archived / private / public / templates.
 - **Language facet (`L`)** narrows to one language.
 - **Stale-only (`x`)** surfaces side-projects with no push in 6+ months.
 - **Density (`D`)** toggles between compact (1 line/row) and comfortable (description shown on row+1).
-- **Pins (`P`)** float favorites to the top — persisted on disk so they survive restarts.
+- **Pins (`P`)** float favorites to the top with a `★ PINNED` section header — persisted on disk so they survive restarts.
 - Each row shows visibility badges (🔒 private, 🔱 fork, 📦 archived, 🗄 template, 📌 pinned, ★ bookmarked) and a relative push time.
 - `Space` paginates beyond the first 30. `Enter` opens the repo in Analyze details.
 
@@ -252,6 +253,22 @@ Every tab module exports `render(screen, y, h)`, an optional `keys` map for tab-
 **Shipped in v0.4 (this update):** Dashboard enhancements — contribution heatmap (15-week grid), star history sparkline (30-day trend), recent issues/PRs activity, stale repos alert (60+ days), quick actions bar.
 
 **Shipped in v0.5 (this update):** Issue/PR detail popup with rendered body, labels, comments, and file diffs. Comment from TUI, emoji reactions, close/reopen, merge PRs with confirmation. PR diff viewer with unified diff and syntax coloring. Inbox notifications open detail popup for issues/PRs.
+
+**Shipped in v0.6 (this update — UI polish release):**
+- **Onboarding wizard** for first-time users + a toggleable "What's new" tour (`w`)
+- **Breadcrumb navigation** in the header showing where you are (e.g. `Analyze › facebook/react › Files`)
+- **In-tab unread badge** on the Inbox tab
+- **Dismissible filter chips** on the Repos tab (each chip has `✕`)
+- **Searchable help overlay** with categorized shortcuts
+- **Stat cards** on the dashboard are now navigable with `Tab` + `←/→` + `Enter`
+- **Cleaner chrome**: redesigned header, tab strip, status bar with context-aware key hints
+- **Toast notifications with icons** (✓ success, ✗ error, ⓘ info, ! warning)
+- **Recent repos** tracker with quick re-open from the Analyze search screen
+- **PINNED section** on the Repos tab with a clear section header
+- **System panel** on the Settings tab as its own bordered box
+- **By-Repo panel** on the Inbox tab as its own bordered box
+- **New "light" theme** added (8 themes total)
+- **Suggestion/feedback on first run** with the welcome overlay
 
 **Next up (v0.6 — "Cache & Offline"):**
 - Disk-backed ETag cache (survives restarts)

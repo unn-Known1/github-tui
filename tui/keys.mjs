@@ -1,14 +1,17 @@
 // Global key router.
 // Order of resolution:
 //   1. Palette open  -> palette handles everything.
-//   2. Help overlay  -> any key closes it.
-//   3. Input modal   -> input subsystem handles everything.
-//   4. Tab-switch / global keys.
-//   5. Per-tab key handlers from tab modules' keys map.
-//   6. Per-tab arrow / enter / space dispatchers.
+//   2. Onboarding / welcome -> onboarding handles everything.
+//   3. Help overlay  -> any key closes it (except arrow keys for scroll, / for search).
+//   4. Detail popup  -> detail handles everything.
+//   5. Input modal   -> input subsystem handles everything.
+//   6. Tab-switch / global keys.
+//   7. Per-tab key handlers from tab modules' keys map.
+//   8. Per-tab arrow / enter / space dispatchers.
 
 import { appState, tabState, setTab, showMessage, render, TABS, dismissConfirm, confirm } from './state.mjs';
 import * as palette from './palette.mjs';
+import * as onboarding from './tabs/onboarding.mjs';
 import { handleInputKey } from './input.mjs';
 import { copyToClipboard, openUrl, notificationToHtmlUrl } from './utils.mjs';
 
@@ -18,11 +21,11 @@ import * as analyze   from './tabs/analyze.mjs';
 import * as settings  from './tabs/settings.mjs';
 import * as inbox     from './tabs/inbox.mjs';
 import * as detail    from './tabs/detail.mjs';
+import * as help      from './tabs/help.mjs';
 import { addBookmark, removeBookmark, isBookmarked, addSavedSearch, removeSavedSearch } from './store.mjs';
 import { starRepo, unstarRepo, isStarred } from './github.mjs';
 import { getScreen } from './render.mjs';
 
-// Map tab index -> module. Used for keys lookup and arrow dispatchers.
 const tabModules = [dashboard, repos, analyze, settings, inbox];
 
 // ──────────────────────────────────────────────────────────────────
@@ -126,7 +129,41 @@ export function handleKey(key) {
   // 1. Palette captures all keys first.
   if (palette.handleKey(key)) return;
 
-  // 1b. Detail popup captures keys when open.
+  // 1a. Onboarding / What's new captures all keys.
+  if (appState.showOnboarding || appState.showWelcome) {
+    onboarding.handleOnboardingKey(key);
+    return;
+  }
+
+  // 1b. Help overlay: handle special keys, any other key closes.
+  if (appState.showHelp) {
+    if (key === '\x1b' || key === 'q') { appState.showHelp = false; render(); return; }
+    if (key === '\x1b[A' || key === 'k') { help.scrollHelp(-3, 200, 18); render(); return; }
+    if (key === '\x1b[B' || key === 'j') { help.scrollHelp(3, 200, 18); render(); return; }
+    if (key === 'g') { help.setHelpQuery(''); appState.helpCursor = 0; render(); return; }
+    if (key === '\x7f' || key === '\b') {
+      const q = appState.helpQuery || '';
+      help.setHelpQuery(q.slice(0, -1));
+      render();
+      return;
+    }
+    if (key === '/') {
+      // Already in search mode; treat as literal.
+      help.setHelpQuery((appState.helpQuery || '') + '/');
+      render();
+      return;
+    }
+    if (key === 'n') { help.scrollHelp(3, 200, 18); render(); return; }
+    if (key === 'p') { help.scrollHelp(-3, 200, 18); render(); return; }
+    if (key.length === 1 && key.charCodeAt(0) >= 32) {
+      help.setHelpQuery((appState.helpQuery || '') + key);
+      render();
+      return;
+    }
+    return;
+  }
+
+  // 1c. Detail popup captures keys when open.
   if (appState.showDetail) {
     if (key === '\x1b' || key === 'h' || key === '\x7f') { detail.handleBack(); return; }
     if (key === '\r' || key === '\n') { detail.enter(); return; }
@@ -140,14 +177,7 @@ export function handleKey(key) {
     return;
   }
 
-  // 2. Help overlay swallows the next key, whatever it is.
-  if (appState.showHelp) {
-    appState.showHelp = false;
-    render();
-    return;
-  }
-
-  // 2b. Confirmation dialog — 'y' executes, anything else dismisses.
+  // 2. Confirmation dialog — 'y' executes, anything else dismisses.
   if (appState.confirmAction) {
     if (key === 'y' || key === 'Y') {
       const action = appState.confirmAction;
@@ -169,7 +199,6 @@ export function handleKey(key) {
       const i = parseInt(key, 10) - 1;
       setTab(i);
       if (i === 0) appState.dashboardScroll = 0;
-      // Auto-load Inbox on first visit.
       if (i === 4 && appState.notifications.length === 0 && appState.token) {
         inbox.loadNotifications();
       }
@@ -179,13 +208,13 @@ export function handleKey(key) {
     case '\t': setTab((tabState.current + 1) % TABS.length); return;
     case '\x1b[Z': setTab((tabState.current - 1 + TABS.length) % TABS.length); return;
     case '?': appState.showHelp = true; render(); return;
-    case '\x10':  // Ctrl-P
-    case ':':
-      palette.open(); return;
+    case '\x10':
+    case ':': palette.open(); return;
     case 'r': refreshCurrent(); return;
     case 'o': openCurrent(); return;
     case 'y': copyCurrentUrl(); return;
     case 'b': toggleBookmark(); return;
+    case 'w': onboarding.startWelcome(); return;
     case '\r': case '\n': handleEnter(); return;
     case '\x1b[A': case 'k': handleUp(); return;
     case '\x1b[B': case 'j': handleDown(); return;
@@ -194,30 +223,39 @@ export function handleKey(key) {
       return;
     case ' ': handleSpace(); return;
     case 'G': {
-      // 'G' = jump to bottom (vim convention). Tab-aware so it doesn't
-      // collide with the Files-pane 'G' (gh clone) — that one fires only
-      // when we're on the files pane, which is a per-tab key.
       const screen = getScreen();
       if (tabState.current === 1 && typeof repos.bottom === 'function') {
         repos.bottom(screen); return;
       }
-      // Fall through to per-tab key map so analyze can route to files.
       break;
     }
   }
 
-  // 5. Global star toggle — '*' so it doesn't conflict with per-tab 's' keys
-  //    (forks sort-by-stars, repos sort-by-stars).
+  // 5. Global star toggle.
   if (key === '*' && currentRepoForAction()) { toggleStar(); return; }
 
-  // 6. Per-tab key map.
+  // 6. Dashboard stat-card focus.
+  if (tabState.current === 0) {
+    if (key === '\x1b[D' || key === 'H') { dashboard.leftCard(); return; }
+    if (key === '\x1b[C' || key === 'L') { dashboard.rightCard(); return; }
+    if (appState.dashboardCardsFocus && (key === '\r' || key === '\n')) {
+      dashboard.openFocusedCard();
+      return;
+    }
+    if (key === '\t' && appState.dashboardCardsFocus) {
+      dashboard.unfocusCards();
+      return;
+    }
+  }
+
+  // 7. Per-tab key map.
   const mod = tabModules[tabState.current];
   if (mod && mod.keys && typeof mod.keys[key] === 'function') {
     mod.keys[key]();
     return;
   }
 
-  // 7. Dashboard quick actions: 'n' opens new issue page.
+  // 8. Dashboard quick actions: 'n' opens new issue page.
   if (tabState.current === 0 && key === 'n') {
     const repos = appState.repos;
     if (repos.length > 0) {
@@ -285,6 +323,7 @@ export function registerCoreActions() {
   reg({ id: 'copy',    label: 'Copy current URL to clipboard', hint: 'y', run: copyCurrentUrl });
   reg({ id: 'help',    label: 'Show help overlay',            hint: '?',
         run: () => { appState.showHelp = true; render(); } });
+  reg({ id: 'welcome', label: 'Show "What\'s new" / tour',    hint: 'w', run: onboarding.startWelcome });
   reg({ id: 'quit',    label: 'Quit application',             hint: 'q', run: quit });
 
   reg({ id: 'star.toggle',     label: 'Star / unstar current repo',         hint: '*', run: toggleStar });
@@ -329,7 +368,7 @@ export function registerCoreActions() {
 
   reg({ id: 'settings.theme',  label: 'Change theme...',
         run: () => { setTab(3); appState.settingsCursor = 4; render(); settings.enter(); } });
-  reg({ id: 'settings.logout', label: 'Log out', run: () => confirm('Log out of GitHub?', settings.handleLogout) });
+  reg({ id: 'settings.logout', label: 'Log out', run: () => confirm('Log out of GitHub?', settings.handleLogout, 'Log Out') });
   reg({ id: 'dashboard.refresh', label: 'Refresh dashboard widgets',
         run: () => dashboard.loadDashboardWidgets(true) });
   reg({ id: 'dashboard.new-issue', label: 'Dashboard: Create new issue',

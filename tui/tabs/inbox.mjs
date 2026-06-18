@@ -1,5 +1,5 @@
 // Inbox tab — GitHub notifications.
-// v0.3 features: mark-as-read (per-thread + all), unsubscribe, filter cycle.
+// v0.5+ polish: cleaner section header, by-repo panel as a real box, filter chip.
 
 import { appState, render, startAsync, isStale, showMessage, confirm } from '../state.mjs';
 import {
@@ -77,7 +77,7 @@ export async function markCurrentRead() {
   try {
     await markNotificationRead(appState.token, n.id);
     n.unread = false;
-    showMessage('Marked as read', 'success');
+    showMessage('✓ Marked as read', 'success');
     render();
   } catch (e) { showMessage('Failed: ' + e.message, 'error'); }
 }
@@ -88,10 +88,10 @@ export function markAllRead() {
     try {
       await markAllNotificationsRead(appState.token);
       for (const n of appState.notifications) n.unread = false;
-      showMessage('All notifications marked as read', 'success');
+      showMessage('✓ All notifications marked as read', 'success');
       render();
     } catch (e) { showMessage('Failed: ' + e.message, 'error'); }
-  });
+  }, 'Mark All Read');
 }
 
 export async function unsubscribeCurrent() {
@@ -117,11 +117,9 @@ export function cycleFilter() {
 export async function openCurrent() {
   const n = selected();
   if (!n) return;
-  // Try to open detail popup for issues/PRs
   const type = n.subject && n.subject.type;
   const url = n.subject && n.subject.url;
   if ((type === 'Issue' || type === 'PullRequest') && url) {
-    // Parse owner/repo/number from API URL
     const match = url.match(/\/repos\/([^/]+)\/([^/]+)\/(?:issues|pulls)\/(\d+)/);
     if (match) {
       const [, owner, repo, num] = match;
@@ -135,46 +133,55 @@ export async function openCurrent() {
   else showMessage(r.error || 'Open failed', 'error');
 }
 
+function sectionHeader(screen, x, y, text, hint) {
+  screen.writeStr(x, y, text, { fg: 'cyan', bold: true });
+  if (hint) {
+    const hx = screen.width - hint.length - 2;
+    if (hx > x + text.length + 4) screen.writeStr(hx, y, hint, { dim: true });
+  }
+}
+
 export function renderInbox(screen, y, h) {
   const W = screen.width;
   const list = filtered();
   const allList = appState.notifications;
   const unreadCount = allList.filter(n => n.unread).length;
 
-  screen.writeStr(4, y, 'Notifications', color('title'));
+  screen.writeStr(2, y, 'NOTIFICATIONS', { fg: 'white', bold: true });
 
-  // Filter as a chip.
-  const filterChip = ' ' + appState.inboxFilter + ' ';
-  screen.writeStr(20, y, filterChip, color('chipActive'));
+  // Filter chip
+  const filterChip = ' ' + appState.inboxFilter.toUpperCase() + ' ';
+  screen.writeStr(18, y, filterChip, { bg: 'cyan', fg: 'darkGray', bold: true });
 
   if (allList.length > 0) {
-    const counts = unreadCount + ' unread / ' + allList.length + ' total';
-    screen.writeStr(Math.max(4, W - counts.length - 2), y, counts,
-      unreadCount > 0 ? color('warning') : color('dim'));
+    const counts = (unreadCount > 0 ? unreadCount + ' unread / ' : '0 unread / ') + allList.length + ' total';
+    screen.writeStr(Math.max(2, W - counts.length - 2), y, counts,
+      unreadCount > 0 ? { fg: 'yellow', bold: true } : { dim: true });
   }
-  screen.hline(y + 1, '─', color('dim'));
+  screen.hline(y + 1, '─', { dim: true });
 
   if (!appState.token) {
     emptyState(screen, y + 2, h - 2, {
-      icon: '---',
+      icon: '🔒',
       title: 'Login required',
-      message: 'Go to Settings [4] to log in',
+      message: 'Sign in to view your GitHub notifications.',
       hint: '',
+      keyHint: 'Press [4] for Settings',
     });
     return;
   }
   if (allList.length === 0) {
     emptyState(screen, y + 2, h - 2, {
-      icon: '---',
+      icon: '🎉',
       title: appState.loading ? 'Loading...' : 'Inbox zero!',
-      message: appState.loading ? 'Fetching notifications...' : 'No notifications yet',
+      message: appState.loading ? 'Fetching notifications...' : 'You have no notifications — enjoy the quiet.',
       hint: appState.loading ? '' : '[r] Refresh',
     });
     return;
   }
   if (list.length === 0) {
     emptyState(screen, y + 2, h - 2, {
-      icon: '---',
+      icon: '○',
       title: 'No matches',
       message: 'No notifications match filter [' + appState.inboxFilter + ']',
       hint: '[f] Cycle filter',
@@ -182,70 +189,83 @@ export function renderInbox(screen, y, h) {
     return;
   }
 
-  // By-repo summary on the right.
+  // By-repo summary panel (right).
   const repoCounts = {};
   for (const n of allList) {
     const r = n.repository && n.repository.full_name;
     if (!r) continue;
     repoCounts[r] = (repoCounts[r] || 0) + 1;
   }
-  const topRepos = Object.entries(repoCounts).sort((a, b) => b[1] - a[1]).slice(0, 5);
-  const summaryX = Math.max(W - 32, Math.floor(W * 0.65));
-  if (summaryX > 40) {
-    screen.writeStr(summaryX, y + 2, 'By Repo', color('header'));
+  const topRepos = Object.entries(repoCounts).sort((a, b) => b[1] - a[1]).slice(0, 6);
+  const summaryX = Math.max(W - 32, Math.floor(W * 0.62));
+  const summaryW = W - summaryX - 2;
+  let summaryH = 0;
+  if (summaryX > 50 && topRepos.length > 0) {
+    const panelH = topRepos.length + 3;
+    screen.box(summaryX, y + 3, summaryW, panelH, 'By Repo', { fg: 'cyan', bold: true });
     topRepos.forEach(([repo, count], i) => {
-      const row = y + 3 + i;
+      const row = y + 4 + i;
       if (row >= y + h - 1) return;
-      const short = truncate(repo, W - summaryX - 6);
-      screen.writeStr(summaryX, row, short, color('dim'));
-      screen.writeStr(W - 4, row, String(count), color('accent'));
+      const short = truncate(repo, summaryW - 8);
+      screen.writeStr(summaryX + 2, row, short, { fg: 'white' });
+      const countStr = String(count);
+      screen.writeStr(summaryX + summaryW - countStr.length - 2, row, countStr, { fg: 'cyan', bold: true });
     });
+    summaryH = panelH;
   }
 
-  const headerY = y + 2;
-  const listW = summaryX > 40 ? summaryX - 6 : W - 4;
-  screen.writeStr(4, headerY, 'Type', color('header'));
-  screen.writeStr(16, headerY, 'Repo / Title', color('header'));
-  screen.writeStr(Math.min(listW - 12, 56), headerY, 'Reason', color('header'));
-  screen.writeStr(Math.min(listW - 4, 68), headerY, 'When', color('header'));
+  const headerY = y + 3;
+  const listW = summaryX > 50 ? summaryX - 6 : W - 4;
+  screen.writeStr(2, headerY, 'TYPE', { fg: 'cyan', bold: true });
+  screen.writeStr(14, headerY, 'REPO / TITLE', { fg: 'cyan', bold: true });
+  screen.writeStr(Math.min(listW - 12, 56), headerY, 'REASON', { fg: 'cyan', bold: true });
+  screen.writeStr(Math.min(listW - 4, 68), headerY, 'WHEN', { fg: 'cyan', bold: true });
+  screen.hline(headerY + 1, '─', { dim: true });
 
-  const maxRows = Math.max(1, h - 5);
+  const maxRows = Math.max(1, h - 7);
   const start = appState.inboxScroll;
   for (let i = 0; i < maxRows && start + i < list.length; i++) {
     const n = list[start + i];
-    const row = headerY + 1 + i;
+    const row = headerY + 2 + i;
     const sel = start + i === appState.selectedNotification;
     const unread = n.unread;
 
-    // Full-row selection highlight.
     if (sel) {
-      for (let x = 0; x < W; x++) screen.styleBuf[row][x] = color('selection');
+      for (let x = 0; x < listW + 4; x++) screen.styleBuf[row][x] = { bg: 'blue', fg: 'white', bold: true };
     }
 
-    screen.writeStr(2, row, sel ? '>' : ' ', sel ? color('selection') : null);
-    screen.writeStr(3, row, unread ? '●' : ' ', unread ? color('unread') : color('dim'));
+    screen.writeStr(2, row, sel ? '▶' : '  ', sel ? { bg: 'blue', fg: 'white' } : { dim: true });
+    screen.writeStr(3, row, unread ? '●' : ' ', unread ? { fg: 'yellow', bold: true } : { dim: true });
 
     const type = (n.subject && n.subject.type) || '?';
-    screen.writeStr(4, row, type.substring(0, 10).padEnd(11), notifTypeColor(type));
+    const typeColor = notifTypeColor(type);
+    const typeName = type === 'PullRequest' ? 'PR'
+      : type === 'Issue' ? 'Issue'
+      : type === 'Release' ? 'Release'
+      : type === 'Discussion' ? 'Discuss'
+      : type === 'Commit' ? 'Commit'
+      : type === 'CheckSuite' ? 'CI'
+      : type;
+    screen.writeStr(4, row, typeName.padEnd(9), sel ? { bg: 'blue', fg: typeColor, bold: true } : typeColor);
 
     const repoName = (n.repository && n.repository.full_name || '?').split('/')[1] ||
       (n.repository && n.repository.full_name) || '?';
     const title = (n.subject && n.subject.title) || '';
     const combined = repoName + ' / ' + title;
     const titleW = Math.min(listW - 30, 40);
-    screen.writeStr(16, row, truncate(combined, titleW),
-      sel ? color('selection') : (unread ? null : color('dim')));
+    screen.writeStr(14, row, truncate(combined, titleW),
+      sel ? { bg: 'blue', fg: 'white' } : (unread ? { fg: 'white' } : { dim: true }));
 
     screen.writeStr(Math.min(listW - 12, 56), row,
-      truncate(n.reason || '?', 11), color('dim'));
+      truncate(n.reason || '?', 11), sel ? { bg: 'blue', fg: 'white' } : { dim: true });
     const when = n.updated_at ? relTime(n.updated_at) : '';
-    screen.writeStr(Math.min(listW - 4, 68), row, when, color('dim'));
+    screen.writeStr(Math.min(listW - 4, 68), row, when, sel ? { bg: 'blue', fg: 'white' } : { dim: true });
   }
 
-  const infoY = headerY + 1 + Math.min(maxRows, list.length) + 1;
+  const infoY = headerY + 2 + Math.min(maxRows, list.length) + 1;
   if (infoY < y + h) {
-    screen.writeStr(4, infoY,
-      '[r] Refresh  [m] Mark read  [M] Mark all  [f] Filter  [Enter] Open', color('dim'));
+    screen.writeStr(2, infoY,
+      '[r] Refresh   [m] Mark read   [M] Mark all   [f] Filter   [u] Unsubscribe   [Enter] Open', { dim: true });
   }
 }
 

@@ -1,4 +1,5 @@
 // Settings tab — login/logout, refresh actions, system info panel.
+// v0.5+ polish: sectioned panels with clearer hierarchy, system info in its own box.
 
 import { appState, render, startAsync, isStale, showMessage, confirm } from '../state.mjs';
 import {
@@ -33,7 +34,7 @@ export async function submitLogin(value) {
       appState.reposHasMore = appState.repos.length >= REPOS_PER_PAGE;
       appState.dashboardLoaded = false;
       loadDashboardWidgets().catch(() => {});
-      showMessage('Logged in as ' + user.login, 'success');
+      showMessage('✓ Logged in as ' + user.login, 'success');
     } else {
       showMessage('Invalid token', 'error');
     }
@@ -66,132 +67,178 @@ registerInputHandler('theme', (value) => {
   else showMessage('Unknown theme. Available: ' + listThemes().join(', '), 'warning');
 });
 
+function sectionHeader(screen, x, y, text, maxW) {
+  screen.writeStr(x, y, text, { fg: 'cyan', bold: true });
+  // Underline separator, limited to the left column.
+  const W = maxW || screen.width;
+  for (let i = x; i < x + W - x; i++) {
+    screen.setCell(i, y + 1, '─', { dim: true });
+  }
+}
+
+function renderRow(screen, y, W, label, desc, enabled, selected) {
+  if (selected) {
+    for (let x = 0; x < W; x++) screen.styleBuf[y][x] = { bg: 'blue', fg: 'white', bold: true };
+  }
+  const prefix = selected ? '▶ ' : '  ';
+  const labelStyle = selected
+    ? { bg: 'blue', fg: 'white', bold: true }
+    : (enabled ? { fg: 'white' } : { dim: true });
+  const descStyle = selected
+    ? { bg: 'blue', fg: 'white' }
+    : { dim: true };
+  screen.writeStr(2, y, prefix, selected ? { bg: 'blue', fg: 'white' } : { dim: true });
+  screen.writeStr(4, y, label, labelStyle);
+  // Right-align description within the row's allowed width.
+  const maxX = W - 2;
+  const descX = Math.max(4 + label.length + 2, maxX - desc.length);
+  screen.writeStr(descX, y, desc.substring(0, Math.max(0, maxX - descX)), descStyle);
+}
+
 export function renderSettings(screen, y, h) {
   const W = screen.width;
   const isLoggedIn = !!appState.token;
 
-  screen.writeStr(4, y, 'Settings', color('title'));
-  screen.hline(y + 1, '─', color('dim'));
+  screen.writeStr(2, y, 'SETTINGS', { fg: 'white', bold: true });
+  screen.hline(y + 1, '─', { dim: true });
 
-  // Section: Authentication.
-  let row = y + 2;
-  screen.writeStr(4, row++, 'AUTHENTICATION', color('header'));
+  let row = y + 3;
 
-  const items = [
-    { label: 'Login',              desc: isLoggedIn ? 'Already logged in' : 'Press Enter to login',  enabled: !isLoggedIn },
-    { label: 'Logout',             desc: isLoggedIn ? 'Press Enter to logout' : 'Not logged in',     enabled: isLoggedIn },
+  // First decide where the system panel goes so we can constrain left column.
+  const sysPanelW = Math.min(46, Math.max(34, Math.floor(W * 0.4)));
+  const sysX = Math.max(2, W - sysPanelW - 2);
+  const leftMaxW = sysX > 50 ? sysX - 4 : W;
+  const sectionH = h - 8;
+
+  // AUTHENTICATION
+  sectionHeader(screen, 2, row, '🔑 AUTHENTICATION', leftMaxW);
+  row += 2;
+  const authItems = [
+    { label: 'Login',    desc: isLoggedIn ? 'Already logged in' : 'Sign in with a token', enabled: !isLoggedIn, sel: appState.settingsCursor === 0 },
+    { label: 'Logout',   desc: isLoggedIn ? 'Sign out' : 'Not logged in',                  enabled: isLoggedIn,  sel: appState.settingsCursor === 1 },
   ];
-
-  for (const item of items) {
-    if (row >= y + h - 1) break;
-    const sel = appState.settingsCursor === row - (y + 2);
-    if (sel) {
-      for (let x = 0; x < W; x++) screen.styleBuf[row][x] = color('selection');
-    }
-    screen.writeStr(4, row, sel ? '> ' : '  ', sel ? color('selection') : null);
-    screen.writeStr(6, row, item.label, sel ? color('selection') : (item.enabled ? null : color('dim')));
-    screen.writeStr(24, row, item.desc.substring(0, W - 26), color('dim'));
+  for (const item of authItems) {
+    if (row >= y + sectionH) break;
+    renderRow(screen, row, leftMaxW, item.label, item.desc, item.enabled, item.sel);
     row++;
   }
+  row += 2;
 
-  row++;
-
-  // Section: Data.
-  screen.writeStr(4, row++, 'DATA', color('header'));
+  // DATA
+  sectionHeader(screen, 2, row, '🔄 DATA', leftMaxW);
+  row += 2;
   const dataItems = [
-    { label: 'Refresh Dashboard',  desc: 'Re-fetch events, trending, starred',  enabled: isLoggedIn },
-    { label: 'Refresh User Data',  desc: 'Re-fetch profile and repositories',   enabled: isLoggedIn },
+    { label: 'Refresh Dashboard', desc: 'Re-fetch events, trending',   enabled: isLoggedIn, sel: appState.settingsCursor === 2 },
+    { label: 'Refresh User Data', desc: 'Re-fetch profile and repos',  enabled: isLoggedIn, sel: appState.settingsCursor === 3 },
   ];
   for (const item of dataItems) {
-    if (row >= y + h - 1) break;
-    const sel = appState.settingsCursor === row - (y + 2);
-    if (sel) {
-      for (let x = 0; x < W; x++) screen.styleBuf[row][x] = color('selection');
-    }
-    screen.writeStr(4, row, sel ? '> ' : '  ', sel ? color('selection') : null);
-    screen.writeStr(6, row, item.label, sel ? color('selection') : (item.enabled ? null : color('dim')));
-    screen.writeStr(24, row, item.desc.substring(0, W - 26), color('dim'));
+    if (row >= y + sectionH) break;
+    renderRow(screen, row, leftMaxW, item.label, item.desc, item.enabled, item.sel);
     row++;
   }
+  row += 2;
 
-  row++;
-
-  // Section: Appearance.
-  screen.writeStr(4, row++, 'APPEARANCE', color('header'));
-  const themeItem = { label: 'Change Theme', desc: 'Active: ' + getThemeName() + ' (' + listThemes().join(', ') + ')', enabled: true };
-  if (row < y + h - 1) {
-    const sel = appState.settingsCursor === row - (y + 2);
-    if (sel) {
-      for (let x = 0; x < W; x++) screen.styleBuf[row][x] = color('selection');
-    }
-    screen.writeStr(4, row, sel ? '> ' : '  ', sel ? color('selection') : null);
-    screen.writeStr(6, row, themeItem.label, sel ? color('selection') : null);
-    screen.writeStr(24, row, themeItem.desc.substring(0, W - 26), color('dim'));
+  // APPEARANCE
+  sectionHeader(screen, 2, row, '🎨 APPEARANCE', leftMaxW);
+  row += 2;
+  const themeItem = { label: 'Change Theme', desc: 'Current: ' + getThemeName(), enabled: true, sel: appState.settingsCursor === 4 };
+  if (row < y + sectionH) {
+    renderRow(screen, row, leftMaxW, themeItem.label, themeItem.desc, true, themeItem.sel);
     row++;
   }
+  // Show all available themes as a small chip row.
+  if (row < y + sectionH - 1) {
+    row++;
+    screen.writeStr(2, row, 'Available:', { dim: true });
+    let cx = 14;
+    for (const t of listThemes()) {
+      const isCurrent = t === getThemeName();
+      const text = ' ' + t + ' ';
+      const style = isCurrent
+        ? { bg: 'cyan', fg: 'darkGray', bold: true }
+        : { dim: true };
+      if (cx + text.length + 1 < leftMaxW - 2) {
+        screen.writeStr(cx, row, text, style);
+        cx += text.length + 1;
+      }
+    }
+  }
+  row += 2;
 
-  row++;
-
-  // Section: Danger Zone.
-  screen.writeStr(4, row++, 'DANGER ZONE', { fg: 'red', bold: true });
+  // DANGER ZONE
+  sectionHeader(screen, 2, row, '⚠ DANGER ZONE', leftMaxW);
+  row += 2;
   const dangerItems = [
-    { label: 'Clear Token File', desc: 'Wipe ' + TOKEN_FILE + ' (also logs out)', enabled: isLoggedIn },
+    { label: 'Clear Token File', desc: 'Wipe saved token',  enabled: isLoggedIn, sel: appState.settingsCursor === 5 },
   ];
   for (const item of dangerItems) {
-    if (row >= y + h - 1) break;
-    const sel = appState.settingsCursor === row - (y + 2);
-    if (sel) {
-      for (let x = 0; x < W; x++) screen.styleBuf[row][x] = color('selection');
-    }
-    screen.writeStr(4, row, sel ? '> ' : '  ', sel ? color('selection') : null);
-    screen.writeStr(6, row, item.label, sel ? color('selection') : (item.enabled ? color('error') : color('dim')));
-    screen.writeStr(24, row, item.desc.substring(0, W - 26), color('dim'));
+    if (row >= y + sectionH) break;
+    renderRow(screen, row, leftMaxW, item.label, item.desc, item.enabled, item.sel);
+    const labelStyle = item.sel
+      ? { bg: 'red', fg: 'white', bold: true }
+      : (item.enabled ? { fg: 'red', bold: true } : { dim: true });
+    screen.writeStr(4, row, item.label, labelStyle);
     row++;
   }
 
-  appState._maxSettingsCursor = row - (y + 2) - 1;
-
-  // System panel with box.
-  const infoX = Math.min(W - 38, Math.floor(W * 0.55));
-  if (infoX > 30) {
-    const lines = [
-      ['App version',  APP_VERSION,                'cyan'],
-      ['Config dir',   CONFIG_DIR,                 null],
-      ['Token file',   TOKEN_FILE,                 null],
-      ['Node',         process.version,            null],
-      ['Platform',     process.platform + ' ' + process.arch, null],
-      ['Terminal',     W + 'x' + screen.height,    null],
-    ];
-    if (lastRateLimit.remaining !== null) {
-      const resetIn = lastRateLimit.reset
-        ? Math.max(0, Math.floor((lastRateLimit.reset * 1000 - Date.now()) / 60000))
-        : '?';
-      lines.push(['API remaining', lastRateLimit.remaining + '/' + lastRateLimit.limit, 'yellow']);
-      lines.push(['API resets in', resetIn + ' min', 'dim']);
-    }
-    if (lastScopes.scopes && lastScopes.scopes.length) {
-      lines.push(['Token scopes', lastScopes.scopes.join(', '), 'dim']);
-    }
-
-    // Draw system panel box.
-    const boxH = lines.length + 3;
-    screen.box(infoX, y + 2, W - infoX - 2, boxH, 'System');
-    lines.forEach(([k, v, c], i) => {
-      const row = y + 3 + i;
-      if (row >= y + 2 + boxH - 1) return;
-      screen.writeStr(infoX + 2, row, k + ':', color('dim'));
-      screen.writeStr(infoX + 18, row, String(v).substring(0, W - infoX - 20), c || null);
-    });
-  }
-
-  const helpY = y + 2 + items.length + 1;
-  if (helpY + 2 < y + h) {
-    if (isLoggedIn && appState.user) {
-      screen.writeStr(4, y + h - 1,
-        'Signed in as ' + appState.user.login + '  |  ' + appState.repos.length + ' repos loaded',
-        color('accent'));
+  // ── System panel (right side or below) ──
+  if (sysX > 50) {
+    const sysY = y + 3;
+    renderSystemPanel(screen, sysX, sysY, sysPanelW, h - 6, W);
+  } else {
+    // Below: show system info in a compact line.
+    if (row < y + h - 1) {
+      row += 2;
+      sectionHeader(screen, 2, row, 'ℹ SYSTEM', leftMaxW);
+      row++;
+      renderSystemLines(screen, row, W, W);
     }
   }
+
+  appState._maxSettingsCursor = 5;
+}
+
+function renderSystemPanel(screen, x, y, w, h, screenW) {
+  const lines = buildSystemLines(screenW);
+  const boxH = Math.min(lines.length + 3, h);
+  screen.box(x, y, w, boxH, 'System', { fg: 'cyan', bold: true });
+  for (let i = 0; i < lines.length && i < boxH - 3; i++) {
+    const [k, v, c] = lines[i];
+    screen.writeStr(x + 2, y + 2 + i, k + ':', { dim: true });
+    const val = String(v);
+    const valX = x + Math.min(16, w - val.length - 4);
+    screen.writeStr(valX, y + 2 + i, val.substring(0, w - (valX - x) - 2), c || { fg: 'white' });
+  }
+}
+
+function renderSystemLines(screen, y, W, screenW) {
+  const lines = buildSystemLines(screenW);
+  const items = lines.map(([k, v]) => k + ': ' + v).join('   ');
+  screen.writeStr(2, y, items.substring(0, W - 4), { dim: true });
+}
+
+function buildSystemLines(screenW) {
+  const lines = [
+    ['App',         APP_VERSION,                       { fg: 'cyan', bold: true }],
+    ['Config',      CONFIG_DIR.replace(process.env.HOME || '', '~'), null],
+    ['Token file',  TOKEN_FILE.replace(process.env.HOME || '', '~'), null],
+    ['Node',        process.version,                   null],
+    ['Platform',    process.platform + ' ' + process.arch, null],
+    ['Terminal',    (screenW || 80) + '×24', null],
+  ];
+  if (lastRateLimit.remaining !== null) {
+    const resetIn = lastRateLimit.reset
+      ? Math.max(0, Math.floor((lastRateLimit.reset * 1000 - Date.now()) / 60000))
+      : '?';
+    const pct = lastRateLimit.limit > 0 ? lastRateLimit.remaining / lastRateLimit.limit : 0;
+    const style = pct < 0.1 ? { fg: 'yellow', bold: true } : { fg: 'green' };
+    lines.push(['API',  lastRateLimit.remaining + '/' + lastRateLimit.limit, style]);
+    lines.push(['Reset in', resetIn + ' min', { dim: true }]);
+  }
+  if (lastScopes.scopes && lastScopes.scopes.length) {
+    lines.push(['Scopes', lastScopes.scopes.join(', '), { dim: true }]);
+  }
+  return lines;
 }
 
 export const keys = {};
@@ -213,7 +260,7 @@ export function enter() {
       else showMessage('Already logged in', 'info');
       break;
     case 1:
-      if (isLoggedIn) confirm('Log out of GitHub?', handleLogout);
+      if (isLoggedIn) confirm('Log out of GitHub?', handleLogout, 'Log Out');
       else showMessage('Not logged in', 'warning');
       break;
     case 2:
@@ -233,7 +280,7 @@ export function enter() {
       if (isLoggedIn) confirm('Wipe token file and log out?', () => {
         handleLogout();
         showMessage('Token file wiped', 'success');
-      });
+      }, 'Wipe Token');
       break;
   }
 }

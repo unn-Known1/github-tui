@@ -1,83 +1,122 @@
 // Help overlay — centered modal listing every keybinding.
+// v0.5+ polish: searchable filter, scannable layout with categories.
 
 import { appState } from '../state.mjs';
 import { color } from '../theme.mjs';
 import { truncate } from '../utils.mjs';
 
+// All shortcuts organized by category for the searchable help overlay.
+const CATEGORIES = [
+  { id: 'global',     name: 'GLOBAL',            shortcuts: [
+    { key: '1-5',       desc: 'Switch tabs (Dashboard/Repos/Analyze/Settings/Inbox)' },
+    { key: 'Tab',       desc: 'Next tab (or focus stat cards on Dashboard)' },
+    { key: 'Shift+Tab', desc: 'Previous tab' },
+    { key: 'Ctrl-P / :', desc: 'Open command palette' },
+    { key: '↑↓ / j k',  desc: 'Navigate lists' },
+    { key: '← / →',     desc: 'Switch between focused items (stat cards)' },
+    { key: 'Enter',     desc: 'Select / drill in' },
+    { key: 'Esc / h',   desc: 'Back' },
+    { key: 'Space',     desc: 'Load more (pagination)' },
+    { key: 'G',         desc: 'Jump to bottom' },
+    { key: 'g',         desc: 'Jump to top (in file viewer)' },
+    { key: 'o',         desc: 'Open current item in browser' },
+    { key: 'y',         desc: 'Copy URL to clipboard (OSC-52)' },
+    { key: 'b',         desc: 'Toggle bookmark' },
+    { key: '*',         desc: 'Toggle star on GitHub' },
+    { key: 'r',         desc: 'Refresh current view' },
+    { key: 'w',         desc: 'Show "What\'s new" / tour' },
+    { key: '?',         desc: 'Toggle this help' },
+    { key: 'q / Ctrl-C', desc: 'Quit' },
+  ]},
+  { id: 'dashboard',  name: 'DASHBOARD',         shortcuts: [
+    { key: 'j / k',     desc: 'Scroll dashboard up/down' },
+    { key: 'n',         desc: 'Create a new issue on your first repo' },
+    { key: 'Tab',       desc: 'Focus the row of stat cards' },
+    { key: '← / → / H L', desc: 'Move between stat cards' },
+    { key: 'Enter',     desc: 'Open the focused stat card (e.g. Stale → Repos)' },
+    { key: 'Esc',       desc: 'Unfocus stat cards (back to scrolling)' },
+    { key: 'Space',     desc: 'Load more trending repos' },
+  ]},
+  { id: 'repos',      name: 'REPOS',             shortcuts: [
+    { key: '/',         desc: 'Substring filter' },
+    { key: 'c',         desc: 'Clear ALL filters' },
+    { key: 't',         desc: 'Cycle type: all → sources → forks → archived → private → public → templates' },
+    { key: 'L',         desc: 'Filter by language' },
+    { key: 'x',         desc: 'Toggle stale-only (no push 6+ months)' },
+    { key: 'D',         desc: 'Toggle density (compact ↔ comfortable)' },
+    { key: 'P',         desc: 'Pin / unpin repo (sticky top, persisted)' },
+    { key: 'n / S / f / i / u', desc: 'Sort by name / stars / forks / issues / updated' },
+    { key: 'V',         desc: 'Toggle starred / own repos' },
+    { key: '✕ on chip', desc: 'Remove individual filter chip (click X)' },
+  ]},
+  { id: 'analyze',    name: 'ANALYZE',           shortcuts: [
+    { key: 'i',         desc: 'Search prompt (or toggle Issues pane on details)' },
+    { key: 'Enter',     desc: 'Open details (or open Forks / Issue-PR detail)' },
+    { key: 'O',         desc: 'Overview pane' },
+    { key: 'R',         desc: 'README pane' },
+    { key: 'F',         desc: 'Files pane' },
+    { key: 'P',         desc: 'PRs pane' },
+    { key: 'Space',     desc: 'Load more results or more forks' },
+  ]},
+  { id: 'files',      name: 'FILES',             shortcuts: [
+    { key: 'Enter',     desc: 'Open dir / view file' },
+    { key: 's',         desc: 'Save current file to CWD' },
+    { key: 'S',         desc: 'Save whole folder recursively to CWD' },
+    { key: 'Z',         desc: 'Download repo zipball to CWD' },
+    { key: 'C',         desc: 'git clone into CWD' },
+    { key: 'G',         desc: 'gh repo clone (for private repos)' },
+    { key: 'B',         desc: 'Branch / tag picker' },
+    { key: 'y',         desc: 'Copy raw github URL' },
+    { key: 'Y',         desc: 'Copy file contents (OSC-52)' },
+  ]},
+  { id: 'inbox',      name: 'INBOX',             shortcuts: [
+    { key: 'm',         desc: 'Mark current as read' },
+    { key: 'M',         desc: 'Mark ALL as read' },
+    { key: 'u',         desc: 'Unsubscribe (ignore future updates)' },
+    { key: 'f',         desc: 'Cycle filter: all → unread → mentions → review' },
+    { key: 'r',         desc: 'Refresh notifications' },
+    { key: 'Enter / o', desc: 'Open detail popup (issues/PRs) or browser' },
+  ]},
+  { id: 'detail',     name: 'ISSUE / PR DETAIL', shortcuts: [
+    { key: 'Enter on issue/PR', desc: 'Open detail popup' },
+    { key: 'Esc / h',   desc: 'Close popup' },
+    { key: '↑↓ / j k',  desc: 'Scroll content' },
+    { key: 'Enter (on body)', desc: 'Cycle Body → Comments → Files' },
+    { key: 'c',         desc: 'Comment on the issue/PR' },
+    { key: 'r',         desc: 'React — pick an emoji' },
+    { key: 'x',         desc: 'Close or Reopen' },
+    { key: 'M',         desc: 'Merge PR (with confirmation)' },
+    { key: 'y',         desc: 'Copy URL' },
+  ]},
+  { id: 'settings',   name: 'SETTINGS',          shortcuts: [
+    { key: '↑↓',        desc: 'Navigate menu items' },
+    { key: 'Enter',     desc: 'Select / activate the highlighted item' },
+    { key: 'y',         desc: 'Confirm a destructive action' },
+    { key: 'n / Esc',   desc: 'Cancel a destructive action' },
+  ]},
+];
+
+// Flatten for searching.
+function allShortcuts() {
+  const flat = [];
+  for (const cat of CATEGORIES) {
+    for (const s of cat.shortcuts) {
+      flat.push({ ...s, category: cat.name });
+    }
+  }
+  return flat;
+}
+
+function matchesQuery(s, q) {
+  if (!q) return true;
+  q = q.toLowerCase();
+  return s.key.toLowerCase().includes(q) || s.desc.toLowerCase().includes(q);
+}
+
 export function render(screen) {
   const W = screen.width;
   const H = screen.height;
-
-  const lines = [
-    'Keyboard Shortcuts',
-    '',
-    '--- Global ---',
-    '  1-5 / Tab        Switch tabs',
-    '  Ctrl-P or :      Command palette',
-    '  ↑↓ or j/k        Navigate lists',
-    '  Enter            Select / drill in',
-    '  Esc / h          Back',
-    '  Space            Load more',
-    '  G                Jump to bottom',
-    '  o                Open in browser',
-    '  y                Copy URL',
-    '  b                Toggle bookmark',
-    '  *                Toggle star',
-    '  r                Refresh',
-    '  ?                Toggle help',
-    '  q / Ctrl-C       Quit',
-    '',
-    '--- Repos ---',
-    '  /                Substring filter',
-    '  c                Clear ALL filters',
-    '  t                Cycle type filter',
-    '  L                Filter by language',
-    '  x                Toggle stale-only',
-    '  D                Toggle density',
-    '  P                Pin / unpin repo',
-    '  n/S/f/i/u        Sort by column',
-    '  V                Toggle starred/own repos',
-    '',
-    '--- Dashboard ---',
-    '  j/k              Scroll dashboard',
-    '  Enter            Open first trending repo',
-    '  Space            Load more trending',
-    '',
-    '--- Analyze ---',
-    '  i                Search / Issues pane',
-    '  P                PRs pane',
-    '  O                Overview pane',
-    '  R                README pane',
-    '  F                Files pane',
-    '',
-    '--- Files ---',
-    '  Enter            Open dir / view file',
-    '  s                Save file',
-    '  S                Save folder',
-    '  Z                Download zipball',
-    '  C                git clone',
-    '  G                gh repo clone',
-    '  B                Pick branch',
-    '  y                Copy raw URL',
-    '',
-    '--- Inbox ---',
-    '  m                Mark read',
-    '  M                Mark all read',
-    '  u                Unsubscribe',
-    '  f                Cycle filter',
-    '',
-    '--- Issue/PR Detail ---',
-    '  Enter on issue/PR Open detail popup',
-    '  Esc              Close popup',
-    '  c                Comment',
-    '  r                React (pick emoji)',
-    '  x                Close / Reopen',
-    '  M                Merge PR',
-    '  y                Copy URL',
-    '  g / G            Jump top / bottom',
-    '',
-    'Press any key to close',
-  ];
+  const q = (appState.helpQuery || '').trim();
 
   // Modal backdrop: dim the entire screen.
   const backdropStyle = color('modalBackdrop');
@@ -87,19 +126,10 @@ export function render(screen) {
     }
   }
 
-  // Scroll support: offset if content is taller than terminal.
-  const contentH = lines.length;
-  const boxH = Math.min(contentH + 4, H - 4);
-  const boxW = Math.min(56, W - 4);
+  const boxW = Math.min(78, W - 4);
+  const boxH = Math.min(H - 4, 28);
   const x0 = Math.floor((W - boxW) / 2);
   const y0 = Math.floor((H - boxH) / 2);
-
-  // Calculate scroll offset based on content that won't fit.
-  let scrollOffset = 0;
-  if (contentH + 4 > boxH) {
-    // Keep the "Press any key" at the bottom visible.
-    scrollOffset = Math.max(0, contentH - (boxH - 4));
-  }
 
   // Clear the box area.
   for (let yy = y0; yy < y0 + boxH; yy++) {
@@ -109,25 +139,95 @@ export function render(screen) {
   }
 
   // Box border.
-  screen.box(x0, y0, boxW, boxH, 'Help');
+  screen.box(x0, y0, boxW, boxH, 'Help · Keyboard Shortcuts', { fg: 'cyan', bold: true });
 
-  // Render lines with scroll offset.
-  const maxLines = boxH - 3;
+  // Search bar.
+  const searchY = y0 + 1;
+  screen.writeStr(x0 + 2, searchY, '🔍', { fg: 'cyan' });
+  const queryStr = q || 'Type to filter (Esc to close, ↑↓ to scroll)...';
+  screen.writeStr(x0 + 4, searchY, truncate(queryStr, boxW - 8),
+    q ? { fg: 'cyan', bold: true } : { dim: true });
+  if (q) {
+    // Show a small "x" to clear.
+    screen.writeStr(x0 + boxW - 4, searchY, '✕', { fg: 'gray' });
+  }
+  screen.hline(searchY + 1, '─', { dim: true });
+
+  // Build the lines to render. Filter by query.
+  const lines = [];
+  if (!q) {
+    for (const cat of CATEGORIES) {
+      lines.push({ kind: 'header', text: cat.name });
+      for (const s of cat.shortcuts) {
+        lines.push({ kind: 'shortcut', key: s.key, desc: s.desc });
+      }
+    }
+  } else {
+    const matched = allShortcuts().filter(s => matchesQuery(s, q));
+    if (matched.length === 0) {
+      lines.push({ kind: 'empty', text: 'No matching shortcuts' });
+    } else {
+      // Group by category for readability.
+      const grouped = {};
+      for (const s of matched) {
+        if (!grouped[s.category]) grouped[s.category] = [];
+        grouped[s.category].push(s);
+      }
+      for (const cat of CATEGORIES) {
+        if (grouped[cat.name]) {
+          lines.push({ kind: 'header', text: cat.name });
+          for (const s of grouped[cat.name]) {
+            lines.push({ kind: 'shortcut', key: s.key, desc: s.desc });
+          }
+        }
+      }
+    }
+  }
+
+  // Pad to boxH-3 to allow for footer.
+  const maxLines = boxH - 4;
+  let scrollOffset = appState.helpCursor || 0;
+  if (scrollOffset > lines.length - maxLines) {
+    scrollOffset = Math.max(0, lines.length - maxLines);
+  }
+  if (scrollOffset < 0) scrollOffset = 0;
+
   for (let i = 0; i < maxLines && (i + scrollOffset) < lines.length; i++) {
     const ln = lines[i + scrollOffset];
-    const style =
-      i === 0 ? color('title') :
-      ln.startsWith('---') ? color('accent') :
-      ln.startsWith('  ') ? null : color('accent');
-    // Strip the --- markers for cleaner display.
-    const display = ln.replace(/^---\s*/, '').replace(/\s*---$/, '');
-    screen.writeStr(x0 + 2, y0 + 1 + i, truncate(display, boxW - 4), style);
+    const row = y0 + 3 + i;
+    if (ln.kind === 'header') {
+      screen.writeStr(x0 + 2, row, ln.text, { fg: 'cyan', bold: true });
+    } else if (ln.kind === 'shortcut') {
+      const key = ln.key.padEnd(20).substring(0, 20);
+      screen.writeStr(x0 + 2, row, key, { fg: 'yellow' });
+      screen.writeStr(x0 + 22, row, truncate(ln.desc, boxW - 24), { fg: 'white' });
+    } else if (ln.kind === 'empty') {
+      screen.writeStr(x0 + 2, row, ln.text, { dim: true });
+    }
   }
 
-  // Scroll indicator if needed.
-  if (scrollOffset > 0) {
-    screen.writeStr(x0 + boxW - 4, y0 + boxH - 2, '...', color('dim'));
+  // Scroll indicator.
+  const footY = y0 + boxH - 2;
+  if (lines.length > maxLines) {
+    const s = (scrollOffset + 1) + '-' + Math.min(scrollOffset + maxLines, lines.length) +
+      ' of ' + lines.length;
+    screen.writeStr(x0 + 2, footY, s, { dim: true });
+  } else {
+    screen.writeStr(x0 + 2, footY, lines.length + ' shortcuts · ' + CATEGORIES.length + ' categories', { dim: true });
   }
+  // Footer hint pinned to right.
+  const hint = '↑↓ scroll   / search   Esc close';
+  screen.writeStr(x0 + boxW - hint.length - 2, footY, hint, { dim: true });
+}
+
+// Update the search query (called from keys.mjs).
+export function setHelpQuery(q) {
+  appState.helpQuery = q;
+  appState.helpCursor = 0;
+}
+export function scrollHelp(delta, totalLines, maxLines) {
+  const cur = appState.helpCursor || 0;
+  appState.helpCursor = Math.max(0, Math.min(totalLines - maxLines, cur + delta));
 }
 
 export const keys = {};

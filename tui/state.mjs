@@ -32,6 +32,8 @@ export const tabState = { current: 0 };
 export function setTab(i) {
   if (i < 0 || i >= TABS.length) return;
   tabState.current = i;
+  // Reset context-specific scroll whenever switching tabs.
+  if (i === 0) appState.dashboardScroll = 0;
   render();
 }
 
@@ -113,6 +115,8 @@ export const appState = {
   dashboardStaleRepos: [],       // stale repo names for display
   dashboardStarHistory: [],      // daily star counts for sparkline
   dashboardScroll: 0,            // scroll offset for dashboard content
+  dashboardSelectedCard: 0,      // 0..4 stat-card focus for keyboard nav
+  dashboardCardsFocus: false,    // true when keyboard focus is on a stat card
 
   // ── Inbox ──
   notifications: [],
@@ -128,16 +132,26 @@ export const appState = {
 
   // ── Global UI state ──
   loading: false,
-  message: null,         // { text, type } | null
+  message: null,         // { text, type, icon? } | null
   messageTimer: null,
   showHelp: false,
+  helpQuery: '',         // search filter inside help overlay
+  helpCursor: 0,
   showPalette: false,
   paletteQuery: '',
   paletteCursor: 0,
+  showOnboarding: false, // first-time welcome splash
+  showWelcome: false,    // togglable "what's new" screen
+  dismissedOnboarding: false,
+
+  // ── Recently viewed repos (capped list) ──
+  recentRepos: [],       // [{ full_name, url, visitedAt }]
+  MAX_RECENT: 12,
 
   // ── Confirmation dialog ──
   confirmAction: null,   // function to call on 'y'
   confirmMessage: '',    // message to display
+  confirmTitle: 'Confirm', // dialog title
 
   // ── Input modal ──
   inputMode: null,       // null | 'input'
@@ -180,8 +194,15 @@ export const appState = {
 // ────────────────────────────────────────────────────────────────────────────
 // Toast / status bar message bus.
 // ────────────────────────────────────────────────────────────────────────────
+const TOAST_ICONS = {
+  info:    'ⓘ',
+  success: '✓',
+  error:   '✗',
+  warning: '!',
+};
+
 export function showMessage(text, type = 'info', durationMs = 3000) {
-  appState.message = { text, type };
+  appState.message = { text, type, icon: TOAST_ICONS[type] || 'ⓘ' };
   if (appState.messageTimer) clearTimeout(appState.messageTimer);
   appState.messageTimer = setTimeout(() => {
     appState.message = null;
@@ -198,14 +219,28 @@ export function clearMessage() {
 // ────────────────────────────────────────────────────────────────────────────
 // Confirmation dialog for destructive actions.
 // ────────────────────────────────────────────────────────────────────────────
-export function confirm(message, action) {
+export function confirm(message, action, title = 'Confirm') {
   appState.confirmMessage = message;
   appState.confirmAction = action;
+  appState.confirmTitle = title;
   render();
 }
 
 export function dismissConfirm() {
   appState.confirmAction = null;
   appState.confirmMessage = '';
+  appState.confirmTitle = 'Confirm';
   render();
+}
+
+// ────────────────────────────────────────────────────────────────────────────
+// Recently viewed repos — used for breadcrumbs and quick re-open.
+// ────────────────────────────────────────────────────────────────────────────
+export function pushRecentRepo(repo) {
+  if (!repo || !repo.full_name) return;
+  // Move-to-front, dedupe, cap.
+  appState.recentRepos = [
+    { full_name: repo.full_name, url: repo.html_url, description: repo.description, language: repo.language, stars: repo.stargazers_count, visitedAt: Date.now() },
+    ...appState.recentRepos.filter(r => r.full_name !== repo.full_name),
+  ].slice(0, appState.MAX_RECENT);
 }

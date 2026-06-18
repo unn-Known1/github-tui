@@ -5,13 +5,14 @@ const FG = {
   red: `${ESC}[31m`, green: `${ESC}[32m`, yellow: `${ESC}[33m`,
   blue: `${ESC}[34m`, magenta: `${ESC}[35m`, cyan: `${ESC}[36m`,
   white: `${ESC}[37m`, gray: `${ESC}[90m`,
+  darkGray: `${ESC}[90m`, // alias used by some themes
 };
 
 const BG = {
   red: `${ESC}[41m`, green: `${ESC}[42m`, yellow: `${ESC}[43m`,
   blue: `${ESC}[44m`, magenta: `${ESC}[45m`, cyan: `${ESC}[46m`,
   white: `${ESC}[47m`, gray: `${ESC}[100m`,
-  darkGray: `${ESC}[48;5;235m`, darkBlue: `${ESC}[48;5;236m`,
+  darkGray: `${ESC}[100m`,
 };
 
 const ATTR = {
@@ -33,6 +34,19 @@ function compileStyle(s) {
   if (s.fg)        parts.push(FG[s.fg] || '');
   if (s.bg)        parts.push(BG[s.bg] || '');
   return parts.length > 0 ? parts.join('') : null;
+}
+
+// Unicode safe cell width — we treat most glyphs as width 1 to keep
+// box-drawing predictable across terminals.
+function strWidth(s) {
+  let w = 0;
+  for (let i = 0; i < s.length; i++) {
+    const c = s.charCodeAt(i);
+    // Skip ANSI escapes that leaked in (defensive — shouldn't happen).
+    if (c === 0x1b) { while (i < s.length && s.charCodeAt(i) !== 0x6d) i++; continue; }
+    w++;
+  }
+  return w;
 }
 
 export class Screen {
@@ -87,6 +101,17 @@ export class Screen {
     }
   }
 
+  // Write a string without touching existing styles at each cell.
+  // Useful for drawing characters over a previously-filled background.
+  writeStrNoStyle(x, y, str) {
+    if (y < 0 || y >= this.height) return;
+    for (let i = 0; i < str.length; i++) {
+      const cx = x + i;
+      if (cx < 0 || cx >= this.width) break;
+      this.charBuf[y][cx] = str[i];
+    }
+  }
+
   setCell(x, y, ch, style = null) {
     if (y < 0 || y >= this.height || x < 0 || x >= this.width) return;
     this.charBuf[y][x] = ch;
@@ -101,10 +126,23 @@ export class Screen {
     }
   }
 
+  // Fill a rectangle with a character and style.
+  fillRect(x, y, w, h, ch, style = null) {
+    for (let yy = y; yy < y + h; yy++) {
+      if (yy < 0 || yy >= this.height) continue;
+      for (let xx = x; xx < x + w; xx++) {
+        if (xx < 0 || xx >= this.width) continue;
+        this.charBuf[yy][xx] = ch;
+        this.styleBuf[yy][xx] = style;
+      }
+    }
+  }
+
   hline(y, ch = '─', style = null) {
     this.fillRow(y, ch, style);
   }
 
+  // Draw a rounded box with double-line border. Falls back to single when w<4.
   box(x, y, w, h, title = '', style = { bold: true }) {
     if (h < 2 || w < 4 || y < 0 || y >= this.height) return;
 
@@ -125,6 +163,104 @@ export class Screen {
     if (y + h - 1 < this.height) {
       this.writeStr(x, y + h - 1, '└' + '─'.repeat(w - 2) + '┘', style);
     }
+  }
+
+  // Filled card with optional title — used for stat cards.
+  // Background fills the box, title centered on the top.
+  card(x, y, w, h, title = '', fillStyle = null, borderStyle = null) {
+    if (h < 2 || w < 4 || y < 0 || y >= this.height) return;
+    // Background fill
+    if (fillStyle) {
+      this.fillRect(x + 1, y + 1, w - 2, h - 2, ' ', fillStyle);
+    }
+    const bs = borderStyle || { dim: true };
+    this.writeStr(x, y, '┌' + '─'.repeat(w - 2) + '┐', bs);
+    for (let i = 1; i < h - 1; i++) {
+      if (y + i >= this.height) break;
+      this.setCell(x, y + i, '│', bs);
+      this.setCell(x + w - 1, y + i, '│', bs);
+    }
+    if (y + h - 1 < this.height) {
+      this.writeStr(x, y + h - 1, '└' + '─'.repeat(w - 2) + '┘', bs);
+    }
+    if (title) {
+      const t = ' ' + title + ' ';
+      const tx = x + Math.floor((w - t.length) / 2);
+      this.writeStr(tx, y, t, { fg: 'gray', dim: true });
+    }
+  }
+
+  // Render a chip with optional dismiss-X. Returns end-x after chip.
+  // e.g. " Python ✕ " or "[Python]"
+  chip(x, y, text, opts = {}) {
+    const { active = false, dismissible = false, style = null, dim = false } = opts;
+    const s = active ? style : (dim ? { dim: true } : { dim: true });
+    const label = text;
+    const dismiss = dismissible ? ' ✕' : '';
+    const txt = ' ' + label + dismiss + ' ';
+    this.writeStr(x, y, txt, s);
+    return x + txt.length;
+  }
+
+  // Render a key hint in the canonical [key] style.
+  keyHint(x, y, key, label) {
+    // Caller passes through color('keyHint') / color('dim').
+    this.writeStr(x, y, '[' + key + ']', { fg: 'cyan', bold: true });
+    if (label) this.writeStr(x + key.length + 2, y, ' ' + label, { dim: true });
+  }
+
+  // Render a horizontal sparkline / progress bar across a fixed width.
+  // ratio is 0..1. style for filled, dimStyle for empty.
+  bar(x, y, width, ratio, fillStyle = null, emptyStyle = { dim: true }) {
+    const filled = Math.max(0, Math.min(width, Math.round(width * ratio)));
+    if (filled > 0) this.writeStr(x, y, '█'.repeat(filled), fillStyle);
+    if (filled < width) this.writeStr(x + filled, y, '░'.repeat(width - filled), emptyStyle);
+  }
+
+  // Render a "breadcrumb" path string: "a › b › c" with the last segment highlighted.
+  // Returns the next x.
+  breadcrumb(x, y, segments, maxWidth) {
+    if (!segments || segments.length === 0) return x;
+    const sep = ' › ';
+    const last = segments.length - 1;
+    // Build the string with width limits, truncating middle segments if needed.
+    let totalLen = segments.reduce((a, s) => a + strWidth(s), 0) + sep.length * (segments.length - 1);
+    let segs = segments.slice();
+    if (totalLen > maxWidth) {
+      // Truncate each non-first/non-last segment to fit.
+      const fixed = segs[0].length + sep.length + segs[last].length + 2 * sep.length + 2; // … marker
+      const remaining = maxWidth - fixed;
+      if (remaining < 0) {
+        // Path too long — just show last segment.
+        segs = [segs[last]];
+      } else {
+        // Truncate middle segments evenly.
+        const midCount = segs.length - 2;
+        const per = Math.max(1, Math.floor(remaining / midCount));
+        for (let i = 1; i < last; i++) {
+          if (segs[i].length > per) segs[i] = segs[i].slice(0, Math.max(1, per - 1)) + '…';
+        }
+      }
+    }
+    let cx = x;
+    for (let i = 0; i < segs.length; i++) {
+      const isLast = i === segs.length - 1;
+      if (i > 0) {
+        this.writeStr(cx, y, sep, { dim: true });
+        cx += sep.length;
+      }
+      this.writeStr(cx, y, segs[i],
+        isLast ? { fg: 'cyan', bold: true } : { dim: true });
+      cx += segs[i].length;
+    }
+    return cx;
+  }
+
+  // Render a "badge" with rounded edges — a small label with bg color.
+  badge(x, y, text, style = null) {
+    const t = ' ' + text + ' ';
+    this.writeStr(x, y, t, style);
+    return x + t.length;
   }
 
   render() {

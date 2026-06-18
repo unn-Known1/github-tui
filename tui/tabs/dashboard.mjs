@@ -1,6 +1,7 @@
 // Dashboard tab — the home screen.
+// v0.5+ design: cleaner section cards, focus-aware stat cards, breadcrumb-aware.
 
-import { appState, render, startAsync, isStale, showMessage, setTab } from '../state.mjs';
+import { appState, render, startAsync, isStale, showMessage, setTab, confirm } from '../state.mjs';
 import {
   getUserEvents, getTrendingRepos, getStarredRepos,
   getUserIssues, getUserPullRequests, searchRepositories,
@@ -44,8 +45,6 @@ export async function loadDashboardWidgets(force = false) {
 }
 
 // ─── Heatmap builder ──────────────────────────────────────────────────
-// Builds a 7-row x N-weeks grid from event timestamps.
-// Uses the user's OWN repos' push dates as a fallback when public events are sparse.
 function buildHeatmap(events) {
   const dayMs = 86400000;
   const weeks = 15;
@@ -55,7 +54,6 @@ function buildHeatmap(events) {
   today.setHours(0, 0, 0, 0);
   const todayDay = today.getDay();
   const gridStartMs = today.getTime() - (weeks * 7 - 1 + todayDay) * dayMs;
-  const gridEndMs = today.getTime() + dayMs;
 
   function addDay(isoDate) {
     if (!isoDate) return;
@@ -72,7 +70,6 @@ function buildHeatmap(events) {
     }
   }
 
-  // 1. Count events from the public events API.
   const activityTypes = new Set([
     'PushEvent', 'IssuesEvent', 'PullRequestEvent', 'CreateEvent',
     'PullRequestReviewEvent', 'ReleaseEvent', 'ForkEvent',
@@ -83,13 +80,10 @@ function buildHeatmap(events) {
     addDay(ev.created_at);
   }
 
-  // 2. Also count push dates from the user's repos (covers private repo activity).
-  //    Each repo's pushed_at gives us the last push date.
   for (const repo of (appState.repos || [])) {
     addDay(repo.pushed_at);
   }
 
-  // Find max for intensity scaling.
   let max = 0;
   for (const row of grid) for (const v of row) if (v > max) max = v;
   return { weeks, grid, max };
@@ -136,14 +130,18 @@ function sparkline(data, width) {
   }).join('');
 }
 
-function sectionHeader(screen, x, y, text) {
-  screen.writeStr(x, y, text, color('header'));
+// Section header: title + optional key hint on the right.
+function sectionHeader(screen, x, y, text, hint) {
+  screen.writeStr(x, y, text, color('sectionHeading'));
+  if (hint) {
+    const hx = screen.width - hint.length - 2;
+    if (hx > x + text.length + 4) screen.writeStr(hx, y, hint, { dim: true });
+  }
 }
 
-// Render the contribution heatmap with intensity gradient.
-function renderHeatmap(screen, leftX, y, rightX, h) {
+function renderHeatmap(screen, leftX, y, rightX) {
   const hm = appState.dashboardContributions;
-  if (!hm) return;
+  if (!hm) return y;
 
   const dayLabels = ['S', 'M', 'T', 'W', 'T', 'F', 'S'];
   const heatW = rightX - leftX - 4;
@@ -151,15 +149,15 @@ function renderHeatmap(screen, leftX, y, rightX, h) {
 
   const totalEvents = hm.grid.flat().reduce((a, b) => a + b, 0);
   if (totalEvents === 0) {
-    screen.writeStr(leftX, y, '(no public activity in last 15 weeks)', color('dim'));
-    return;
+    screen.writeStr(leftX, y, '(no public activity in last 15 weeks)', { dim: true });
+    return y + 1;
   }
 
-  sectionHeader(screen, leftX, y, 'ACTIVITY (' + totalEvents + ' events)');
+  sectionHeader(screen, leftX, y, '◧ ACTIVITY · ' + totalEvents + ' EVENTS');
   y++;
 
   const heatStyle = (level) => {
-    if (level === 0) return color('dim');
+    if (level === 0) return { dim: true };
     if (hm.max <= 3) return { fg: 'green' };
     const ratio = level / hm.max;
     if (ratio < 0.25) return { fg: 'green', dim: true };
@@ -170,8 +168,7 @@ function renderHeatmap(screen, leftX, y, rightX, h) {
 
   const heatChars = [' ', '░', '▒', '▓', '█'];
   for (let row = 0; row < 7; row++) {
-    if (y >= h) break;
-    screen.writeStr(leftX, y, dayLabels[row], color('dim'));
+    screen.writeStr(leftX, y, dayLabels[row], { dim: true });
     for (let col = 0; col < hm.weeks; col++) {
       const cx = leftX + 2 + col * cellW;
       if (cx >= rightX - 1) break;
@@ -185,8 +182,9 @@ function renderHeatmap(screen, leftX, y, rightX, h) {
     y++;
   }
 
-  const legend = 'Less ░▒▓█ More';
-  screen.writeStr(leftX, y, legend, color('dim'));
+  const legend = 'Less  ░ ▒ ▓ █  More';
+  screen.writeStr(leftX, y, legend, { dim: true });
+  return y + 1;
 }
 
 export function renderDashboard(screen, y, h) {
@@ -195,10 +193,11 @@ export function renderDashboard(screen, y, h) {
 
   if (!user) {
     emptyState(screen, y, h, {
-      icon: '---',
-      title: 'Not authenticated',
-      message: 'Go to Settings [4] to log in',
+      icon: '🔒  NOT SIGNED IN',
+      title: 'Welcome to GitHub TUI',
+      message: 'Sign in with a Personal Access Token to see your dashboard.',
       hint: '',
+      keyHint: 'Press [4] for Settings  →  [Enter] on Login',
     });
     return;
   }
@@ -209,17 +208,17 @@ export function renderDashboard(screen, y, h) {
 
   // Greeting row.
   const heading = greeting() + ', ' + (user.name || user.login);
-  screen.writeStr(4, y, heading, color('title'));
+  screen.writeStr(2, y, heading, { fg: 'white', bold: true });
 
   const unread = appState.notifications.filter(n => n.unread).length;
   if (unread > 0) {
-    const badge = unread + ' unread';
-    screen.writeStr(Math.max(4, W - badge.length - 6), y, badge, { fg: 'yellow', bold: true });
+    const badge = '🔔 ' + unread + ' unread';
+    screen.writeStr(Math.max(2, W - badge.length - 4), y, badge, { fg: 'yellow', bold: true });
   }
-  screen.hline(y + 1, '─');
+  screen.hline(y + 1, '─', { dim: true });
 
-  // Stat cards.
-  const cardY = y + 2;
+  // ── Stat cards ──────────────────────────────────────────────
+  const cardY = y + 3;
   const totalStars = appState.repos.reduce((a, r) => a + (r.stargazers_count || 0), 0);
   const totalForks = appState.repos.reduce((a, r) => a + (r.forks_count || 0), 0);
   const langSet = new Set(appState.repos.map(r => r.language).filter(Boolean));
@@ -228,194 +227,203 @@ export function renderDashboard(screen, y, h) {
     : '?';
 
   const cardCount = 5;
-  const margin = 4;
+  const margin = 2;
   const gap = 1;
   const cardW = Math.max(14, Math.floor((W - margin * 2 - gap * (cardCount - 1)) / cardCount));
+  const cardH = 4;
   const cards = [
-    ['Stars',      shortNum(totalStars), color('star')],
-    ['Forks',      shortNum(totalForks), color('fork')],
-    ['Languages',  String(langSet.size), color('trending')],
-    ['Account Age', accountAgeYears + 'y', color('success')],
-    ['Stale',      String(appState.dashboardStaleCount), appState.dashboardStaleCount > 0 ? color('warning') : color('dim')],
+    { label: 'STARS',         value: shortNum(totalStars),                            style: { fg: 'yellow', bold: true } },
+    { label: 'FORKS',         value: shortNum(totalForks),                            style: { fg: 'cyan', bold: true } },
+    { label: 'LANGUAGES',     value: String(langSet.size),                            style: { fg: 'magenta', bold: true } },
+    { label: 'ACCOUNT AGE',   value: accountAgeYears + 'y',                           style: { fg: 'green', bold: true } },
+    { label: 'STALE',         value: String(appState.dashboardStaleCount),            style: appState.dashboardStaleCount > 0 ? { fg: 'yellow', bold: true } : { dim: true } },
   ];
+  const cardsFocus = appState.dashboardCardsFocus;
   cards.forEach((c, i) => {
     const cx = margin + i * (cardW + gap);
-    if (cardY + 3 >= y + h) return;
-    screen.box(cx, cardY, cardW, 3, '');
-    screen.writeStr(cx + 2, cardY + 1, truncate(c[0], cardW - 4), color('dim'));
-    screen.writeStr(cx + 2, cardY + 2, truncate(c[1], cardW - 4), c[2] || color('title'));
+    if (cardY + cardH >= y + h) return;
+    const focused = cardsFocus && i === appState.dashboardSelectedCard;
+    const fillStyle = focused ? { bg: 'darkGray', fg: 'white' } : null;
+    const borderStyle = focused ? { fg: 'cyan', bold: true } : { dim: true };
+    screen.card(cx, cardY, cardW, cardH, c.label, fillStyle, borderStyle);
+    const valStr = c.value;
+    const valX = cx + Math.floor((cardW - valStr.length) / 2);
+    screen.writeStr(valX, cardY + 2, valStr, c.style);
   });
 
-  // Body: 2 columns with a vertical divider.
-  const bodyY = cardY + 5;
+  // ── Body: 2 columns ────────────────────────────────────────
+  const bodyY = cardY + cardH + 2;
   if (bodyY >= y + h) return;
   const splitX = Math.floor(W / 2);
-  const leftX = 4;
-  const rightX = splitX + 3;
+  const leftX = 2;
+  const rightX = splitX + 2;
+  const leftW = splitX - leftX - 2;
+  const rightW = W - rightX - 2;
 
-  // LEFT COLUMN.
+  // LEFT COLUMN ─────────────────────────────────────────────
   let ly = bodyY;
-  sectionHeader(screen, leftX, ly++, 'PROFILE');
+
+  sectionHeader(screen, leftX, ly, '▸ PROFILE');
+  ly++;
   const profile = [
-    ['@' + user.login, null],
-    [user.email || '—', color('dim')],
-    ['Followers: ' + (user.followers || 0) + '  Following: ' + (user.following || 0), color('dim')],
-    ['Public: ' + (user.public_repos || 0) + '  Private: ' + (user.total_private_repos || 0), color('dim')],
+    { text: '@' + user.login, style: { fg: 'cyan', bold: true } },
+    { text: user.email || '—', style: { dim: true } },
+    { text: 'Followers: ' + (user.followers || 0) + '   Following: ' + (user.following || 0), style: { dim: true } },
+    { text: 'Public: ' + (user.public_repos || 0) + '   Private: ' + (user.total_private_repos || 0), style: { dim: true } },
   ];
-  for (const [txt, style] of profile) {
+  for (const p of profile) {
     if (ly >= y + h - 1) break;
-    screen.writeStr(leftX, ly++, txt.substring(0, splitX - leftX - 2), style);
+    screen.writeStr(leftX, ly++, p.text.substring(0, leftW), p.style);
   }
   ly++;
 
-  // Sparkline with axis labels.
   if (ly < y + h - 4 && appState.dashboardStarHistory.length > 0) {
-    sectionHeader(screen, leftX, ly++, 'STARS (30 DAYS)');
-    const sparkW = Math.min(30, splitX - leftX - 4);
-    const spark = sparkline(appState.dashboardStarHistory, sparkW);
-    const totalStarsRecent = appState.dashboardStarHistory.reduce((a, b) => a + b, 0);
-    screen.writeStr(leftX, ly, spark, color('star'));
-    screen.writeStr(leftX, ly + 1, '30d ago', color('dim'));
-    const todayLabel = 'today';
-    screen.writeStr(leftX + sparkW - todayLabel.length, ly + 1, todayLabel, color('dim'));
-    ly += 2;
-    screen.writeStr(leftX, ly, totalStarsRecent + ' new stars', color('dim'));
+    sectionHeader(screen, leftX, ly, '▸ STARS · LAST 30 DAYS');
     ly++;
+    const sparkW = Math.min(leftW - 2, 30);
+    const spark = sparkline(appState.dashboardStarHistory, sparkW);
+    screen.writeStr(leftX, ly, spark, { fg: 'yellow' });
+    ly++;
+    const totalStarsRecent = appState.dashboardStarHistory.reduce((a, b) => a + b, 0);
+    screen.writeStr(leftX, ly, '30d ago', { dim: true });
+    const todayLabel = 'today';
+    screen.writeStr(leftX + sparkW - todayLabel.length, ly, todayLabel, { dim: true });
+    ly++;
+    screen.writeStr(leftX, ly, totalStarsRecent + ' new stars in 30 days', { dim: true });
+    ly += 2;
   }
 
-  // Top repos.
   if (ly < y + h - 2) {
-    sectionHeader(screen, leftX, ly++, 'TOP REPOS');
+    sectionHeader(screen, leftX, ly, '▸ TOP REPOS');
+    ly++;
     const top = [...appState.repos]
       .sort((a, b) => (b.stargazers_count || 0) - (a.stargazers_count || 0))
       .slice(0, 5);
     if (top.length === 0) {
-      screen.writeStr(leftX, ly++, '(no repos)', color('dim'));
+      screen.writeStr(leftX, ly++, '(no repos)', { dim: true });
     } else {
       for (const r of top) {
         if (ly >= y + h - 1) break;
         const stars = '★' + shortNum(r.stargazers_count || 0);
-        screen.writeStr(leftX, ly, r.name.substring(0, splitX - leftX - 12));
-        screen.writeStr(splitX - 8, ly, stars, color('star'));
+        const nameMax = leftW - stars.length - 2;
+        screen.writeStr(leftX, ly, truncate(r.name, nameMax), { fg: 'white' });
+        screen.writeStr(leftX + leftW - stars.length, ly, stars, { fg: 'yellow' });
         ly++;
       }
     }
   }
 
-  // RIGHT COLUMN.
+  // RIGHT COLUMN ────────────────────────────────────────────
   let ry = bodyY;
-  const rightW = W - rightX - 2;
 
-  sectionHeader(screen, rightX, ry++, 'RECENT ACTIVITY');
+  sectionHeader(screen, rightX, ry, '▸ RECENT ACTIVITY', '[Enter] open first');
+  ry++;
   if (appState.events.length === 0) {
     screen.writeStr(rightX, ry++, appState.dashboardLoaded
-      ? '(no public events)' : 'Loading...', color('dim'));
+      ? '(no public events)' : 'Loading...', { dim: true });
   } else {
-    const maxEvents = Math.min(6, Math.max(1, Math.floor((y + h - bodyY) * 0.35)));
+    const maxEvents = Math.min(7, Math.max(1, Math.floor((y + h - bodyY) * 0.30)));
     for (const ev of appState.events.slice(0, maxEvents)) {
       if (ry >= y + h - 1) break;
       const [icon, c, label] = eventGlyph(ev.type);
       const repo = (ev.repo && ev.repo.name ? ev.repo.name : '?').substring(0, Math.max(10, rightW - 22));
       const when = relTime(ev.created_at);
       screen.writeStr(rightX, ry, icon, c);
-      screen.writeStr(rightX + 2, ry, label.substring(0, 11).padEnd(11), color('dim'));
-      screen.writeStr(rightX + 14, ry, repo);
-      screen.writeStr(rightX + rightW - when.length - 1, ry, when, color('dim'));
+      screen.writeStr(rightX + 2, ry, label.substring(0, 11).padEnd(11), { dim: true });
+      screen.writeStr(rightX + 14, ry, truncate(repo, rightW - 22));
+      screen.writeStr(rightX + rightW - when.length, ry, when, { dim: true });
       ry++;
     }
   }
   ry++;
 
   if (ry < y + h - 3 && appState.dashboardRecentIssues.length > 0) {
-    sectionHeader(screen, rightX, ry++, 'RECENT ISSUES');
-    const maxIssues = Math.min(4, Math.max(1, Math.floor((y + h - bodyY) * 0.2)));
+    sectionHeader(screen, rightX, ry, '▸ RECENT ISSUES');
+    ry++;
+    const maxIssues = Math.min(4, Math.max(1, Math.floor((y + h - bodyY) * 0.20)));
     for (const issue of appState.dashboardRecentIssues.slice(0, maxIssues)) {
       if (ry >= y + h - 1) break;
       const num = '#' + (issue.number || '?');
-      const title = (issue.title || '?').substring(0, Math.max(10, rightW - 20));
-      const state = issue.state === 'open' ? color('success') : color('dim');
-      screen.writeStr(rightX, ry, num.padEnd(7), color('issue'));
-      screen.writeStr(rightX + 7, ry, title, state);
+      const titleMax = rightW - 14;
+      const title = truncate(issue.title || '?', titleMax);
+      const stateStyle = issue.state === 'open' ? { fg: 'green' } : { dim: true };
+      screen.writeStr(rightX, ry, num, { fg: 'yellow' });
+      screen.writeStr(rightX + 8, ry, title, stateStyle);
       ry++;
     }
     ry++;
   }
 
   if (ry < y + h - 3 && appState.dashboardRecentPRs.length > 0) {
-    sectionHeader(screen, rightX, ry++, 'RECENT PRS');
-    const maxPRs = Math.min(4, Math.max(1, Math.floor((y + h - bodyY) * 0.2)));
+    sectionHeader(screen, rightX, ry, '▸ RECENT PRs');
+    ry++;
+    const maxPRs = Math.min(4, Math.max(1, Math.floor((y + h - bodyY) * 0.20)));
     for (const pr of appState.dashboardRecentPRs.slice(0, maxPRs)) {
       if (ry >= y + h - 1) break;
       const num = '#' + (pr.number || '?');
-      const title = (pr.title || '?').substring(0, Math.max(10, rightW - 20));
       const draft = pr.draft ? '[draft] ' : '';
-      const state = pr.state === 'open' ? color('pr') : color('dim');
-      screen.writeStr(rightX, ry, num.padEnd(7), color('pr'));
-      screen.writeStr(rightX + 7, ry, (draft + title).substring(0, rightW - 9), state);
+      const titleMax = rightW - 14;
+      const title = truncate(draft + (pr.title || '?'), titleMax);
+      const stateStyle = pr.state === 'open' ? { fg: 'cyan' } : { dim: true };
+      screen.writeStr(rightX, ry, num, { fg: 'cyan' });
+      screen.writeStr(rightX + 8, ry, title, stateStyle);
       ry++;
     }
     ry++;
   }
 
   if (ry < y + h - 3 && appState.dashboardStaleCount > 0) {
-    sectionHeader(screen, rightX, ry++, 'STALE REPOS');
+    sectionHeader(screen, rightX, ry, '▸ STALE REPOS');
+    ry++;
     for (const name of appState.dashboardStaleRepos) {
       if (ry >= y + h - 1) break;
-      screen.writeStr(rightX + 2, ry++, name.substring(0, rightW - 4), color('warning'));
+      screen.writeStr(rightX, ry++, truncate(name, rightW), { fg: 'yellow' });
     }
     if (appState.dashboardStaleCount > appState.dashboardStaleRepos.length) {
-      screen.writeStr(rightX + 2, ry++, '... and ' +
-        (appState.dashboardStaleCount - appState.dashboardStaleRepos.length) + ' more', color('dim'));
+      screen.writeStr(rightX, ry++, '... and ' +
+        (appState.dashboardStaleCount - appState.dashboardStaleRepos.length) + ' more', { dim: true });
     }
     ry++;
   }
 
   if (ry < y + h - 2) {
-    sectionHeader(screen, rightX, ry++, 'TRENDING');
+    sectionHeader(screen, rightX, ry, '▸ TRENDING THIS WEEK');
+    ry++;
     if (appState.trending.length === 0) {
-      screen.writeStr(rightX, ry++, appState.dashboardLoaded ? '(none)' : 'Loading...', color('dim'));
+      screen.writeStr(rightX, ry++, appState.dashboardLoaded ? '(none)' : 'Loading...', { dim: true });
     } else {
-      const maxTrending = Math.min(appState.trending.length, Math.max(3, Math.floor((y + h - bodyY) * 0.3)));
+      const maxTrending = Math.min(appState.trending.length, Math.max(3, Math.floor((y + h - bodyY) * 0.30)));
       for (let i = 0; i < maxTrending && i < appState.trending.length; i++) {
         if (ry >= y + h - 1) break;
         const r = appState.trending[i];
-        const name = (r.full_name || '?').substring(0, Math.max(10, rightW - 14));
+        const name = truncate(r.full_name || '?', rightW - 8);
         const stars = '★' + shortNum(r.stargazers_count || 0);
-        screen.writeStr(rightX, ry, name);
-        screen.writeStr(rightX + rightW - stars.length - 1, ry, stars, color('star'));
+        screen.writeStr(rightX, ry, name, { fg: 'white' });
+        screen.writeStr(rightX + rightW - stars.length, ry, stars, { fg: 'magenta' });
         ry++;
       }
       if (appState.trending.length > maxTrending) {
-        screen.writeStr(rightX, ry, '[Space] Load more  [Enter] Analyze', color('dim'));
-        ry++;
-      } else {
-        screen.writeStr(rightX, ry, '[Enter] Analyze repo', color('dim'));
+        screen.writeStr(rightX, ry, '[Space] Load more', { dim: true });
         ry++;
       }
     }
   }
 
-  // Column divider + bounds (after both columns are rendered).
-  const bodyH = Math.max(0, Math.min(ly, ry) - bodyY);
-  const colBot = bodyY + bodyH;
+  // Column divider line.
+  const colBot = Math.max(ly, ry);
+  const bodyH = Math.max(0, colBot - bodyY);
   for (let dy = 0; dy < bodyH; dy++) {
-    screen.setCell(splitX + 1, bodyY + dy, '│', color('dim'));
+    screen.setCell(splitX, bodyY + dy, '│', { dim: true });
   }
 
-  // Full-width sections below columns.
-  const colEnd = Math.max(ly, ry) + 1;
-  const fullBottom = Math.min(y + h, colEnd + 10);
-
-  // Heatmap — full width.
+  // Full-width sections below the columns.
+  const colEnd = colBot + 1;
   if (colEnd + 10 < y + h) {
-    renderHeatmap(screen, leftX, colEnd, W - 4, fullBottom);
-  }
-
-  // Language breakdown — full width.
-  if (colEnd + 10 < y + h && appState.repos.length > 0) {
-    const langY = colEnd + 10;
-    if (langY < y + h - 2) {
-      sectionHeader(screen, leftX, langY, 'LANGUAGES');
+    renderHeatmap(screen, leftX, colEnd, W - 2);
+    const heatEnd = colEnd + 9;
+    if (heatEnd + 2 < y + h && appState.repos.length > 0) {
+      const langY = heatEnd;
+      sectionHeader(screen, leftX, langY, '◨ LANGUAGES');
       const langCount = {};
       for (const r of appState.repos) {
         if (r.language) langCount[r.language] = (langCount[r.language] || 0) + 1;
@@ -425,7 +433,7 @@ export function renderDashboard(screen, y, h) {
       const barW = Math.max(6, W - leftX - 26);
       let lly = langY + 1;
       if (sorted.length === 0) {
-        screen.writeStr(leftX, lly, '(no language metadata)', color('dim'));
+        screen.writeStr(leftX, lly, '(no language metadata)', { dim: true });
       } else {
         for (const [lang, count] of sorted) {
           if (lly >= y + h - 1) break;
@@ -433,17 +441,16 @@ export function renderDashboard(screen, y, h) {
           const filled = Math.max(1, Math.round(pct * barW));
           const bar = '█'.repeat(filled) + '░'.repeat(Math.max(0, barW - filled));
           screen.writeStr(leftX, lly, lang.substring(0, 10).padEnd(11));
-          screen.writeStr(leftX + 11, lly, bar, color('languageBar'));
-          screen.writeStr(leftX + 12 + barW, lly, String(count), color('dim'));
+          screen.writeStr(leftX + 11, lly, bar, { fg: 'cyan' });
+          screen.writeStr(leftX + 12 + barW, lly, String(count), { dim: true });
           lly++;
         }
       }
     }
   }
 
-  // Scroll indicator at bottom of content area.
   if (scroll > 0) {
-    screen.writeStr(W - 16, y + h - 1, '↑ more above', color('dim'));
+    screen.writeStr(W - 18, y + h - 1, '↑ scroll up', { dim: true });
   }
 }
 
@@ -477,6 +484,27 @@ export function openTrendingRepo() {
   loadRepoDetails(owner, name);
 }
 
+// Open the focused stat card (currently: STALE = jump to Repos with stale filter).
+export function openFocusedCard() {
+  if (!appState.dashboardCardsFocus) return;
+  const i = appState.dashboardSelectedCard;
+  if (i === 4) {
+    // Stale → repos with stale filter
+    setTab(1);
+    appState.repoStaleOnly = true;
+    appState.repoScroll = 0;
+    appState.repoSelected = 0;
+    appState.dashboardCardsFocus = false;
+    showMessage('Showing stale repos', 'info');
+    render();
+  } else if (i === 0 || i === 1) {
+    // Stars / Forks → repos tab
+    setTab(1);
+    appState.dashboardCardsFocus = false;
+    render();
+  }
+}
+
 export const keys = {};
 
 export function up() {
@@ -485,5 +513,25 @@ export function up() {
 }
 export function down() {
   appState.dashboardScroll = (appState.dashboardScroll || 0) + 1;
+  render();
+}
+
+// Card focus navigation (Tab on dashboard).
+export function focusCards() {
+  appState.dashboardCardsFocus = true;
+  render();
+}
+export function unfocusCards() {
+  appState.dashboardCardsFocus = false;
+  render();
+}
+export function leftCard() {
+  if (!appState.dashboardCardsFocus) return;
+  appState.dashboardSelectedCard = Math.max(0, appState.dashboardSelectedCard - 1);
+  render();
+}
+export function rightCard() {
+  if (!appState.dashboardCardsFocus) return;
+  appState.dashboardSelectedCard = Math.min(4, appState.dashboardSelectedCard + 1);
   render();
 }

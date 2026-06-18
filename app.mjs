@@ -51,6 +51,12 @@ async function main() {
   // Auto-load if we already have a saved token.
   if (appState.token) {
     await loadUserData();
+  } else {
+    // First-time users get a friendly welcome overlay.
+    const onboarding = await import('./tui/tabs/onboarding.mjs');
+    if (onboarding.isFirstRun()) {
+      onboarding.startOnboarding();
+    }
   }
   render();
 }

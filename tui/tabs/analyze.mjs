@@ -1,7 +1,8 @@
 // Analyze tab — search any public repo, drill into rich details,
 // toggle Issues/PRs sub-panes, view README, hop to Forks sub-view.
+// v0.5+ polish: pushes to recent-repos list, cleaner section headings.
 
-import { appState, render, startAsync, isStale, showMessage } from '../state.mjs';
+import { appState, render, startAsync, isStale, showMessage, pushRecentRepo } from '../state.mjs';
 import {
   searchRepositories, getRepositoryDetails,
   getRepositoryLanguages, getRepositoryContributors,
@@ -91,6 +92,8 @@ export async function loadRepoDetails(owner, name) {
     if (isStale(gen)) return;
     appState.repoDetails = details;
     appState.analyzeView = 'details';
+    // Track in recent repos.
+    pushRecentRepo(details);
     render();
 
     const safe = (p) => p.catch(() => null);
@@ -115,7 +118,6 @@ export async function loadRepoDetails(owner, name) {
   if (!isStale(gen)) render();
 }
 
-// README viewer — overlay-like sub-pane.
 export async function viewReadme() {
   const repo = appState.repoDetails;
   if (!repo) return;
@@ -136,38 +138,71 @@ export async function viewReadme() {
   if (!isStale(gen)) render();
 }
 
+function sectionHeader(screen, x, y, text, hint) {
+  screen.writeStr(x, y, text, { fg: 'cyan', bold: true });
+  if (hint) {
+    const hx = screen.width - hint.length - 2;
+    if (hx > x + text.length + 4) screen.writeStr(hx, y, hint, { dim: true });
+  }
+}
+
 function renderSearchInput(screen, y, h) {
   const W = screen.width;
   const inputY = y + 3;
   const inputW = Math.min(50, W - 12);
 
-  // Bordered input box.
-  screen.writeStr(4, inputY - 1, 'Search', color('header'));
-  screen.box(4, inputY, inputW + 2, 3, '');
+  sectionHeader(screen, 2, inputY - 1, '🔎 SEARCH PUBLIC REPOSITORIES');
+  screen.box(2, inputY, inputW + 2, 3, '');
 
   if (appState.inputMode) {
     const shown = appState.inputMask
       ? '*'.repeat(appState.inputBuffer.length) : appState.inputBuffer;
-    screen.writeStr(6, inputY + 1,
-      (appState.inputPrompt + shown + '_').substring(0, inputW - 2), color('inputBox'));
+    screen.writeStr(4, inputY + 1,
+      (appState.inputPrompt + shown + '_').substring(0, inputW - 2), { fg: 'cyan', underline: true });
   } else {
-    screen.writeStr(6, inputY + 1, 'Type a repo name or keywords...', color('dim'));
+    screen.writeStr(4, inputY + 1, 'Type a repo name or keywords...', { dim: true });
   }
 
-  screen.writeStr(4, y + 6, 'Search for any public GitHub repository to analyze.', color('dim'));
-  screen.writeStr(4, y + 7, 'Examples: facebook/react, rust-lang, machine learning', color('dim'));
+  // Tips + quick examples.
+  let tipY = inputY + 4;
+  screen.writeStr(2, tipY, '💡 Tips', { fg: 'yellow', bold: true });
+  const tips = [
+    '• Search by name:    facebook/react',
+    '• Search by topic:   language:rust stars:>1000',
+    '• Filter orgs:       org:microsoft',
+    '• Combine filters:   machine learning language:python',
+  ];
+  for (const t of tips) {
+    screen.writeStr(2, ++tipY, t, { dim: true });
+  }
+
+  // Recent repos (if any) — quick access.
+  if (appState.recentRepos.length > 0) {
+    tipY += 2;
+    sectionHeader(screen, 2, tipY, '🕘 RECENT');
+    tipY++;
+    for (const r of appState.recentRepos.slice(0, 5)) {
+      screen.writeStr(2, tipY, truncate(r.full_name, W - 4), { fg: 'white' });
+      if (r.description) {
+        const desc = '  ' + truncate(r.description, W - 22);
+        screen.writeStr(2 + 2 + truncate(r.full_name, W - 4).length, tipY, desc, { dim: true });
+      }
+      tipY++;
+      if (tipY > y + h - 2) break;
+    }
+  }
 }
 
 function renderResultsList(screen, y, h) {
   const W = screen.width;
-  screen.writeStr(4, y + 2, 'Search:', color('title'));
-  screen.writeStr(12, y + 2, appState.searchQuery || '');
+  screen.writeStr(2, y + 2, 'Search:', { fg: 'white', bold: true });
+  screen.writeStr(10, y + 2, appState.searchQuery || '', { fg: 'cyan' });
 
   const listY = y + 4;
   const maxVisible = Math.max(1, Math.min(8, h - 10));
   if (appState.searchResults.length === 0) {
     emptyState(screen, listY, h - 4, {
-      icon: '---',
+      icon: '○',
       title: 'No results found',
       message: 'Try different keywords or check the spelling',
       hint: '[Esc] Back to search',
@@ -175,40 +210,39 @@ function renderResultsList(screen, y, h) {
     return;
   }
 
-  screen.writeStr(4, listY, 'Results', color('header'));
-  screen.hline(listY + 1, '─', color('dim'));
+  sectionHeader(screen, 2, listY, '◫ RESULTS', '[' + appState.searchResults.length + ']');
+  screen.hline(listY + 1, '─', { dim: true });
   const start = appState.searchScroll;
   for (let i = 0; i < maxVisible && start + i < appState.searchResults.length; i++) {
     const repo = appState.searchResults[start + i];
     const row = listY + 2 + i;
     const sel = start + i === appState.selectedRepo;
 
-    // Full-row selection highlight.
     if (sel) {
-      for (let x = 0; x < W; x++) screen.styleBuf[row][x] = color('selection');
+      for (let x = 0; x < W; x++) screen.styleBuf[row][x] = { bg: 'blue', fg: 'white', bold: true };
     }
 
-    screen.writeStr(4, row, sel ? '>' : ' ', sel ? color('selection') : null);
-    screen.writeStr(6, row, truncate(repo.full_name, 30), sel ? color('selection') : null);
-    screen.writeStr(38, row,
-      '★' + shortNum(repo.stargazers_count) +
-      ' ⑂' + shortNum(repo.forks_count) +
-      ' ⚡' + shortNum(repo.open_issues_count), sel ? color('selection') : color('dim'));
+    screen.writeStr(2, row, sel ? '▶' : '  ', sel ? { bg: 'blue', fg: 'white' } : { dim: true });
+    screen.writeStr(5, row, truncate(repo.full_name, 30), sel ? { bg: 'blue', fg: 'white', bold: true } : { fg: 'white' });
+    const stats = '★' + shortNum(repo.stargazers_count) +
+      '   ⑂' + shortNum(repo.forks_count) +
+      '   ⚡' + shortNum(repo.open_issues_count);
+    screen.writeStr(36, row, stats, sel ? { bg: 'blue', fg: 'white' } : { dim: true });
   }
   const countY = listY + 2 + maxVisible;
   if (countY < y + h) {
     const total = appState.searchResults.length;
-    const more = appState.searchHasMore ? '  [Space] More' : '';
-    screen.writeStr(4, countY, total + ' results' + more, color('dim'));
+    const more = appState.searchHasMore ? '   [Space] More results' : '';
+    screen.writeStr(2, countY, total + ' results' + more, { dim: true });
   }
 }
 
 function renderIssuesPane(screen, y, maxH) {
   renderIssuePRList(screen, y, maxH, {
-    title: 'Open Issues',
+    title: 'OPEN ISSUES',
     items: appState.repoIssues,
     emptyMsg: '(no open issues)',
-    numColor: color('issue'),
+    numColor: { fg: 'yellow' },
     getCols: (W) => ({
       numW: 7, titleCol: 12,
       authorCol: Math.max(32, W - 24),
@@ -217,7 +251,7 @@ function renderIssuesPane(screen, y, maxH) {
     renderExtra: (screen, item, col, W, row) => {
       const labels = (item.labels || []).map(l => l.name).slice(0, 2).join(', ');
       if (col + 8 < W && labels) {
-        screen.writeStr(col, row, truncate(labels, 8), color('trending'));
+        screen.writeStr(col, row, truncate(labels, 8), { fg: 'magenta' });
       }
     },
   });
@@ -225,10 +259,10 @@ function renderIssuesPane(screen, y, maxH) {
 
 function renderPRsPane(screen, y, maxH) {
   renderIssuePRList(screen, y, maxH, {
-    title: 'Open Pull Requests',
+    title: 'OPEN PULL REQUESTS',
     items: appState.repoPullRequests,
     emptyMsg: '(no open PRs)',
-    numColor: color('pr'),
+    numColor: { fg: 'cyan' },
     getCols: (W) => ({
       numW: 7, titleCol: 12,
       authorCol: Math.max(32, W - 24),
@@ -237,7 +271,7 @@ function renderPRsPane(screen, y, maxH) {
     renderExtra: (screen, item, col, W, row) => {
       if (col + 8 < W) {
         const branch = ((item.head && item.head.ref) || '').substring(0, 8);
-        screen.writeStr(col, row, branch, color('trending'));
+        screen.writeStr(col, row, branch, { fg: 'magenta' });
       }
     },
   });
@@ -246,8 +280,8 @@ function renderPRsPane(screen, y, maxH) {
 function renderIssuePRList(screen, y, maxH, opts) {
   const W = screen.width;
   const items = opts.items;
-  screen.writeStr(4, y, opts.title + ' (' + items.length + ')', color('header'));
-  if (items.length === 0) { screen.writeStr(4, y + 2, opts.emptyMsg, color('dim')); return; }
+  sectionHeader(screen, 2, y, opts.title + ' (' + items.length + ')');
+  if (items.length === 0) { screen.writeStr(2, y + 2, opts.emptyMsg, { dim: true }); return; }
   const start = appState.detailsScroll;
   const rows = Math.max(1, maxH - 3);
   const cols = opts.getCols(W);
@@ -256,29 +290,29 @@ function renderIssuePRList(screen, y, maxH, opts) {
     const item = items[start + i];
     const row = y + 2 + i;
     const num = '#' + item.number;
-    screen.writeStr(4, row, num.padEnd(cols.numW), opts.numColor);
+    screen.writeStr(2, row, num.padEnd(cols.numW), opts.numColor);
     const draft = item.draft ? '[draft] ' : '';
     screen.writeStr(cols.titleCol, row,
       truncate(draft + (item.title || '?'), cols.authorCol - cols.titleCol - 2),
-      item.draft ? color('dim') : null);
+      item.draft ? { dim: true } : null);
     if (cols.authorCol + 12 < W) {
       screen.writeStr(cols.authorCol, row,
-        truncate((item.user && item.user.login) || '', 12), color('dim'));
+        truncate((item.user && item.user.login) || '', 12), { dim: true });
     }
     opts.renderExtra(screen, item, cols.extraCol, W, row);
   }
   if (items.length > rows) {
-    screen.writeStr(4, y + 2 + rows,
+    screen.writeStr(2, y + 2 + rows,
       (start + 1) + '-' + Math.min(start + rows, items.length) + ' of ' + items.length +
-      '  [↑↓] scroll', color('dim'));
+      '   [↑↓] scroll', { dim: true });
   }
 }
 
 // Naive Markdown rendering with improved styling.
 function renderReadmePane(screen, y, maxH) {
   const W = screen.width;
-  screen.writeStr(4, y, 'README', color('header'));
-  screen.hline(y + 1, '─', color('dim'));
+  sectionHeader(screen, 2, y, '📖 README');
+  screen.hline(y + 1, '─', { dim: true });
   const text = appState._readmeText || '(no README loaded)';
   const lines = text.split(/\r?\n/);
   const start = appState.detailsScroll;
@@ -287,28 +321,23 @@ function renderReadmePane(screen, y, maxH) {
     const ln = lines[start + i];
     const row = y + 2 + i;
     if (/^#{1,6}\s/.test(ln)) {
-      // Headings: bold.
-      screen.writeStr(4, row, ln.replace(/^#+\s*/, ''), { bold: true });
+      screen.writeStr(2, row, ln.replace(/^#+\s*/, ''), { bold: true });
     } else if (/^\s*[-*+]\s/.test(ln)) {
-      // List items: accent color with bullet preserved.
-      screen.writeStr(4, row, truncate(ln, W - 6), color('accent'));
+      screen.writeStr(2, row, truncate(ln, W - 6), { fg: 'cyan' });
     } else if (/^\s*```/.test(ln)) {
-      // Code fences: dim.
-      screen.writeStr(4, row, truncate(ln, W - 6), color('dim'));
+      screen.writeStr(2, row, truncate(ln, W - 6), { dim: true });
     } else if (/^\s*>/.test(ln)) {
-      // Blockquotes: italic (if available) or dim.
-      screen.writeStr(4, row, truncate(ln, W - 6), color('dim'));
+      screen.writeStr(2, row, truncate(ln, W - 6), { dim: true });
     } else if (/^#{1,6}\s*[-=]+$/.test(ln)) {
-      // Underline-style headings: skip (redundant).
       continue;
     } else {
-      screen.writeStr(4, row, truncate(ln, W - 6));
+      screen.writeStr(2, row, truncate(ln, W - 6));
     }
   }
   if (lines.length > rows) {
-    screen.writeStr(4, y + 2 + rows,
+    screen.writeStr(2, y + 2 + rows,
       'Lines ' + (start + 1) + '-' + Math.min(start + rows, lines.length) +
-      ' of ' + lines.length + '  [↑↓] scroll  [O] back', color('dim'));
+      ' of ' + lines.length + '   [↑↓] scroll   [O] back', { dim: true });
   }
 }
 
@@ -318,25 +347,25 @@ function renderRepoDetails(screen, y, maxH) {
   if (!repo) return;
 
   // Repo name.
-  screen.writeStr(4, y, repo.full_name, color('title'));
+  screen.writeStr(2, y, repo.full_name, { fg: 'white', bold: true });
 
   // Pane tabs as chips.
   const panes = [
-    ['overview', 'Overview',                                  'O'],
+    ['overview', 'Overview',                                    'O'],
     ['issues',   'Issues (' + appState.repoIssues.length + ')',         'i'],
     ['prs',      'PRs (' + appState.repoPullRequests.length + ')',      'P'],
-    ['readme',   'README',                                    'R'],
-    ['files',    'Files',                                     'F'],
+    ['readme',   'README',                                      'R'],
+    ['files',    'Files',                                       'F'],
   ];
-  let px = 4;
+  let px = 2;
   for (const [id, label, k] of panes) {
     const sel = appState.detailsPane === id;
     const text = '[' + k + '] ' + label;
-    const style = sel ? color('chipActive') : color('chipInactive');
+    const style = sel ? { bg: 'cyan', fg: 'darkGray', bold: true } : { dim: true };
     screen.writeStr(px, y + 1, text, style);
     px += text.length + 2;
   }
-  screen.hline(y + 2, '─', color('dim'));
+  screen.hline(y + 2, '─', { dim: true });
 
   if (appState.detailsPane === 'issues') { renderIssuesPane(screen, y + 3, maxH - 3); return; }
   if (appState.detailsPane === 'prs')    { renderPRsPane(screen, y + 3, maxH - 3); return; }
@@ -363,7 +392,7 @@ function renderRepoDetails(screen, y, maxH) {
   const rows = Math.min(details.length, maxH - 4);
   for (let i = 0; i < rows; i++) {
     const [k, v] = details[i];
-    screen.writeStr(4, y + 3 + i, k, color('dim'));
+    screen.writeStr(2, y + 3 + i, k, { dim: true });
     screen.writeStr(18, y + 3 + i, truncate(String(v), leftWidth - 14));
   }
 
@@ -372,7 +401,7 @@ function renderRepoDetails(screen, y, maxH) {
   if (rightX + 20 < W) {
     let ry = y + 3;
     if (appState.repoLanguages && Object.keys(appState.repoLanguages).length > 0) {
-      screen.writeStr(rightX, ry++, 'Languages', color('header'));
+      sectionHeader(screen, rightX, ry++, 'LANGUAGES');
       const total = Object.values(appState.repoLanguages).reduce((a, b) => a + b, 0);
       const sorted = Object.entries(appState.repoLanguages).sort((a, b) => b[1] - a[1]);
       const barWidth = Math.min(30, W - rightX - 18);
@@ -382,30 +411,30 @@ function renderRepoDetails(screen, y, maxH) {
         const filled = Math.max(1, Math.round(pct * barWidth));
         const bar = '█'.repeat(filled) + '░'.repeat(Math.max(0, barWidth - filled));
         screen.writeStr(rightX, ry, lang.substring(0, 12).padEnd(13));
-        screen.writeStr(rightX + 13, ry, bar, color('languageBar'));
-        screen.writeStr(rightX + 14 + barWidth, ry, (pct * 100).toFixed(1) + '%', color('dim'));
+        screen.writeStr(rightX + 13, ry, bar, { fg: 'cyan' });
+        screen.writeStr(rightX + 14 + barWidth, ry, (pct * 100).toFixed(1) + '%', { dim: true });
         ry++;
       }
       ry++;
     }
     if (appState.repoContributors.length > 0 && ry < y + maxH - 2) {
-      screen.writeStr(rightX, ry++, 'Top Contributors', color('header'));
+      sectionHeader(screen, rightX, ry++, 'TOP CONTRIBUTORS');
       for (const c of appState.repoContributors.slice(0, 5)) {
         if (ry >= y + maxH - 1) break;
         screen.writeStr(rightX, ry, truncate('  ' + (c.login || '?'), 24));
-        screen.writeStr(rightX + 26, ry, (c.contributions || 0) + ' commits', color('dim'));
+        screen.writeStr(rightX + 26, ry, (c.contributions || 0) + ' commits', { dim: true });
         ry++;
       }
       ry++;
     }
     if (appState.repoReleases.length > 0 && ry < y + maxH - 2) {
-      screen.writeStr(rightX, ry++, 'Latest Releases', color('header'));
+      sectionHeader(screen, rightX, ry++, 'LATEST RELEASES');
       for (const rel of appState.repoReleases.slice(0, 3)) {
         if (ry >= y + maxH - 1) break;
         const tag = truncate(rel.tag_name || rel.name || '?', 18);
         const when = rel.published_at ? new Date(rel.published_at).toLocaleDateString() : '';
-        screen.writeStr(rightX, ry, '> ' + tag);
-        screen.writeStr(rightX + 22, ry, when, color('dim'));
+        screen.writeStr(rightX, ry, '▶ ' + tag);
+        screen.writeStr(rightX + 22, ry, when, { dim: true });
         ry++;
       }
     }
@@ -413,8 +442,8 @@ function renderRepoDetails(screen, y, maxH) {
 }
 
 export function renderAnalyze(screen, y, h) {
-  screen.writeStr(4, y, 'Analyze Repository', color('title'));
-  screen.hline(y + 1, '─');
+  screen.writeStr(2, y, 'ANALYZE REPOSITORY', { fg: 'white', bold: true });
+  screen.hline(y + 1, '─', { dim: true });
   const v = appState.analyzeView;
   if (v === 'search')   { renderSearchInput(screen, y, h); return; }
   if (v === 'results')  { renderResultsList(screen, y, h); return; }

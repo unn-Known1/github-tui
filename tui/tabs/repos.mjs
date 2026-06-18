@@ -1,6 +1,5 @@
 // Repos tab — your personal repositories.
-// W2/W3 features: row selection, Enter to drill in, type filter cycle,
-// language facet, stale filter, density toggle, pins, badges, honest counts.
+// v0.5+ polish: dismissable filter chips, cleaner density, better selected row.
 
 import { appState, render, startAsync, isStale, showMessage, setTab } from '../state.mjs';
 import { getAuthenticatedUser, getUserRepositories, getStarredRepos } from '../github.mjs';
@@ -54,7 +53,7 @@ export function toggleRepoSort(field) {
   render();
 }
 
-function applyAllFilters(repos) {
+export function applyAllFilters(repos) {
   let out = [...repos];
 
   switch (appState.repoTypeFilter) {
@@ -98,6 +97,34 @@ function floatPinsToTop(repos) {
   return [...pinned, ...rest];
 }
 
+// Build the list of currently active filter chips with dismiss handler.
+// Each chip has [name, kind, value] so we know what to clear.
+function activeFilterChips() {
+  const chips = [];
+  if (appState.repoTypeFilter !== 'all')
+    chips.push({ label: 'type: ' + appState.repoTypeFilter, kind: 'type' });
+  if (appState.reposLangFilter)
+    chips.push({ label: 'lang: ' + appState.reposLangFilter, kind: 'lang' });
+  if (appState.repoStaleOnly)
+    chips.push({ label: 'stale', kind: 'stale' });
+  if (appState.repoFilter)
+    chips.push({ label: '"' + appState.repoFilter + '"', kind: 'filter' });
+  return chips;
+}
+
+function clearFilterChip(kind) {
+  switch (kind) {
+    case 'type':   appState.repoTypeFilter = 'all'; break;
+    case 'lang':   appState.reposLangFilter = null; break;
+    case 'stale':  appState.repoStaleOnly = false; break;
+    case 'filter': appState.repoFilter = ''; break;
+  }
+  appState.repoScroll = 0;
+  appState.repoSelected = 0;
+  showMessage('Filter cleared', 'info');
+  render();
+}
+
 // ─── Loaders ──────────────────────────────────────────────────────
 
 export async function loadUserData() {
@@ -109,12 +136,10 @@ export async function loadUserData() {
     appState.user = await getAuthenticatedUser(appState.token);
     if (isStale(gen)) return;
     if (appState.user) {
-      // Load first page immediately, then fetch remaining pages in background.
       appState.repos = await getUserRepositories(appState.token, 1, REPOS_PER_PAGE);
       appState.reposPage = 1;
       appState.reposHasMore = appState.repos.length >= REPOS_PER_PAGE;
       if (isStale(gen)) return;
-      // Background: load all remaining pages for accurate stats.
       loadAllReposBackground(gen);
       loadDashboardWidgets().catch(() => {});
     }
@@ -137,7 +162,6 @@ export async function loadUserData() {
   if (!isStale(gen)) render();
 }
 
-// Fetch all remaining repo pages in background so stats are accurate.
 async function loadAllReposBackground(gen) {
   let page = 2;
   while (appState.reposHasMore) {
@@ -195,28 +219,22 @@ registerInputHandler('lang-filter', (value) => {
 // ─── Action helpers ───────────────────────────────────────────────
 export function visibleRows(screen) {
   const compact = appState.repoDensity === 'compact';
-  // Layout: 3 header lines + 1 filter chips line + 1 column headers line + 1 footer line = 6
-  // Plus 2 lines for status bar and tab strip overhead.
-  const overhead = 8;
+  const overhead = 9; // account for new chip row + density indicator
   return Math.max(1, Math.floor((screen.height - overhead) / (compact ? 1 : 2)));
 }
 
 function badgeChar(r) {
-  if (r.private)     return { ch: 'P', style: color('warning') };
-  if (r.fork)        return { ch: 'F', style: color('accent') };
-  if (r.archived)    return { ch: 'A', style: color('dim') };
-  if (isPinned(r.full_name)) return { ch: '*', style: color('star') };
-  if (isBookmarked(r.full_name)) return { ch: 'B', style: color('star') };
+  if (r.private)     return { ch: 'P', style: { fg: 'yellow', bold: true }, label: 'private' };
+  if (r.fork)        return { ch: 'F', style: { fg: 'cyan', bold: true },    label: 'fork' };
+  if (r.archived)    return { ch: 'A', style: { dim: true },                  label: 'archived' };
+  if (isPinnedLocal(r.full_name)) return { ch: '★', style: { fg: 'yellow', bold: true }, label: 'pinned' };
+  if (isBookmarked(r.full_name)) return { ch: 'B', style: { fg: 'magenta' },  label: 'bookmarked' };
   return null;
 }
 
-function filterTagsLine() {
-  const tags = [];
-  if (appState.repoTypeFilter !== 'all') tags.push(appState.repoTypeFilter);
-  if (appState.reposLangFilter)          tags.push(appState.reposLangFilter);
-  if (appState.repoStaleOnly)            tags.push('stale');
-  if (appState.repoFilter)               tags.push('"' + appState.repoFilter + '"');
-  return tags;
+// Use in-memory state to avoid disk roundtrip on every row render.
+function isPinnedLocal(fullName) {
+  return appState.repoPins && appState.repoPins.indexOf(fullName) >= 0;
 }
 
 // ─── Render ───────────────────────────────────────────────────────
@@ -225,24 +243,25 @@ function renderStarredList(screen, y, h) {
   const W = screen.width;
   const list = appState.starred;
 
-  screen.writeStr(4, y, 'Starred Repositories', color('title'));
+  screen.writeStr(2, y, 'STARRED REPOSITORIES', { fg: 'white', bold: true });
   const countText = list.length + ' repos';
-  screen.writeStr(Math.max(4, W - countText.length - 2), y, countText, color('dim'));
-  screen.hline(y + 1, '─');
+  screen.writeStr(Math.max(2, W - countText.length - 2), y, countText, { dim: true });
+  screen.hline(y + 1, '─', { dim: true });
 
   if (list.length === 0) {
     emptyState(screen, y + 3, h - 3, {
-      icon: '---',
-      title: appState.loading ? 'Loading...' : 'No starred repos',
+      icon: '☆',
+      title: appState.loading ? 'Loading...' : 'No starred repos yet',
       message: appState.loading ? 'Fetching starred repos...' : 'Star repos on GitHub to see them here',
       hint: '',
+      keyHint: 'Press [V] to return to your repos',
     });
     return;
   }
 
   const headerY = y + 2;
-  screen.writeStr(4, headerY, 'Repo', color('header'));
-  if (W > 40) screen.writeStr(W - 22, headerY, 'Stars', color('header'));
+  screen.writeStr(2, headerY, 'REPO', { fg: 'cyan', bold: true });
+  if (W > 40) screen.writeStr(W - 22, headerY, 'STARS', { fg: 'cyan', bold: true });
 
   const maxRows = Math.max(1, h - 5);
   const start = appState.starredScroll;
@@ -255,20 +274,20 @@ function renderStarredList(screen, y, h) {
     const sel = start + i === appState.starredSelected;
 
     if (sel) {
-      for (let x = 0; x < W; x++) screen.styleBuf[row][x] = color('selection');
+      for (let x = 0; x < W; x++) screen.styleBuf[row][x] = { bg: 'blue', fg: 'white', bold: true };
     }
 
-    screen.writeStr(4, row, sel ? '>' : ' ', sel ? color('selection') : null);
-    const name = (r.full_name || '?').substring(0, Math.max(15, W - 36));
-    screen.writeStr(6, row, name, sel ? color('selection') : null);
+    screen.writeStr(2, row, sel ? '▶' : '  ', sel ? { bg: 'blue', fg: 'white' } : { dim: true });
+    const name = truncate(r.full_name || '?', Math.max(15, W - 36));
+    screen.writeStr(5, row, name, sel ? { bg: 'blue', fg: 'white' } : { fg: 'white' });
     const stars = '★' + shortNum(r.stargazers_count || 0);
-    screen.writeStr(W - 22, row, stars, sel ? color('selection') : color('star'));
+    screen.writeStr(W - 22, row, stars, sel ? { bg: 'blue', fg: 'white' } : { fg: 'yellow' });
   }
 
   const footerY = headerY + 1 + rowsToShow + 1;
   if (footerY < y + h) {
     const range = (start + 1) + '-' + Math.min(start + rowsToShow, list.length) + ' of ' + list.length;
-    screen.writeStr(4, footerY, range + '  [V] Back to own repos  [Enter] Analyze', color('dim'));
+    screen.writeStr(2, footerY, range + '   [V] Back to own repos   [Enter] Analyze', { dim: true });
   }
 }
 
@@ -287,40 +306,48 @@ export function renderRepos(screen, y, h) {
   const totalForks = appState.repos.reduce((a, r) => a + (r.forks_count || 0), 0);
   const totalIssues = appState.repos.reduce((a, r) => a + (r.open_issues_count || 0), 0);
 
-  screen.writeStr(4, y, 'Your Repositories', color('title'));
-  const statsText = '★' + shortNum(totalStars) + '  ⑂' + shortNum(totalForks) + '  ⚡' + shortNum(totalIssues);
-  screen.writeStr(Math.max(4, W - statsText.length - 2), y, statsText, color('dim'));
-  screen.hline(y + 1, '─');
+  screen.writeStr(2, y, 'YOUR REPOSITORIES', { fg: 'white', bold: true });
+  const statsText = '★ ' + shortNum(totalStars) + '   ⑂ ' + shortNum(totalForks) + '   ⚡ ' + shortNum(totalIssues);
+  screen.writeStr(Math.max(2, W - statsText.length - 2), y, statsText, { dim: true });
+  screen.hline(y + 1, '─', { dim: true });
 
-  // Filter chips.
-  const tags = filterTagsLine();
-  if (tags.length > 0) {
-    let tx = 4;
-    for (const tag of tags) {
-      const chip = ' ' + tag + ' ';
-      screen.writeStr(tx, y + 2, chip, color('chipActive'));
-      tx += chip.length + 1;
+  // Active filter chips line (dismissible with X).
+  const chips = activeFilterChips();
+  let chipX = 2;
+  const chipY = y + 2;
+  if (chips.length > 0) {
+    for (const chip of chips) {
+      const text = ' ' + chip.label + ' ✕ ';
+      screen.writeStr(chipX, chipY, text, { bg: 'darkGray', fg: 'cyan' });
+      // Store chip positions for click-to-dismiss.
+      chip._x1 = chipX;
+      chip._x2 = chipX + text.length;
+      chipX += text.length + 1;
     }
-    // Sort indicator after chips.
+    // Sort + density indicator on the right.
     const sortInfo = REPO_SORT_OPTIONS.find(o => o.field === appState.repoSort.field);
     const sortDir = appState.repoSort.asc ? ' ↑' : ' ↓';
-    screen.writeStr(tx + 1, y + 2, sortInfo.label + sortDir, color('accent'));
+    const sortText = 'sort: ' + sortInfo.label + sortDir;
+    screen.writeStr(W - sortText.length - 2, chipY, sortText, { fg: 'cyan' });
   } else {
     const sortInfo = REPO_SORT_OPTIONS.find(o => o.field === appState.repoSort.field);
     const sortDir = appState.repoSort.asc ? ' ↑' : ' ↓';
     const densityLabel = appState.repoDensity === 'compact' ? 'compact' : 'comfy';
-    screen.writeStr(4, y + 2,
-      'Sort: ' + sortInfo.label + sortDir + '  Density: ' + densityLabel, color('accent'));
+    const statusText = 'sort: ' + sortInfo.label + sortDir + '   density: ' + densityLabel;
+    screen.writeStr(2, chipY, statusText, { dim: true });
+    const hint = '[c] clear all';
+    screen.writeStr(W - hint.length - 2, chipY, hint, { dim: true });
   }
+  // Store chips for click handling.
+  appState._filterChips = chips;
 
   if (!repos || repos.length === 0) {
-    const hasFilters = appState.repoFilter || appState.reposLangFilter ||
-      appState.repoStaleOnly || appState.repoTypeFilter !== 'all';
+    const hasFilters = chips.length > 0;
     emptyState(screen, y + 3, h - 3, {
-      icon: hasFilters ? '---' : '---',
+      icon: hasFilters ? '○' : '○',
       title: hasFilters ? 'No matching repos' : 'No repositories',
       message: hasFilters
-        ? 'Try clearing filters with [c]'
+        ? 'Try clearing filters with [c] or click ✕ on a chip above'
         : 'Load repos by logging in at Settings [4]',
       hint: hasFilters ? '[c] Clear all filters' : '',
     });
@@ -329,8 +356,8 @@ export function renderRepos(screen, y, h) {
 
   // Responsive column positions.
   const badgeW = 2;
-  const nameCol = 4 + badgeW;
-  const nameW = Math.max(15, Math.floor(W * 0.35));
+  const nameCol = 2 + badgeW + 1;
+  const nameW = Math.max(15, Math.floor(W * 0.30));
   const langCol = nameCol + nameW + 1;
   const starsCol = langCol + 12;
   const forksCol = starsCol + 7;
@@ -338,87 +365,79 @@ export function renderRepos(screen, y, h) {
   const pushedCol = issuesCol + 8;
 
   // Column headers.
-  const headerY = y + 3;
-  screen.writeStr(nameCol, headerY, 'Repo', color('header'));
-  screen.writeStr(langCol, headerY, 'Lang', color('header'));
-  screen.writeStr(starsCol, headerY, 'Stars', color('header'));
-  screen.writeStr(forksCol, headerY, 'Forks', color('header'));
-  screen.writeStr(issuesCol, headerY, 'Issues', color('header'));
+  const headerY = y + 4;
+  screen.writeStr(nameCol, headerY, 'REPO', { fg: 'cyan', bold: true });
+  screen.writeStr(langCol, headerY, 'LANG', { fg: 'cyan', bold: true });
+  screen.writeStr(starsCol, headerY, 'STARS', { fg: 'cyan', bold: true });
+  screen.writeStr(forksCol, headerY, 'FORKS', { fg: 'cyan', bold: true });
+  screen.writeStr(issuesCol, headerY, 'ISSUES', { fg: 'cyan', bold: true });
   if (pushedCol + 8 < W) {
-    screen.writeStr(pushedCol, headerY, 'Pushed', color('header'));
+    screen.writeStr(pushedCol, headerY, 'PUSHED', { fg: 'cyan', bold: true });
   }
+  screen.hline(headerY + 1, '─', { dim: true });
 
   const compact = appState.repoDensity === 'compact';
   const rowH = compact ? 1 : 2;
-  const maxRows = Math.max(1, Math.floor((h - 8) / rowH));
   const start = appState.repoScroll;
-  const rowsToShow = Math.min(maxRows, Math.max(0, repos.length - start));
 
-  let inPinnedSection = false;
-  for (let i = 0; i < rowsToShow; i++) {
-    const repo = repos[start + i];
-    if (!repo) break;
-    const row = headerY + 1 + i * rowH;
-    const sel = start + i === appState.repoSelected;
-    const isPin = isPinned(repo.full_name);
+  // Pre-compute which data rows are "section start" (first pinned repo in a
+  // contiguous run) so we can insert a "PINNED" header above them.
+  const isSectionStart = new Array(repos.length).fill(false);
+  const isPinnedArr    = new Array(repos.length).fill(false);
+  for (let i = 0; i < repos.length; i++) {
+    isPinnedArr[i] = isPinnedLocal(repos[i].full_name);
+    if (isPinnedArr[i] && (i === 0 || !isPinnedArr[i - 1])) isSectionStart[i] = true;
+  }
+  // Count total visual rows needed for the visible window.
+  let visualRowsNeeded = 0;
+  for (let i = start; i < repos.length; i++) {
+    visualRowsNeeded += rowH;
+    if (isSectionStart[i]) visualRowsNeeded += 1;
+    if (visualRowsNeeded > 200) break; // safety
+  }
+  const maxRows = Math.max(1, Math.floor((h - 10) / rowH));
 
-    // Pinned section header.
-    if (isPin && !inPinnedSection) {
-      inPinnedSection = true;
-      if (i > 0) {
-        screen.hline(row - 1, '─', color('dim'));
-      }
-      screen.writeStr(4, row, 'PINNED', { fg: 'yellow', bold: true });
-      // Draw row background if selected.
-      if (sel) {
-        for (let x = 0; x < W; x++) screen.styleBuf[row][x] = color('selection');
-      }
-    } else if (!isPin && inPinnedSection) {
-      inPinnedSection = false;
-      screen.hline(row - 1, '─', color('dim'));
+  // Render loop: emit headers as we cross section boundaries.
+  let curY = headerY + 2;
+  let drawn = 0;
+  for (let i = start; i < repos.length && drawn < maxRows; i++) {
+    if (isSectionStart[i]) {
+      if (i > 0) screen.hline(curY - 1, '─', { dim: true });
+      screen.writeStr(2, curY, '★ PINNED', { fg: 'yellow', bold: true });
+      curY++;
+      if (drawn + 1 > maxRows) break;
     }
-
-    // Selection highlight: full row background.
+    const repo = repos[i];
+    const sel = i === appState.repoSelected;
     if (sel) {
-      for (let x = 0; x < W; x++) {
-        screen.styleBuf[row][x] = color('selection');
-      }
+      for (let x = 0; x < W; x++) screen.styleBuf[curY][x] = { bg: 'blue', fg: 'white', bold: true };
     }
-
-    // Badge.
     const badge = badgeChar(repo);
-    if (badge) {
-      screen.writeStr(4, row, '[' + badge.ch + ']', badge.style);
-    }
+    if (badge) screen.writeStr(2, curY, '[' + badge.ch + ']', badge.style);
+    else screen.writeStr(2, curY, '  ', null);
 
-    // Repo name.
-    const nameStyle = sel ? color('selection') : null;
-    screen.writeStr(nameCol, row, truncate(repo.name || 'N/A', nameW), nameStyle);
+    const nameStyle = sel ? { bg: 'blue', fg: 'white', bold: true } : { fg: 'white' };
+    screen.writeStr(nameCol, curY, truncate(repo.name || 'N/A', nameW), nameStyle);
 
-    // Stats.
-    const statStyle = sel ? color('selection') : color('dim');
-    screen.writeStr(langCol, row, (repo.language || '—').substring(0, 10), sel ? color('selection') : color('dim'));
-    screen.writeStr(starsCol, row, shortNum(repo.stargazers_count || 0), statStyle);
-    screen.writeStr(forksCol, row, shortNum(repo.forks_count || 0), statStyle);
-    screen.writeStr(issuesCol, row, shortNum(repo.open_issues_count || 0), statStyle);
+    const statStyle = sel ? { bg: 'blue', fg: 'white' } : { dim: true };
+    const langStyle = sel ? { bg: 'blue', fg: 'white' } : { dim: true };
+    screen.writeStr(langCol, curY, truncate(repo.language || '—', 10), langStyle);
+    screen.writeStr(starsCol, curY, shortNum(repo.stargazers_count || 0), statStyle);
+    screen.writeStr(forksCol, curY, shortNum(repo.forks_count || 0), statStyle);
+    screen.writeStr(issuesCol, curY, shortNum(repo.open_issues_count || 0), statStyle);
     if (pushedCol + 8 < W) {
-      screen.writeStr(pushedCol, row, relTime(repo.pushed_at || repo.updated_at), statStyle);
+      screen.writeStr(pushedCol, curY, relTime(repo.pushed_at || repo.updated_at), statStyle);
     }
-
-    // Description in comfortable mode.
-    if (!compact && repo.description) {
-      screen.writeStr(nameCol, row + 1,
-        truncate(repo.description, W - nameCol - 2), color('dim'));
-    }
+    curY += rowH;
+    drawn++;
   }
 
-  // Footer.
-  const footerY = headerY + 1 + rowsToShow * rowH + 1;
+  const footerY = curY + 1;
   if (footerY < y + h) {
-    const range = (start + 1) + '-' + Math.min(start + rowsToShow, repos.length) +
+    const range = (start + 1) + '-' + Math.min(start + maxRows, repos.length) +
       ' of ' + repos.length;
-    const more = appState.reposHasMore ? '  [Space] Load more' : '';
-    screen.writeStr(4, footerY, range + more, color('dim'));
+    const more = appState.reposHasMore ? '   [Space] Load more' : '';
+    screen.writeStr(2, footerY, range + more, { dim: true });
   }
 }
 
@@ -472,7 +491,7 @@ function togglePinCurrent() {
   const list = togglePin(r.full_name);
   appState.repoPins = list;
   showMessage(list.includes(r.full_name)
-    ? 'Pinned ' + r.full_name
+    ? '📌 Pinned ' + r.full_name
     : 'Unpinned ' + r.full_name, 'success');
   render();
 }
@@ -487,6 +506,18 @@ function clearAllFilters() {
   appState.repoSelected = 0;
   showMessage('All filters cleared', 'info');
   render();
+}
+
+// Mouse / click on a filter chip's ✕ to dismiss it.
+export function tryDismissChipAt(x, y) {
+  if (!appState._filterChips) return false;
+  for (const chip of appState._filterChips) {
+    if (x >= chip._x1 && x < chip._x2 && y === appState._chipY) {
+      clearFilterChip(chip.kind);
+      return true;
+    }
+  }
+  return false;
 }
 
 export function toggleReposView() {
