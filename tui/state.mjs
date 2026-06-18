@@ -197,6 +197,9 @@ export const appState = {
 
   // ── Rate-limit mirror (also lives in github.mjs but mirrored for render)
   rateLimit: { remaining: null, limit: null, reset: null },
+
+  // ── Collapsible sections (persisted to disk) ──
+  collapsed: {},  // { 'dashboard:profile': true, 'repos:pinned': false, ... }
 };
 
 // ────────────────────────────────────────────────────────────────────────────
@@ -251,4 +254,52 @@ export function pushRecentRepo(repo) {
     { full_name: repo.full_name, url: repo.html_url, description: repo.description, language: repo.language, stars: repo.stargazers_count, visitedAt: Date.now() },
     ...appState.recentRepos.filter(r => r.full_name !== repo.full_name),
   ].slice(0, appState.MAX_RECENT);
+}
+
+// ────────────────────────────────────────────────────────────────────────────
+// Collapsible sections — toggle, collapse all, expand all.
+// Key: z (toggle), Z (collapse all), X (expand all).
+// ────────────────────────────────────────────────────────────────────────────
+export function isCollapsed(section) {
+  return appState.collapsed[section] === true;
+}
+
+export function toggleCollapse(section) {
+  appState.collapsed[section] = !appState.collapsed[section];
+  saveCollapsed();
+  render();
+}
+
+export function collapseAll(sections) {
+  for (const s of sections) appState.collapsed[s] = true;
+  saveCollapsed();
+  render();
+}
+
+export function expandAll(sections) {
+  for (const s of sections) appState.collapsed[s] = false;
+  saveCollapsed();
+  render();
+}
+
+import { readFileSync, writeFileSync, mkdirSync, existsSync } from 'fs';
+import { join } from 'path';
+import { homedir } from 'os';
+
+const COLLAPSED_PATH = join(homedir(), '.github-tui', 'collapsed.json');
+
+function saveCollapsed() {
+  try {
+    const dir = join(homedir(), '.github-tui');
+    if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
+    writeFileSync(COLLAPSED_PATH, JSON.stringify(appState.collapsed, null, 2));
+  } catch {}
+}
+
+export function loadCollapsed() {
+  try {
+    if (existsSync(COLLAPSED_PATH)) {
+      appState.collapsed = JSON.parse(readFileSync(COLLAPSED_PATH, 'utf8'));
+    }
+  } catch {}
 }

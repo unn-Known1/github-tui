@@ -104,6 +104,21 @@ export function skeletonBars(screen, y, h, count = 5, barWidth = 0.4) {
   }
 }
 
+// ── Collapsible section header ──
+import { isCollapsed } from './state.mjs';
+
+export function collapsibleHeader(screen, x, y, section, label, hint) {
+  const collapsed = isCollapsed(section);
+  const arrow = collapsed ? '▸' : '▾';
+  const W = screen.width;
+  screen.writeStr(x, y, arrow + ' ' + label, { fg: 'cyan', bold: true });
+  if (hint) {
+    const hx = W - hint.length - 2;
+    if (hx > x + label.length + 6) screen.writeStr(hx, y, hint, { dim: true });
+  }
+  return !collapsed;
+}
+
 // Render the top header (3 rows + separator).
 function renderHeader(W) {
   const titleStyle = { fg: 'white', bold: true };

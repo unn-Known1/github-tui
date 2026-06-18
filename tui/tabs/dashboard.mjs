@@ -8,7 +8,7 @@ import {
 } from '../github.mjs';
 import { relTime, eventGlyph, greeting, shortNum, truncate, openUrl } from '../utils.mjs';
 import { color } from '../theme.mjs';
-import { emptyState } from '../render.mjs';
+import { emptyState, collapsibleHeader } from '../render.mjs';
 import { loadRepoDetails } from './analyze.mjs';
 
 export async function loadDashboardWidgets(force = false) {
@@ -131,12 +131,16 @@ function sparkline(data, width) {
 }
 
 // Section header: title + optional key hint on the right.
-function sectionHeader(screen, x, y, text, hint) {
+function sectionHeader(screen, x, y, text, hint, section) {
+  if (section) {
+    return collapsibleHeader(screen, x, y, section, text, hint);
+  }
   screen.writeStr(x, y, text, color('sectionHeading'));
   if (hint) {
     const hx = screen.width - hint.length - 2;
     if (hx > x + text.length + 4) screen.writeStr(hx, y, hint, { dim: true });
   }
+  return true;
 }
 
 function renderHeatmap(screen, leftX, y, rightX) {
@@ -259,55 +263,61 @@ export function renderDashboard(screen, y, h) {
   // LEFT COLUMN ─────────────────────────────────────────────
   let ly = bodyY;
 
-  sectionHeader(screen, leftX, ly, '▸ PROFILE');
+  const profileVisible = sectionHeader(screen, leftX, ly, 'PROFILE', null, 'dashboard:profile');
   ly++;
-  const profile = [
-    { text: '@' + user.login, style: { fg: 'cyan', bold: true } },
-    { text: user.email || '—', style: { dim: true } },
-    { text: 'Followers: ' + (user.followers || 0) + '   Following: ' + (user.following || 0), style: { dim: true } },
-    { text: 'Public: ' + (user.public_repos || 0) + '   Private: ' + (user.total_private_repos || 0), style: { dim: true } },
-  ];
-  for (const p of profile) {
-    if (ly >= y + h - 1) break;
-    screen.writeStr(leftX, ly++, p.text.substring(0, leftW), p.style);
+  if (profileVisible) {
+    const profile = [
+      { text: '@' + user.login, style: { fg: 'cyan', bold: true } },
+      { text: user.email || '—', style: { dim: true } },
+      { text: 'Followers: ' + (user.followers || 0) + '   Following: ' + (user.following || 0), style: { dim: true } },
+      { text: 'Public: ' + (user.public_repos || 0) + '   Private: ' + (user.total_private_repos || 0), style: { dim: true } },
+    ];
+    for (const p of profile) {
+      if (ly >= y + h - 1) break;
+      screen.writeStr(leftX, ly++, p.text.substring(0, leftW), p.style);
+    }
+    ly++;
   }
-  ly++;
 
   if (ly < y + h - 4 && appState.dashboardStarHistory.length > 0) {
-    sectionHeader(screen, leftX, ly, '▸ STARS · LAST 30 DAYS');
+    const starsVisible = sectionHeader(screen, leftX, ly, 'STARS · LAST 30 DAYS', null, 'dashboard:stars');
     ly++;
-    const sparkW = Math.min(leftW - 2, 30);
-    const spark = sparkline(appState.dashboardStarHistory, sparkW);
-    screen.writeStr(leftX, ly, spark, { fg: 'yellow' });
-    ly++;
-    const totalStarsRecent = appState.dashboardStarHistory.reduce((a, b) => a + b, 0);
-    screen.writeStr(leftX, ly, '30d ago', { dim: true });
-    const todayLabel = 'today';
-    screen.writeStr(leftX + sparkW - todayLabel.length, ly, todayLabel, { dim: true });
-    ly++;
-    screen.writeStr(leftX, ly, totalStarsRecent + ' new stars in 30 days', { dim: true });
-    ly += 2;
+    if (starsVisible) {
+      const sparkW = Math.min(leftW - 2, 30);
+      const spark = sparkline(appState.dashboardStarHistory, sparkW);
+      screen.writeStr(leftX, ly, spark, { fg: 'yellow' });
+      ly++;
+      const totalStarsRecent = appState.dashboardStarHistory.reduce((a, b) => a + b, 0);
+      screen.writeStr(leftX, ly, '30d ago', { dim: true });
+      const todayLabel = 'today';
+      screen.writeStr(leftX + sparkW - todayLabel.length, ly, todayLabel, { dim: true });
+      ly++;
+      screen.writeStr(leftX, ly, totalStarsRecent + ' new stars in 30 days', { dim: true });
+      ly += 2;
+    }
   }
 
   if (ly < y + h - 2) {
-    sectionHeader(screen, leftX, ly, '▸ TOP REPOS');
+    const topReposVisible = sectionHeader(screen, leftX, ly, 'TOP REPOS', null, 'dashboard:topRepos');
     ly++;
-    const top = [...appState.repos]
-      .sort((a, b) => (b.stargazers_count || 0) - (a.stargazers_count || 0))
-      .slice(0, 5);
-    if (top.length === 0) {
-      screen.writeStr(leftX, ly++, '(no repos)', { dim: true });
-    } else {
-      for (const r of top) {
-        if (ly >= y + h - 1) break;
-        const stars = '★' + shortNum(r.stargazers_count || 0);
-        const nameMax = leftW - stars.length - 2;
-        screen.writeStr(leftX, ly, truncate(r.name, nameMax), { fg: 'white' });
-        screen.writeStr(leftX + leftW - stars.length, ly, stars, { fg: 'yellow' });
-        ly++;
+    if (topReposVisible) {
+      const top = [...appState.repos]
+        .sort((a, b) => (b.stargazers_count || 0) - (a.stargazers_count || 0))
+        .slice(0, 5);
+      if (top.length === 0) {
+        screen.writeStr(leftX, ly++, '(no repos)', { dim: true });
+      } else {
+        for (const r of top) {
+          if (ly >= y + h - 1) break;
+          const stars = '★' + shortNum(r.stargazers_count || 0);
+          const nameMax = leftW - stars.length - 2;
+          screen.writeStr(leftX, ly, truncate(r.name, nameMax), { fg: 'white' });
+          screen.writeStr(leftX + leftW - stars.length, ly, stars, { fg: 'yellow' });
+          ly++;
+        }
       }
+      ly++;
     }
-    ly++;
   }
 
   // Heatmap + Languages side by side in left column below top repos.
@@ -325,13 +335,14 @@ export function renderDashboard(screen, y, h) {
       const cellW = Math.max(1, Math.min(2, Math.floor(heatW / hm.weeks)));
       const totalEvents = hm.grid.flat().reduce((a, b) => a + b, 0);
 
+      const activityLabel = totalEvents === 0 ? 'ACTIVITY' : 'ACTIVITY · ' + totalEvents;
+      const activityVisible = sectionHeader(screen, leftX, ly, activityLabel, null, 'dashboard:activity');
+      ly++;
+
+      if (activityVisible) {
       if (totalEvents === 0) {
-        sectionHeader(screen, leftX, ly, '◧ ACTIVITY');
-        ly++;
         screen.writeStr(leftX, ly++, '(no activity)', { dim: true });
       } else {
-        sectionHeader(screen, leftX, ly, '◧ ACTIVITY · ' + totalEvents);
-        ly++;
 
   const heatStyle = (level) => {
     if (level === 0) return color('dim');
@@ -360,33 +371,36 @@ export function renderDashboard(screen, y, h) {
         screen.writeStr(leftX, ly, 'Less ░▒▓█ More', { dim: true });
         ly++;
       }
+      } // activityVisible
     }
     ly++;
   }
 
   // ── Languages (right sub-column, aligned with heatmap top) ──
   if (appState.repos.length > 0 && heatTopY < y + h - 3) {
-    sectionHeader(screen, langLeftX, heatTopY, '◨ LANGUAGES');
-    const langCount = {};
-    for (const r of appState.repos) {
-      if (r.language) langCount[r.language] = (langCount[r.language] || 0) + 1;
-    }
-    const total = Object.values(langCount).reduce((a, b) => a + b, 0);
-    const sorted = Object.entries(langCount).sort((a, b) => b[1] - a[1]).slice(0, 7);
-    const barW = Math.max(3, halfW - Math.floor(halfW * 0.58) - 14);
-    let lly = heatTopY + 1;
-    if (sorted.length === 0) {
-      screen.writeStr(langLeftX, lly, '(no metadata)', { dim: true });
-    } else {
-      for (const [lang, count] of sorted) {
-        if (lly >= y + h - 1) break;
-        const pct = count / total;
-        const filled = Math.max(1, Math.round(pct * barW));
-        const bar = '█'.repeat(filled) + '░'.repeat(Math.max(0, barW - filled));
-        screen.writeStr(langLeftX, lly, lang.substring(0, 8).padEnd(9));
-        screen.writeStr(langLeftX + 9, lly, bar, { fg: 'cyan' });
-        screen.writeStr(langLeftX + 10 + barW, lly, String(count), { dim: true });
-        lly++;
+    const langVisible = sectionHeader(screen, langLeftX, heatTopY, 'LANGUAGES', null, 'dashboard:languages');
+    if (langVisible) {
+      const langCount = {};
+      for (const r of appState.repos) {
+        if (r.language) langCount[r.language] = (langCount[r.language] || 0) + 1;
+      }
+      const total = Object.values(langCount).reduce((a, b) => a + b, 0);
+      const sorted = Object.entries(langCount).sort((a, b) => b[1] - a[1]).slice(0, 7);
+      const barW = Math.max(3, halfW - Math.floor(halfW * 0.58) - 14);
+      let lly = heatTopY + 1;
+      if (sorted.length === 0) {
+        screen.writeStr(langLeftX, lly, '(no metadata)', { dim: true });
+      } else {
+        for (const [lang, count] of sorted) {
+          if (lly >= y + h - 1) break;
+          const pct = count / total;
+          const filled = Math.max(1, Math.round(pct * barW));
+          const bar = '█'.repeat(filled) + '░'.repeat(Math.max(0, barW - filled));
+          screen.writeStr(langLeftX, lly, lang.substring(0, 8).padEnd(9));
+          screen.writeStr(langLeftX + 9, lly, bar, { fg: 'cyan' });
+          screen.writeStr(langLeftX + 10 + barW, lly, String(count), { dim: true });
+          lly++;
+        }
       }
     }
   }
@@ -394,78 +408,86 @@ export function renderDashboard(screen, y, h) {
   // RIGHT COLUMN ────────────────────────────────────────────
   let ry = bodyY;
 
-  sectionHeader(screen, rightX, ry, '▸ RECENT ACTIVITY', '[Enter] open first');
+  const activityVisible = sectionHeader(screen, rightX, ry, 'RECENT ACTIVITY', '[Enter] open first', 'dashboard:activity');
   ry++;
-  if (appState.events.length === 0) {
-    screen.writeStr(rightX, ry++, appState.dashboardLoaded
-      ? '(no public events)' : 'Loading...', { dim: true });
-  } else {
-    const maxEvents = Math.min(7, Math.max(1, Math.floor((y + h - bodyY) * 0.30)));
-    for (const ev of appState.events.slice(0, maxEvents)) {
-      if (ry >= y + h - 1) break;
-      const [icon, c, label] = eventGlyph(ev.type);
-      const repo = (ev.repo && ev.repo.name ? ev.repo.name : '?').substring(0, Math.max(10, rightW - 22));
-      const when = relTime(ev.created_at);
-      screen.writeStr(rightX, ry, icon, c);
-      screen.writeStr(rightX + 2, ry, label.substring(0, 11).padEnd(11), { dim: true });
-      screen.writeStr(rightX + 14, ry, truncate(repo, rightW - 22));
-      screen.writeStr(rightX + rightW - when.length, ry, when, { dim: true });
-      ry++;
+  if (activityVisible) {
+    if (appState.events.length === 0) {
+      screen.writeStr(rightX, ry++, appState.dashboardLoaded
+        ? '(no public events)' : 'Loading...', { dim: true });
+    } else {
+      const maxEvents = Math.min(7, Math.max(1, Math.floor((y + h - bodyY) * 0.30)));
+      for (const ev of appState.events.slice(0, maxEvents)) {
+        if (ry >= y + h - 1) break;
+        const [icon, c, label] = eventGlyph(ev.type);
+        const repo = (ev.repo && ev.repo.name ? ev.repo.name : '?').substring(0, Math.max(10, rightW - 22));
+        const when = relTime(ev.created_at);
+        screen.writeStr(rightX, ry, icon, c);
+        screen.writeStr(rightX + 2, ry, label.substring(0, 11).padEnd(11), { dim: true });
+        screen.writeStr(rightX + 14, ry, truncate(repo, rightW - 22));
+        screen.writeStr(rightX + rightW - when.length, ry, when, { dim: true });
+        ry++;
+      }
     }
+    ry++;
   }
-  ry++;
 
   if (ry < y + h - 3 && appState.dashboardRecentIssues.length > 0) {
-    sectionHeader(screen, rightX, ry, '▸ RECENT ISSUES');
+    const issuesVisible = sectionHeader(screen, rightX, ry, 'RECENT ISSUES', null, 'dashboard:issues');
     ry++;
-    const maxIssues = Math.min(4, Math.max(1, Math.floor((y + h - bodyY) * 0.20)));
-    for (const issue of appState.dashboardRecentIssues.slice(0, maxIssues)) {
-      if (ry >= y + h - 1) break;
-      const num = '#' + (issue.number || '?');
-      const titleMax = rightW - 14;
-      const title = truncate(issue.title || '?', titleMax);
-      const stateStyle = issue.state === 'open' ? { fg: 'green' } : { dim: true };
-      screen.writeStr(rightX, ry, num, { fg: 'yellow' });
-      screen.writeStr(rightX + 8, ry, title, stateStyle);
+    if (issuesVisible) {
+      const maxIssues = Math.min(4, Math.max(1, Math.floor((y + h - bodyY) * 0.20)));
+      for (const issue of appState.dashboardRecentIssues.slice(0, maxIssues)) {
+        if (ry >= y + h - 1) break;
+        const num = '#' + (issue.number || '?');
+        const titleMax = rightW - 14;
+        const title = truncate(issue.title || '?', titleMax);
+        const stateStyle = issue.state === 'open' ? { fg: 'green' } : { dim: true };
+        screen.writeStr(rightX, ry, num, { fg: 'yellow' });
+        screen.writeStr(rightX + 8, ry, title, stateStyle);
+        ry++;
+      }
       ry++;
     }
-    ry++;
   }
 
   if (ry < y + h - 3 && appState.dashboardRecentPRs.length > 0) {
-    sectionHeader(screen, rightX, ry, '▸ RECENT PRs');
+    const prsVisible = sectionHeader(screen, rightX, ry, 'RECENT PRs', null, 'dashboard:prs');
     ry++;
-    const maxPRs = Math.min(4, Math.max(1, Math.floor((y + h - bodyY) * 0.20)));
-    for (const pr of appState.dashboardRecentPRs.slice(0, maxPRs)) {
-      if (ry >= y + h - 1) break;
-      const num = '#' + (pr.number || '?');
-      const draft = pr.draft ? '[draft] ' : '';
-      const titleMax = rightW - 14;
-      const title = truncate(draft + (pr.title || '?'), titleMax);
-      const stateStyle = pr.state === 'open' ? { fg: 'cyan' } : { dim: true };
-      screen.writeStr(rightX, ry, num, { fg: 'cyan' });
-      screen.writeStr(rightX + 8, ry, title, stateStyle);
+    if (prsVisible) {
+      const maxPRs = Math.min(4, Math.max(1, Math.floor((y + h - bodyY) * 0.20)));
+      for (const pr of appState.dashboardRecentPRs.slice(0, maxPRs)) {
+        if (ry >= y + h - 1) break;
+        const num = '#' + (pr.number || '?');
+        const draft = pr.draft ? '[draft] ' : '';
+        const titleMax = rightW - 14;
+        const title = truncate(draft + (pr.title || '?'), titleMax);
+        const stateStyle = pr.state === 'open' ? { fg: 'cyan' } : { dim: true };
+        screen.writeStr(rightX, ry, num, { fg: 'cyan' });
+        screen.writeStr(rightX + 8, ry, title, stateStyle);
+        ry++;
+      }
       ry++;
     }
-    ry++;
   }
 
   if (ry < y + h - 3 && appState.dashboardStaleCount > 0) {
-    sectionHeader(screen, rightX, ry, '▸ STALE REPOS');
+    const staleVisible = sectionHeader(screen, rightX, ry, 'STALE REPOS', null, 'dashboard:stale');
     ry++;
-    for (const name of appState.dashboardStaleRepos) {
-      if (ry >= y + h - 1) break;
-      screen.writeStr(rightX, ry++, truncate(name, rightW), { fg: 'yellow' });
+    if (staleVisible) {
+      for (const name of appState.dashboardStaleRepos) {
+        if (ry >= y + h - 1) break;
+        screen.writeStr(rightX, ry++, truncate(name, rightW), { fg: 'yellow' });
+      }
+      if (appState.dashboardStaleCount > appState.dashboardStaleRepos.length) {
+        screen.writeStr(rightX, ry++, '... and ' +
+          (appState.dashboardStaleCount - appState.dashboardStaleRepos.length) + ' more', { dim: true });
+      }
+      ry++;
     }
-    if (appState.dashboardStaleCount > appState.dashboardStaleRepos.length) {
-      screen.writeStr(rightX, ry++, '... and ' +
-        (appState.dashboardStaleCount - appState.dashboardStaleRepos.length) + ' more', { dim: true });
-    }
-    ry++;
   }
 
   if (ry < y + h - 2) {
-    sectionHeader(screen, rightX, ry, '▸ TRENDING THIS WEEK');
+    const trendingVisible = sectionHeader(screen, rightX, ry, 'TRENDING THIS WEEK', null, 'dashboard:trending');
     ry++;
     if (appState.trending.length === 0) {
       screen.writeStr(rightX, ry++, appState.dashboardLoaded ? '(none)' : 'Loading...', { dim: true });
@@ -644,4 +666,15 @@ export function rightCard() {
   if (!appState.dashboardCardsFocus) return;
   appState.dashboardSelectedCard = Math.min(4, appState.dashboardSelectedCard + 1);
   render();
+}
+
+// ── Collapsible sections ──
+const DASHBOARD_SECTIONS = ['profile', 'stars', 'topRepos', 'activity', 'languages'];
+
+export function getSections() {
+  return DASHBOARD_SECTIONS.map(s => 'dashboard:' + s);
+}
+
+export function getCurrentSection() {
+  return 'dashboard:profile';
 }

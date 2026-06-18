@@ -1043,3 +1043,14 @@ export function space() {
   if (appState.analyzeView === 'results') loadMoreSearchResults();
   else if (appState.analyzeView === 'forks') loadMoreForks();
 }
+
+// ── Collapsible sections ──
+const ANALYZE_SECTIONS = ['overview', 'issues', 'prs', 'readme', 'files', 'packages', 'traffic', 'milestones', 'labels'];
+
+export function getSections() {
+  return ANALYZE_SECTIONS.map(s => 'analyze:' + s);
+}
+
+export function getCurrentSection() {
+  return 'analyze:' + (appState.detailsPane || 'overview');
+}

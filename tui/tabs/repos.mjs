@@ -701,3 +701,14 @@ export function bottom(screen) {
   appState.repoScroll = Math.max(0, total - v);
   render();
 }
+
+// ── Collapsible sections ──
+const REPOS_SECTIONS = ['pinned', 'repos'];
+
+export function getSections() {
+  return REPOS_SECTIONS.map(s => 'repos:' + s);
+}
+
+export function getCurrentSection() {
+  return 'repos:pinned';
+}

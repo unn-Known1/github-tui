@@ -2,7 +2,7 @@
 // GitHub TUI — entrypoint.
 // All real logic lives in tui/*.mjs. This file just wires lifecycle events.
 
-import { appState, tabState, showMessage } from './tui/state.mjs';
+import { appState, tabState, showMessage, loadCollapsed } from './tui/state.mjs';
 import { loadToken } from './tui/config.mjs';
 import { loadTheme } from './tui/theme.mjs';
 import { initScreen, getScreen, render } from './tui/render.mjs';
@@ -46,6 +46,7 @@ async function main() {
   appState.bookmarks = loadBookmarks();
   appState.savedSearches = loadSavedSearches();
   appState.repoPins = loadPins();
+  loadCollapsed();
 
   // Initialize screen + register palette actions.
   const screen = initScreen();

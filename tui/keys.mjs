@@ -224,6 +224,9 @@ export function handleKey(key) {
     case '\x1b[6~': handlePageDown(); return;  // PageDown
     case 'g': handleTop(); return;
     case 'G': handleBottom(); return;
+    case 'z': handleCollapseToggle(); return;
+    case 'Z': handleCollapseAll(); return;
+    case 'X': handleExpandAll(); return;
   }
 
   // 5. Global star toggle.
@@ -328,6 +331,43 @@ function handleBottom() {
     render();
   }
 }
+
+// ── Collapsible section handlers ──
+import { toggleCollapse, collapseAll, expandAll } from './state.mjs';
+
+function handleCollapseToggle() {
+  const section = getCurrentSection();
+  if (section) toggleCollapse(section);
+}
+
+function handleCollapseAll() {
+  const sections = getTabSections();
+  if (sections.length) collapseAll(sections);
+}
+
+function handleExpandAll() {
+  const sections = getTabSections();
+  if (sections.length) expandAll(sections);
+}
+
+function getCurrentSection() {
+  const t = tabState.current;
+  if (t === 0) return dashboard.getCurrentSection ? dashboard.getCurrentSection() : null;
+  if (t === 1) return repos.getCurrentSection ? repos.getCurrentSection() : null;
+  if (t === 2) return analyze.getCurrentSection ? analyze.getCurrentSection() : null;
+  if (t === 4) return inbox.getCurrentSection ? inbox.getCurrentSection() : null;
+  return null;
+}
+
+function getTabSections() {
+  const t = tabState.current;
+  if (t === 0) return dashboard.getSections ? dashboard.getSections() : [];
+  if (t === 1) return repos.getSections ? repos.getSections() : [];
+  if (t === 2) return analyze.getSections ? analyze.getSections() : [];
+  if (t === 4) return inbox.getSections ? inbox.getSections() : [];
+  return [];
+}
+
 function handleEnter() {
   const t = tabState.current;
   if (t === 0) dashboard.openTrendingRepo();

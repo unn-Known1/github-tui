@@ -346,3 +346,14 @@ export function down(screen) {
 }
 export const enter = openCurrent;
 export function space() { loadMoreNotifications(); }
+
+// ── Collapsible sections ──
+const INBOX_SECTIONS = ['unread', 'read', 'byRepo'];
+
+export function getSections() {
+  return INBOX_SECTIONS.map(s => 'inbox:' + s);
+}
+
+export function getCurrentSection() {
+  return 'inbox:unread';
+}
