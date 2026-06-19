@@ -80,16 +80,46 @@ function copyCurrentUrl() {
 async function toggleStar() {
   const r = currentRepoForAction();
   if (!r || !appState.token) { showMessage('Login + select a repo first', 'warning'); return; }
-  const [owner, name] = r.full_name.split('/');
+  const fullName = r.full_name;
+  const [owner, name] = fullName.split('/');
   try {
     const already = await isStarred(appState.token, owner, name);
     if (already) {
       await unstarRepo(appState.token, owner, name);
-      showMessage('Unstarred ' + r.full_name, 'success');
+      r.stargazers_count = Math.max(0, (r.stargazers_count || 0) - 1);
+      showMessage('Unstarred ' + fullName, 'success');
     } else {
       await starRepo(appState.token, owner, name);
-      showMessage('Starred ' + r.full_name, 'success');
+      r.stargazers_count = (r.stargazers_count || 0) + 1;
+      showMessage('Starred ' + fullName, 'success');
     }
+    // Update stargazers_count in every app state array that may contain this repo.
+    for (const arr of [appState.repos, appState.searchResults,
+                       appState.trending, appState.forks, appState.actionsRepos]) {
+      if (!Array.isArray(arr)) continue;
+      for (let i = 0; i < arr.length; i++) {
+        if (arr[i] && arr[i].full_name === fullName) {
+          arr[i].stargazers_count = r.stargazers_count;
+        }
+      }
+    }
+    if (appState.repoDetails && appState.repoDetails.full_name === fullName) {
+      appState.repoDetails.stargazers_count = r.stargazers_count;
+    }
+    // Update appState.starred membership.
+    if (already) {
+      // Unstarred: remove from starred list if present.
+      const idx = appState.starred.findIndex(s => s.full_name === fullName);
+      if (idx !== -1) appState.starred.splice(idx, 1);
+    } else {
+      // Starred: ensure in starred list.  The /user/starred API returns a
+      // star-decorated repo; we simulate one so buildStarHistory can use it.
+      if (!appState.starred.some(s => s.full_name === fullName)) {
+        appState.starred.unshift({ ...r, starred_at: new Date().toISOString() });
+      }
+    }
+    appState.dashboardStarHistory = dashboard.buildStarHistory(appState.starred);
+    render();
   } catch (e) { showMessage(e.message || 'Star failed', 'error'); }
 }
 

@@ -106,7 +106,7 @@ function findStaleRepos(repos) {
   return { count: stale.length, repos: stale.slice(0, 5).map(r => r.name) };
 }
 
-function buildStarHistory(starred) {
+export function buildStarHistory(starred) {
   if (!starred || starred.length === 0) return [];
   const dayMs = 86400000;
   const days = 30;
