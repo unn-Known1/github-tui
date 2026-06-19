@@ -191,6 +191,22 @@ export function handleKey(key) {
     return;
   }
 
+  // 0b. Esc dismisses ANY open overlay — prevents stuck modal states.
+  if (key === '\x1b') {
+    if (appState.showPalette) { palette.close(); return; }
+    if (appState.showOnboarding || appState.showWelcome) {
+      if (appState.showOnboarding) { appState.showOnboarding = false; }
+      if (appState.showWelcome) { appState.showWelcome = false; }
+      render(); return;
+    }
+    if (appState.showBookmarks) { bookmarks.closeBookmarks(); return; }
+    if (appState.showHelp) { appState.showHelp = false; render(); return; }
+    if (appState.showDetail) { import('./tabs/detail.mjs').then(m => m.closeDetail()).catch(() => {}); return; }
+    if (appState.confirmAction) { dismissConfirm(); return; }
+    if (appState.inputMode === 'input') { import('./input.mjs').then(m => m.cancelInput()).catch(() => {}); return; }
+    // No overlay open — let Esc fall through to per-tab back handlers.
+  }
+
   // 1. Palette captures all keys first.
   if (palette.handleKey(key)) return;
 
