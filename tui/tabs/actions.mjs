@@ -464,7 +464,13 @@ export function enter() {
   }
 }
 
-export function space() {}
+export function space() {
+  if (appState.actionsView === 'repos') {
+    // No pagination for repos list currently.
+  } else {
+    toggleRunDetail();
+  }
+}
 
 const ACTIONS_SECTIONS = ['repos', 'runs'];
 

@@ -6,6 +6,13 @@ import { appState, TABS, tabState, bindRender } from './state.mjs';
 import { Screen } from './screen.mjs';
 import { lastRateLimit } from './github.mjs';
 import { color } from './theme.mjs';
+import { readFileSync } from 'fs';
+import { fileURLToPath } from 'url';
+import { dirname, join } from 'path';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = dirname(__filename);
+const VERSION = JSON.parse(readFileSync(join(__dirname, '..', 'package.json'), 'utf8')).version;
 import { renderDashboard } from './tabs/dashboard.mjs';
 import { renderRepos } from './tabs/repos.mjs';
 import { renderAnalyze } from './tabs/analyze.mjs';
@@ -185,7 +192,7 @@ function renderHeader(W) {
   // Row 0: app title + version (left)  |  user (right)
   screen.writeStr(2, 0, '◈', { fg: 'cyan' });
   screen.writeStr(4, 0, 'GitHub TUI', titleStyle);
-  const version = 'v0.5.7';
+  const version = 'v' + VERSION;
   screen.writeStr(16, 0, version, subtitleStyle);
 
   // User greeting on the right of the top line.

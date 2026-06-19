@@ -12,6 +12,16 @@ import { loadUserData } from './tui/tabs/repos.mjs';
 import { loadBookmarks, loadSavedSearches, loadPins, loadRepoPrefs, saveRepoPrefs } from './tui/store.mjs';
 import { getRateLimit } from './tui/github.mjs';
 
+import { readFileSync } from 'fs';
+import { fileURLToPath } from 'url';
+import { dirname, join } from 'path';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = dirname(__filename);
+const pkg = JSON.parse(readFileSync(join(__dirname, 'package.json'), 'utf8'));
+
+let rateLimitInterval = null;
+
 async function refreshRateLimit() {
   if (!appState.token) return;
   try {
@@ -28,6 +38,23 @@ async function refreshRateLimit() {
 }
 
 async function main() {
+  // CLI flags.
+  if (process.argv.includes('--version') || process.argv.includes('-v')) {
+    console.log('github-tui ' + pkg.version);
+    process.exit(0);
+  }
+  if (process.argv.includes('--help') || process.argv.includes('-h')) {
+    console.log('github-tui ' + pkg.version);
+    console.log('A fast, zero-dependency terminal user interface for GitHub.');
+    console.log('');
+    console.log('Usage: github-tui');
+    console.log('');
+    console.log('Options:');
+    console.log('  -h, --help       Show this help message');
+    console.log('  -v, --version    Show version number');
+    process.exit(0);
+  }
+
   if (!process.stdin.isTTY) {
     console.log('GitHub TUI requires an interactive terminal.');
     console.log('Usage: node app.mjs');
@@ -44,6 +71,7 @@ async function main() {
   process.on('exit', cleanup);
   process.on('SIGINT',  () => { cleanup(); process.exit(0); });
   process.on('SIGTERM', () => { cleanup(); process.exit(0); });
+  process.on('SIGHUP',  () => { cleanup(); process.exit(0); });
 
   // Load persisted state.
   loadTheme();
@@ -90,15 +118,16 @@ async function main() {
     });
   }
   process.on('exit', saveCurrentRepoPrefs);
-  process.on('SIGINT', saveCurrentRepoPrefs);
-  process.on('SIGTERM', saveCurrentRepoPrefs);
+  process.on('SIGINT', () => { if (rateLimitInterval) clearInterval(rateLimitInterval); saveCurrentRepoPrefs(); });
+  process.on('SIGTERM', () => { if (rateLimitInterval) clearInterval(rateLimitInterval); saveCurrentRepoPrefs(); });
+  process.on('SIGHUP', () => { if (rateLimitInterval) clearInterval(rateLimitInterval); });
 
   // Auto-load if we already have a saved token.
   if (appState.token) {
     await loadUserData();
     refreshRateLimit();
     // Refresh rate limit every 60 seconds.
-    setInterval(refreshRateLimit, 60000);
+    rateLimitInterval = setInterval(refreshRateLimit, 60000);
   } else {
     // First-time users get a friendly welcome overlay.
     const onboarding = await import('./tui/tabs/onboarding.mjs');

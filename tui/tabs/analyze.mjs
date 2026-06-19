@@ -285,11 +285,9 @@ export function pageDown() {
       searchUsers(appState.token, appState.searchQuery, page, USER_SEARCH_PER_PAGE).then(more => {
         if (isStale(gen)) { appState.loading = false; return; }
         if (Array.isArray(more) && more.length > 0) {
-          appState.userSearchResults = more;
+          appState.userSearchResults = [...appState.userSearchResults, ...more];
           appState.userSearchPage = page;
           appState.userSearchHasMore = more.length >= USER_SEARCH_PER_PAGE;
-          appState.userSelectedRepo = 0;
-          appState.userSearchScroll = 0;
         } else {
           appState.userSearchHasMore = false;
         }
@@ -304,11 +302,9 @@ export function pageDown() {
       searchCode(appState.token, appState.searchQuery, page, CODE_SEARCH_PER_PAGE).then(more => {
         if (isStale(gen)) { appState.loading = false; return; }
         if (Array.isArray(more) && more.length > 0) {
-          appState.codeSearchResults = more;
+          appState.codeSearchResults = [...appState.codeSearchResults, ...more];
           appState.codeSearchPage = page;
           appState.codeSearchHasMore = more.length >= CODE_SEARCH_PER_PAGE;
-          appState.codeSelectedRepo = 0;
-          appState.codeSearchScroll = 0;
         } else {
           appState.codeSearchHasMore = false;
         }
@@ -323,11 +319,9 @@ export function pageDown() {
       searchRepositories(appState.token, appState.searchQuery, page, SEARCH_PER_PAGE).then(more => {
         if (isStale(gen)) { appState.loading = false; return; }
         if (Array.isArray(more) && more.length > 0) {
-          appState.searchResults = more;
+          appState.searchResults = [...appState.searchResults, ...more];
           appState.searchPage = page;
           appState.searchHasMore = more.length >= SEARCH_PER_PAGE;
-          appState.selectedRepo = 0;
-          appState.searchScroll = 0;
         } else {
           appState.searchHasMore = false;
         }

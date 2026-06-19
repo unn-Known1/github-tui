@@ -149,13 +149,19 @@ export function request(path, opts) {
           if (method === 'GET' && res.headers.etag) {
             etagCache.set(`${method}:${path}`, { etag: res.headers.etag, body: payload, ts: Date.now() });
             if (etagCache.size > ETAG_CACHE_MAX) {
-              const expired = [];
               const now = Date.now();
+              // First try to evict expired entries.
+              const expired = [];
               for (const [k, v] of etagCache) {
                 if (now - v.ts >= ETAG_TTL) expired.push(k);
-                if (expired.length > ETAG_CACHE_MAX / 2) break;
               }
               for (const k of expired) etagCache.delete(k);
+              // If still over limit, evict oldest entries.
+              if (etagCache.size > ETAG_CACHE_MAX) {
+                const entries = [...etagCache.entries()].sort((a, b) => a[1].ts - b[1].ts);
+                const toRemove = entries.slice(0, etagCache.size - ETAG_CACHE_MAX + 50);
+                for (const [k] of toRemove) etagCache.delete(k);
+              }
             }
           }
           return resolve(payload);
@@ -320,6 +326,12 @@ export function downloadToFile(url, destPath, token) {
   return new Promise((resolve, reject) => {
     const out = createWriteStream(destPath);
     let bytes = 0;
+    let cleaned = false;
+    function cleanup() {
+      if (cleaned) return;
+      cleaned = true;
+      try { out.destroy(); } catch {}
+    }
     function get(u, redirectsLeft) {
       const u2 = new URL(u);
       const headers = { 'User-Agent': USER_AGENT };
@@ -330,20 +342,21 @@ export function downloadToFile(url, destPath, token) {
         headers,
       }, (res) => {
         if (res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) {
-          if (redirectsLeft <= 0) return reject(new Error('Too many redirects'));
+          if (redirectsLeft <= 0) { cleanup(); return reject(new Error('Too many redirects')); }
           res.resume();
           return get(res.headers.location, redirectsLeft - 1);
         }
         if (res.statusCode !== 200) {
           res.resume();
+          cleanup();
           return reject(new Error('Download HTTP ' + res.statusCode));
         }
         res.on('data', (chunk) => { bytes += chunk.length; });
         res.pipe(out);
         out.on('finish', () => out.close(() => resolve({ bytes, path: destPath })));
-        out.on('error', reject);
+        out.on('error', (e) => { cleanup(); reject(e); });
       });
-      req.on('error', reject);
+      req.on('error', (e) => { cleanup(); reject(e); });
     }
     get(url, 5);
   });

@@ -332,10 +332,26 @@ export function handleKey(key) {
     case '\x1b[5~': handlePageUp(); return;  // PageUp
     case '\x1b[6~': handlePageDown(); return;  // PageDown
     case 'g': handleTop(); return;
-    case 'G': handleBottom(); return;
+    case 'G': {
+      // In files pane, G triggers gh repo clone (not jump-to-bottom).
+      if (tabState.current === 2 && appState.analyzeView === 'details' && appState.detailsPane === 'files') break;
+      handleBottom();
+      return;
+    }
     case 'z': handleCollapseToggle(); return;
-    case 'Z': handleCollapseAll(); return;
+    case 'Z': {
+      // In files pane, Z triggers zipball download (not collapse-all).
+      if (tabState.current === 2 && appState.analyzeView === 'details' && appState.detailsPane === 'files') break;
+      handleCollapseAll();
+      return;
+    }
     case 'X': handleExpandAll(); return;
+    case 'B': {
+      // In files pane, B opens branch picker (not bookmarks overlay).
+      if (tabState.current === 2 && appState.analyzeView === 'details' && appState.detailsPane === 'files') break;
+      bookmarks.openBookmarks();
+      return;
+    }
   }
 
   // 5. Global star toggle.
@@ -381,7 +397,7 @@ function handlePageUp() {
   if (t === 0) dashboard.pageUp();
   else if (t === 1) repos.pageUp();
   else if (t === 2) analyze.pageUp();
-  else if (t === 3) { /* Actions: no page-up for now */ }
+  else if (t === 3) actions.up();
   else if (t === 4) inbox.pageUp();
 }
 function handlePageDown() {
@@ -389,7 +405,7 @@ function handlePageDown() {
   if (t === 0) dashboard.pageDown();
   else if (t === 1) repos.pageDown();
   else if (t === 2) analyze.pageDown();
-  else if (t === 3) { /* Actions: no page-down for now */ }
+  else if (t === 3) actions.down();
   else if (t === 4) inbox.pageDown();
 }
 function handleTop() {

@@ -354,8 +354,8 @@ export function renderDashboard(screen, y, h) {
         ly++;
       }
       } // activityVisible
+      ly++;
     }
-    ly++;
   }
 
   // ── Languages (right sub-column, aligned with heatmap top) ──
@@ -600,8 +600,6 @@ export function pageUp() {
         appState.trending = more;
         appState.trendingPage = page;
         appState.trendingHasMore = true;
-        appState.trendingSelected = 0;
-        appState.trendingScroll = 0;
       }
       appState.loading = false;
       render();
@@ -621,11 +619,9 @@ export function pageDown() {
     searchRepositories(appState.token, q, page, 10).then(more => {
       if (isStale(gen)) { appState.loading = false; return; }
       if (Array.isArray(more) && more.length > 0) {
-        appState.trending = more;
+        appState.trending = [...appState.trending, ...more];
         appState.trendingPage = page;
         appState.trendingHasMore = more.length >= 10;
-        appState.trendingSelected = 0;
-        appState.trendingScroll = 0;
       } else {
         appState.trendingHasMore = false;
       }

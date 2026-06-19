@@ -397,5 +397,3 @@ export function loadSession() {
 
 // Auto-save on normal exit.
 process.on('exit', saveSession);
-process.on('SIGINT', () => { saveSession(); });
-process.on('SIGTERM', () => { saveSession(); });
