@@ -763,6 +763,9 @@ function renderPackagesPane(screen, y, maxH) {
   if (assets.length === 0) {
     if (appState.loading) {
       loadingIndicator(screen, 2, y + 2, 'loading assets');
+    } else if (appState.repoReleases.length > 0) {
+      screen.writeStr(2, y + 2, 'No downloadable assets in recent releases', { dim: true });
+      screen.writeStr(2, y + 3, '(releases exist but have no uploaded binaries)', { dim: true });
     } else {
       screen.writeStr(2, y + 2, '(no release packages found)', { dim: true });
     }
