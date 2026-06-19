@@ -1,6 +1,6 @@
 # GitHub TUI
 
-A fast, zero-dependency terminal user interface for GitHub — five tabs, a command palette, an in-terminal file explorer that can clone or save anything to your CWD, an inbox triage workflow, themes, persistent bookmarks & pins, OSC-52 clipboard, ETag-aware caching, mouse support, collapsible sections, and comprehensive repo analytics. All driven by your keyboard (and mouse).
+A fast, zero-dependency terminal user interface for GitHub — six tabs, a command palette, an in-terminal file explorer that can clone or save anything to your CWD, an inbox triage workflow, themes, persistent bookmarks & pins, OSC-52 clipboard, ETag-aware caching, mouse support, collapsible sections, and comprehensive repo analytics. All driven by your keyboard (and mouse).
 
 ![status](https://img.shields.io/badge/status-active-success) ![node](https://img.shields.io/badge/node-%E2%89%A518-blue) ![deps](https://img.shields.io/badge/deps-0-green) ![license](https://img.shields.io/badge/license-MIT-blue)
 
@@ -57,7 +57,7 @@ Your current token scopes are shown in the Settings → System panel so you can 
 
 | Key | Action |
 |---|---|
-| `1`–`5` / `Tab` / `Shift+Tab` | Switch tabs (Dashboard / Repos / Analyze / Settings / Inbox) |
+| `1`–`6` / `Tab` / `Shift+Tab` | Switch tabs (Dashboard / Repos / Analyze / Actions / Inbox / Settings) |
 | `Ctrl-P` or `:` | Open the command palette (fuzzy search every action) |
 | `↑` `↓` or `j` `k` | Navigate lists |
 | `Enter` | Select / drill in |
@@ -67,6 +67,7 @@ Your current token scopes are shown in the Settings → System panel so you can 
 | `o` | Open the current item in your browser |
 | `y` | Copy the current URL to clipboard (OSC-52) |
 | `b` | Bookmark / unbookmark the current repo |
+| `B` | Browse all bookmarks |
 | `s` | Star / unstar the current repo on GitHub |
 | `r` | Refresh the current view |
 | `z` | Toggle collapsible section |
@@ -87,6 +88,7 @@ Your current token scopes are shown in the Settings → System panel so you can 
 | `x` | Toggle stale-only (no push in last 6 months) |
 | `D` | Density toggle (compact ↔ comfortable / shows description) |
 | `P` | Pin / unpin highlighted repo (sticky top, persisted on disk) |
+| `V` | Toggle starred / own repos |
 | `g` / `G` | Jump to top / bottom |
 | `n` `s` `f` `i` `u` | Sort by name / stars / forks / issues / updated (press again to reverse) |
 
@@ -146,6 +148,17 @@ Your current token scopes are shown in the Settings → System panel so you can 
 |---|---|
 | `p` `s` `n` | Sort by last push / stars / name |
 | `Space` | Load the next 30 forks (compares run in parallel) |
+
+### Actions tab
+
+| Key | Action |
+|---|---|
+| `↑↓` `j` `k` | Navigate repos or runs |
+| `Enter` | View runs for selected repo / open run in browser |
+| `r` | Re-run selected workflow |
+| `x` | Cancel running workflow |
+| `t` | Back to repo list (from runs view) |
+| `/` | Filter repos |
 
 ### Inbox
 

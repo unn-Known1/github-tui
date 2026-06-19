@@ -56,15 +56,16 @@
 | ETag-aware caching | ✅ shipped v0.3 | In-memory; auto `If-None-Match` |
 | Command palette (Ctrl-P / `:`) | ✅ shipped v0.3 | ~30 registered actions, fuzzy match |
 | Themes (8 themes) | ✅ shipped v0.5.5 | default/highContrast/dracula/solarized/nord/monokai/gruvbox/light |
-| Bookmarks store | ✅ shipped v0.3 | `b` toggles; `~/.github-tui/bookmarks.json` |
+| Bookmarks store | ✅ shipped v0.3 | `b` toggles; `B` browse overlay; `~/.github-tui/bookmarks.json` |
 | Star / unstar from anywhere | ✅ shipped v0.3 | `*` |
 | OSC-52 clipboard copy | ✅ shipped v0.3 | `y` |
 | Help overlay (`?`) | ✅ shipped v0.5 | Updated for all keys including detail popup |
 | Mouse support | ✅ shipped v0.5.5 | Click tabs/panes/items, scroll wheel, hover effects |
 | Collapsible sections | ✅ shipped v0.5.5 | `z`/`Z`/`X` keys, disk persistence |
-| Saved searches | 🟡 store ready | `store.mjs` exposes API; needs UI surface |
+| Saved searches | ✅ shipped v0.5.5 | `Ctrl-P` → "Save current search"; run/delete via palette |
+| Repo preferences persistence | ✅ shipped v0.5.5 | Sort, filter, density saved to `~/.github-tui/repo-prefs.json` |
 | Disk-backed cache (beyond ETag) | 🔲 planned v0.6 | Survives restarts; offline mode |
-| Workflows / Actions CI tab | 🔲 planned v0.7 | API ready in `github.mjs`; no UI yet |
+| Workflows / Actions CI tab | ✅ shipped v0.5.5 | `4` → Actions; repos → runs; re-run/cancel; collapsible sections |
 | Code search across orgs | 🔲 planned v0.8 | `searchCode` ready |
 | OAuth device-flow + OS keychain | 🔲 planned v0.9 | |
 | User-editable keybindings | 🔲 planned | File path reserved: `~/.github-tui/keys.json` |
@@ -395,19 +396,19 @@ Real sequences a user runs through, end-to-end. Status reflects today.
 2. App pulls my events from the last 24h, dedups, summarises.
 3. Output rendered in a pop-up, copy with `y` (OSC-52). *(`y` already works for URLs)*
 
-### R5 — "CI Cockpit" 🟡 *API ready*
-1. `6` → Actions tab. *(planned)*
-2. All red workflows across watched repos, sorted by recency.
-3. `Enter` → log tail. `R` re-runs failed.
+### R5 — "CI Cockpit" ✅ *shipped v0.5.5*
+1. `4` → Actions tab.
+2. Browse repos → view workflow runs → see status.
+3. `r` re-run failed. `x` cancel.
 
 ### R6 — "OOO Recap" 🔲 *v0.5*
 1. `Ctrl-P` → "Since I was last here".
 2. App shows: merges I missed, mentions waiting, new issues on my repos.
 
-### R7 — "Bookmark Sprint" 🟡 *store ready; tab pending*
-1. Trending → `b` to bookmark 10 repos. ✅
-2. *Pending:* `Ctrl-P` → "Bookmarks" tab. Group by tag. *(needs Bookmarks tab UI)*
-3. *Pending:* Export to Markdown for a blog post.
+### R7 — "Bookmark Sprint" ✅ *partially shipped*
+1. Trending → `b` to bookmark repos. ✅
+2. `B` → Browse bookmarks overlay. `d` delete, `y` copy URL. ✅
+3. `Ctrl-P` → "Export bookmarks to Markdown". ✅
 
 ### R8 — "Stuck PR Audit" 🔲 *v0.4*
 1. `Ctrl-P` → "Stuck PRs > 7d".
