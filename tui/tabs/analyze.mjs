@@ -863,7 +863,7 @@ function renderRepoResults(screen, listY, h, W, maxVisible) {
   scrollIndicators(screen, listY + 2, listY + 1 + maxVisible, appState.searchScroll, results.length);
 
   const countY = listY + 2 + maxVisible;
-  if (countY < y + h) {
+  if (countY < listY + h) {
     const pageInfo = appState.searchHasMore || appState.searchPage > 1
       ? '   Page ' + appState.searchPage + '   [PgUp/PgDn]' : '';
     screen.writeStr(2, countY, results.length + ' results' + pageInfo, { dim: true });
