@@ -411,6 +411,8 @@ export function renderRepos(screen, y, h) {
     const sel = i === appState.repoSelected;
     if (sel) {
       for (let x = 0; x < W; x++) screen.styleBuf[curY][x] = color('selection');
+    } else if (i % 2 === 1) {
+      for (let x = 0; x < W; x++) screen.styleBuf[curY][x] = { bg: 'darkGray', fg: 'white' };
     }
     const badge = badgeChar(repo);
     if (badge) screen.writeStr(2, curY, '[' + badge.ch + ']', badge.style);

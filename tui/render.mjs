@@ -173,14 +173,21 @@ export function collapsibleHeader(screen, x, y, section, label, hint) {
   const collapsed = isCollapsed(section);
   const arrow = collapsed ? '▸' : '▾';
   const W = screen.width;
-  screen.writeStr(x, y, arrow + ' ' + label, { fg: 'cyan', bold: true });
+  const text = arrow + ' ' + label;
+  screen.writeStr(x, y, text, { fg: 'cyan', bold: true });
+  // Underline decoration after the label
+  const lineStart = x + text.length + 1;
+  const lineEnd = hint ? Math.min(W - hint.length - 4, W - 4) : W - 4;
+  if (lineStart < lineEnd) {
+    screen.writeStr(lineStart, y, '─'.repeat(lineEnd - lineStart), { fg: 'cyan', dim: true });
+  }
   if (hint) {
     const hx = W - hint.length - 2;
-    if (hx > x + label.length + 6) screen.writeStr(hx, y, hint, { dim: true });
+    if (hx > lineEnd + 1) screen.writeStr(hx, y, hint, { dim: true });
   }
   // Record position for mouse click detection. Include full text width so the
   // click target covers the entire header (arrow + space + label).
-  appState._sectionHeaders[section] = { x, y, w: arrow.length + 1 + label.length };
+  appState._sectionHeaders[section] = { x, y, w: text.length };
   return !collapsed;
 }
 
@@ -190,16 +197,18 @@ function renderHeader(W) {
   const subtitleStyle = { dim: true };
 
   // Row 0: app title + version (left)  |  user (right)
-  screen.writeStr(2, 0, '◈', { fg: 'cyan' });
-  screen.writeStr(4, 0, 'GitHub TUI', titleStyle);
+  // Background bar for top row
+  for (let x = 0; x < W; x++) screen.styleBuf[0][x] = { bg: 'darkGray', fg: 'white', bold: true };
+  screen.writeStr(2, 0, '◈', { bg: 'darkGray', fg: 'cyan', bold: true });
+  screen.writeStr(4, 0, 'GitHub TUI', { bg: 'darkGray', fg: 'white', bold: true });
   const version = 'v' + VERSION;
-  screen.writeStr(16, 0, version, subtitleStyle);
+  screen.writeStr(15, 0, version, { bg: 'darkGray', fg: 'gray', dim: true });
 
   // User greeting on the right of the top line.
   if (appState.user) {
     const login = '@' + appState.user.login;
     const x = Math.max(2, W - login.length - 2);
-    screen.writeStr(x, 0, login, { fg: 'cyan', bold: true });
+    screen.writeStr(x, 0, login, { bg: 'darkGray', fg: 'cyan', bold: true });
   }
 
   // Row 1: tagline (left)  |  rate-limit (right)
@@ -267,23 +276,21 @@ function renderTabStrip(y, W) {
     const label = tab.label;
     const key = tab.key;
 
-    // Background: active gets a chip-like colored bg.
+    // Background: active gets a colored bg, inactive gets subtle dark bg.
     if (isActive) {
-      const bg = color('tabActiveBg');
       for (let xx = bx; xx < bx + tabW && xx < W - 1; xx++) {
-        screen.styleBuf[tabRowY][xx] = bg;
+        screen.styleBuf[tabRowY][xx] = { bg: 'cyan', fg: 'white', bold: true };
       }
     } else {
-      // Subtle bottom border for inactive tabs.
       for (let xx = bx; xx < bx + tabW && xx < W - 1; xx++) {
-        screen.styleBuf[tabRowY][xx] = color('tabInactive') || { dim: true };
+        screen.styleBuf[tabRowY][xx] = { bg: 'darkGray', fg: 'gray' };
       }
     }
 
-    // Tab text: "[1] Dashboard"
+    // Tab text: "[1] Dash"
     const text = '[' + key + '] ' + label;
     const tx = bx + 1;
-    screen.writeStr(tx, tabRowY, text, isActive ? color('tabActive') : { fg: 'gray', dim: true });
+    screen.writeStr(tx, tabRowY, text, isActive ? { bg: 'cyan', fg: 'white', bold: true } : { bg: 'darkGray', fg: 'gray' });
 
     // Badge for inbox with unread items.
     if (i === 4 && unreadCount > 0) {

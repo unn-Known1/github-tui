@@ -207,12 +207,12 @@ export function renderDashboard(screen, y, h) {
     const cx = margin + i * (cardW + gap);
     if (cardY + cardH >= y + h) return;
     const focused = cardsFocus && i === appState.dashboardSelectedCard;
-    const fillStyle = focused ? { bg: 'darkGray', fg: 'white' } : null;
-    const borderStyle = focused ? color('cardBorderFocused') : color('cardBorder');
+    const fillStyle = focused ? { bg: 'blue', fg: 'white' } : { bg: 'darkGray', fg: 'white' };
+    const borderStyle = focused ? { fg: 'cyan', bold: true } : { fg: 'gray', dim: true };
     screen.card(cx, cardY, cardW, cardH, c.label, fillStyle, borderStyle);
     const valStr = c.value;
     const valX = cx + Math.floor((cardW - valStr.length) / 2);
-    screen.writeStr(valX, cardY + 2, valStr, c.style);
+    screen.writeStr(valX, cardY + 2, valStr, focused ? { fg: 'white', bold: true } : c.style);
   });
 
   // ── Body: 2 columns ────────────────────────────────────────
@@ -497,6 +497,8 @@ export function renderDashboard(screen, y, h) {
         const sel = i === appState.trendingSelected;
         if (sel) {
           for (let x = rightX; x < rightX + rightW; x++) screen.styleBuf[ry][x] = { bg: 'blue', fg: 'white', bold: true };
+        } else if ((i - scroll) % 2 === 1) {
+          for (let x = rightX; x < rightX + rightW; x++) screen.styleBuf[ry][x] = { bg: 'darkGray', fg: 'white' };
         }
         const name = truncate(r.full_name || '?', rightW - 8);
         const stars = '★ ' + shortNum(r.stargazers_count || 0);
