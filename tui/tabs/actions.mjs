@@ -126,7 +126,7 @@ export function renderActions(screen, y, h) {
     return;
   }
 
-  screen.writeStr(2, y, 'CI / ACTIONS', { fg: 'white', bold: true });
+  screen.writeStr(2, y, 'CI / ACTIONS', color('title') || { fg: 'white', bold: true });
   screen.hline(y + 1, '─', { dim: true });
 
   const section = appState.actionsView === 'runs' ? 'actions:runs' : 'actions:repos';
@@ -174,7 +174,7 @@ function renderRepoList(screen, y, h, W) {
     const prefix = sel ? '▶ ' : '  ';
     const name = truncate(r.full_name || '?', W - 20);
     const stars = '★' + (r.stargazers_count || 0);
-    screen.writeStr(2, row, prefix + name, sel ? color('selection') : { fg: 'white' });
+    screen.writeStr(2, row, prefix + name, sel ? color('selection') : (color('repoName') || { fg: 'white' }));
     screen.writeStr(W - stars.length - 2, row, stars, sel ? color('selection') : { fg: 'yellow' });
   }
   scrollIndicators(screen, y, y + maxVisible - 1, appState.actionsRepoScroll, repos.length);
@@ -231,7 +231,7 @@ function renderRunList(screen, y, h, W) {
     const when = relTime(run.created_at);
     screen.writeStr(2, row, prefix, sel ? color('selection') : null);
     screen.writeStr(4, row, status, sel ? color('selection') : icon.style);
-    screen.writeStr(10, row, wfName, sel ? color('selection') : { fg: 'white' });
+    screen.writeStr(10, row, wfName, sel ? color('selection') : (color('repoName') || { fg: 'white' }));
     screen.writeStr(40, row, branch, sel ? color('selection') : { fg: 'cyan' });
     screen.writeStr(56, row, when, sel ? color('selection') : { dim: true });
   }

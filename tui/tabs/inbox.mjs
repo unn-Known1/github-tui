@@ -200,7 +200,7 @@ export function renderInbox(screen, y, h) {
   const allList = appState.notifications;
   const unreadCount = allList.filter(n => n.unread).length;
 
-  screen.writeStr(2, y, 'NOTIFICATIONS', { fg: 'white', bold: true });
+  screen.writeStr(2, y, 'NOTIFICATIONS', color('title') || { fg: 'white', bold: true });
 
   // Filter chip
   const filterChip = ' ' + appState.inboxFilter.toUpperCase() + ' ';
@@ -264,7 +264,7 @@ export function renderInbox(screen, y, h) {
       const row = y + 4 + i;
       if (row >= y + h - 1) return;
       const short = truncate(repo, summaryW - 8);
-      screen.writeStr(summaryX + 2, row, short, { fg: 'white' });
+      screen.writeStr(summaryX + 2, row, short, color('repoName') || { fg: 'white' });
       const countStr = String(count);
       screen.writeStr(summaryX + summaryW - countStr.length - 2, row, countStr, { fg: 'cyan', bold: true });
     });

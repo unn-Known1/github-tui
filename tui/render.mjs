@@ -179,7 +179,7 @@ export function collapsibleHeader(screen, x, y, section, label, hint) {
 
 // Render the top header (3 rows + separator).
 function renderHeader(W) {
-  const titleStyle = { fg: 'white', bold: true };
+  const titleStyle = color('title') || { fg: 'white', bold: true };
   const subtitleStyle = { dim: true };
 
   // Row 0: app title + version (left)  |  user (right)
@@ -341,7 +341,7 @@ function renderFooter(W, H) {
     const tabLabel = TABS[tabState.current]?.label || '';
     screen.writeStr(2, statusY, tabLabel, { fg: 'cyan', bold: true });
     screen.writeStr(2 + tabLabel.length + 1, statusY, '│', { dim: true });
-    screen.writeStr(2 + tabLabel.length + 3, statusY, hint.substring(0, W - tabLabel.length - 8), { fg: 'white' });
+    screen.writeStr(2 + tabLabel.length + 3, statusY, hint.substring(0, W - tabLabel.length - 8), color('repoName') || { fg: 'white' });
   }
 
   // Rate limit badge on the right when remaining is available and low.
@@ -532,7 +532,7 @@ function renderBookmarksOverlay(screen) {
   // Empty state
   if (bm.length === 0) {
     screen.writeStr(x + 2, y + 2, '★', { fg: 'cyan' });
-    screen.writeStr(x + 2, y + 3, 'No bookmarks yet', { fg: 'white', bold: true });
+    screen.writeStr(x + 2, y + 3, 'No bookmarks yet', color('emptyTitle') || { fg: 'white', bold: true });
     screen.writeStr(x + 2, y + 4, 'Press [b] on any repo to add one.', color('dim'));
     screen.writeStr(x + 2, y + 5, 'Then use this overlay to browse, open, or delete them.', color('dim'));
     return;
@@ -556,7 +556,7 @@ function renderBookmarksOverlay(screen) {
     const prefix = sel ? '▶ ' : '  ';
     const name = truncate(b.full_name || '?', boxW - 16);
     screen.writeStr(x + 1, row, prefix, sel ? color('selection') : null);
-    screen.writeStr(x + 3, row, name, sel ? color('selection') : { fg: 'white' });
+    screen.writeStr(x + 3, row, name, sel ? color('selection') : (color('repoName') || { fg: 'white' }));
 
     // Stars
     const stars = b.stars ? '★' + b.stars : '';

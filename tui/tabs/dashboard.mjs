@@ -172,7 +172,7 @@ export function renderDashboard(screen, y, h) {
 
   // Greeting row.
   const heading = greeting() + ', ' + (user.name || user.login);
-  screen.writeStr(2, y, heading, { fg: 'white', bold: true });
+  screen.writeStr(2, y, heading, color('title') || { fg: 'white', bold: true });
 
   const unread = appState.notifications.filter(n => n.unread).length;
   if (unread > 0) {
@@ -288,7 +288,7 @@ export function renderDashboard(screen, y, h) {
           if (ly >= y + h - 1) break;
           const stars = '★' + shortNum(r.stargazers_count || 0);
           const nameMax = leftW - stars.length - 2;
-          screen.writeStr(leftX, ly, truncate(r.name, nameMax), { fg: 'white' });
+          screen.writeStr(leftX, ly, truncate(r.name, nameMax), color('repoName') || { fg: 'white' });
           screen.writeStr(leftX + leftW - stars.length, ly, stars, { fg: 'yellow' });
           ly++;
         }
@@ -501,7 +501,7 @@ export function renderDashboard(screen, y, h) {
         const name = truncate(r.full_name || '?', rightW - 8);
         const stars = '★' + shortNum(r.stargazers_count || 0);
         screen.writeStr(rightX, ry, sel ? '▶ ' : '  ', sel ? { bg: 'blue', fg: 'white' } : null);
-        screen.writeStr(rightX + 2, ry, name, sel ? { bg: 'blue', fg: 'white', bold: true } : { fg: 'white' });
+        screen.writeStr(rightX + 2, ry, name, sel ? { bg: 'blue', fg: 'white', bold: true } : (color('repoName') || { fg: 'white' }));
         screen.writeStr(rightX + rightW - stars.length, ry, stars, sel ? { bg: 'blue', fg: 'magenta' } : { fg: 'magenta' });
         ry++;
       }

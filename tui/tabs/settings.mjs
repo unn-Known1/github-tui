@@ -99,7 +99,7 @@ export function renderSettings(screen, y, h) {
   const W = screen.width;
   const isLoggedIn = !!appState.token;
 
-  screen.writeStr(2, y, 'SETTINGS', { fg: 'white', bold: true });
+  screen.writeStr(2, y, 'SETTINGS', color('title') || { fg: 'white', bold: true });
   screen.hline(y + 1, '─', { dim: true });
 
   let row = y + 3;

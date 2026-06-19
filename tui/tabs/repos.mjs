@@ -244,7 +244,7 @@ function renderStarredList(screen, y, h) {
   const W = screen.width;
   const list = appState.starred;
 
-  screen.writeStr(2, y, 'STARRED REPOSITORIES', { fg: 'white', bold: true });
+  screen.writeStr(2, y, 'STARRED REPOSITORIES', color('title') || { fg: 'white', bold: true });
   const countText = list.length + ' repos';
   screen.writeStr(Math.max(2, W - countText.length - 2), y, countText, { dim: true });
   screen.hline(y + 1, '─', { dim: true });
@@ -311,7 +311,7 @@ export function renderRepos(screen, y, h) {
   const totalForks = appState.repos.reduce((a, r) => a + (r.forks_count || 0), 0);
   const totalIssues = appState.repos.reduce((a, r) => a + (r.open_issues_count || 0), 0);
 
-  screen.writeStr(2, y, 'YOUR REPOSITORIES', { fg: 'white', bold: true });
+  screen.writeStr(2, y, 'YOUR REPOSITORIES', color('title') || { fg: 'white', bold: true });
   const statsText = '★ ' + shortNum(totalStars) + '   ⑂ ' + shortNum(totalForks) + '   ⚡ ' + shortNum(totalIssues);
   screen.writeStr(Math.max(2, W - statsText.length - 2), y, statsText, { dim: true });
   screen.hline(y + 1, '─', { dim: true });

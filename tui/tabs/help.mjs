@@ -213,7 +213,7 @@ export function render(screen) {
     } else if (ln.kind === 'shortcut') {
       const key = ln.key.padEnd(18).substring(0, 18);
       screen.writeStr(x0 + 2, row, key, { fg: 'yellow', bold: true });
-      screen.writeStr(x0 + 20, row, truncate(ln.desc, boxW - 22), { fg: 'white' });
+      screen.writeStr(x0 + 20, row, truncate(ln.desc, boxW - 22), color('repoName') || { fg: 'white' });
     } else if (ln.kind === 'empty') {
       screen.writeStr(x0 + 2, row, ln.text, { dim: true });
     }

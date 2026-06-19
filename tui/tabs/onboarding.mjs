@@ -176,7 +176,7 @@ export function renderOnboarding(screen, opts = {}) {
   screen.writeStr(x0 + 3, iconY, iconText, { fg: 'cyan', bold: true });
 
   // Title.
-  screen.writeStr(x0 + 7, iconY, step.title, { fg: 'white', bold: true });
+  screen.writeStr(x0 + 7, iconY, step.title, color('title') || { fg: 'white', bold: true });
 
   // Body — supports either string or string[] for line-by-line.
   const body = Array.isArray(step.body) ? step.body : step.body.split('\n');
@@ -187,7 +187,7 @@ export function renderOnboarding(screen, opts = {}) {
     let style = null;
     if (/^\s*\d+\./.test(ln)) style = { fg: 'yellow' };
     else if (/^\s*\[/.test(ln)) style = { fg: 'cyan', bold: true };
-    else if (/^\s*•/.test(ln)) style = { fg: 'white' };
+    else if (/^\s*•/.test(ln)) style = color('repoName') || { fg: 'white' };
     else if (/^\s*$/.test(ln)) { bodyY++; continue; }
     else style = null;
     screen.writeStr(x0 + 3, bodyY, ln.substring(0, innerW), style);

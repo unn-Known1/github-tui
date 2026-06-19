@@ -807,7 +807,7 @@ function renderSearchInput(screen, y, h) {
     tipY++;
     let recentIdx = 0;
     for (const r of appState.recentRepos.slice(0, 5)) {
-      screen.writeStr(2, tipY, truncate(r.full_name, W - 4), { fg: 'white' });
+      screen.writeStr(2, tipY, truncate(r.full_name, W - 4), color('repoName') || { fg: 'white' });
       if (r.description) {
         const desc = '  ' + truncate(r.description, W - 22);
         screen.writeStr(2 + 2 + truncate(r.full_name, W - 4).length, tipY, desc, { dim: true });
@@ -824,7 +824,7 @@ function renderResultsList(screen, y, h) {
   const W = screen.width;
   const type = appState.searchType || 'repos';
   const typeLabel = type === 'repos' ? 'REPOS' : type === 'users' ? 'USERS' : 'CODE';
-  screen.writeStr(2, y + 1, 'Search ' + typeLabel + ':', { fg: 'white', bold: true });
+  screen.writeStr(2, y + 1, 'Search ' + typeLabel + ':', color('title') || { fg: 'white', bold: true });
   screen.writeStr(14 + typeLabel.length, y + 1, appState.searchQuery || '', { fg: 'cyan' });
   const hint = type === 'repos' ? '[i] Search repos   [u] Search users   [C] Search code'
     : type === 'users' ? '[i] Search repos   [u] Search users   [C] Search code'
@@ -1072,7 +1072,7 @@ function renderRepoDetails(screen, y, maxH) {
   appState._overviewAssetBounds = null;
 
   // Repo name.
-  screen.writeStr(2, y, repo.full_name, { fg: 'white', bold: true });
+  screen.writeStr(2, y, repo.full_name, color('title') || { fg: 'white', bold: true });
 
   // Pane tabs as chips.
   const panes = [
@@ -1198,7 +1198,7 @@ function renderRepoDetails(screen, y, maxH) {
 }
 
 export function renderAnalyze(screen, y, h) {
-  screen.writeStr(2, y, 'ANALYZE REPOSITORY', { fg: 'white', bold: true });
+  screen.writeStr(2, y, 'ANALYZE REPOSITORY', color('title') || { fg: 'white', bold: true });
   screen.hline(y + 1, '─', { dim: true });
   const v = appState.analyzeView;
   if (v === 'search')   { renderSearchInput(screen, y, h); return; }
