@@ -612,26 +612,27 @@ export function registerCoreActions() {
   reg({ id: 'watch.toggle',    label: 'Watch / unwatch current repo',       hint: 'W', run: toggleWatch });
   reg({ id: 'bookmark.toggle', label: 'Bookmark / unbookmark current repo', hint: 'b', run: toggleBookmark });
 
-  reg({ id: 'repos.sort.name',    label: 'Sort repos by name',    run: () => { setTab(1); repos.keys.n(); } });
-  reg({ id: 'repos.sort.stars',   label: 'Sort repos by stars',   run: () => { setTab(1); repos.keys.S(); } });
-  reg({ id: 'repos.sort.updated', label: 'Sort repos by updated', run: () => { setTab(1); repos.keys.u(); } });
+  reg({ id: 'repos.sort.name',    label: 'Sort repos by name',    hint: 'n', run: () => { setTab(1); repos.keys.n(); } });
+  reg({ id: 'repos.sort.stars',   label: 'Sort repos by stars',   hint: 'S', run: () => { setTab(1); repos.keys.S(); } });
+  reg({ id: 'repos.sort.updated', label: 'Sort repos by updated', hint: 'u', run: () => { setTab(1); repos.keys.u(); } });
   reg({ id: 'repos.filter',       label: 'Filter your repositories...',
-        run: () => { setTab(1); repos.keys['/'](); } });
+        hint: '/', run: () => { setTab(1); repos.keys['/'](); } });
   reg({ id: 'repos.clear-filter', label: 'Clear all repos filters',
-        run: () => { setTab(1); repos.keys.c(); } });
+        hint: 'c', run: () => { setTab(1); repos.keys.c(); } });
   reg({ id: 'repos.type', label: 'Cycle repos type filter (all/sources/forks/...)',
-        run: () => { setTab(1); repos.keys.t(); } });
+        hint: 't', run: () => { setTab(1); repos.keys.t(); } });
   reg({ id: 'repos.lang', label: 'Filter repos by language...',
-        run: () => { setTab(1); repos.keys.L(); } });
+        hint: 'L', run: () => { setTab(1); repos.keys.L(); } });
   reg({ id: 'repos.stale', label: 'Toggle stale-only filter (no push 6+ months)',
-        run: () => { setTab(1); repos.keys.x(); } });
+        hint: 'x', run: () => { setTab(1); repos.keys.x(); } });
   reg({ id: 'repos.starred', label: 'View starred repos',
-        run: () => { setTab(1); repos.toggleReposView(); } });
+        hint: 'V', run: () => { setTab(1); repos.toggleReposView(); } });
   reg({ id: 'repos.density', label: 'Toggle Repos density (compact / comfortable)',
-        run: () => { setTab(1); repos.keys.D(); } });
+        hint: 'D', run: () => { setTab(1); repos.keys.D(); } });
   reg({ id: 'repos.pin', label: 'Pin / unpin highlighted repo',
-        run: () => { setTab(1); repos.keys.P(); } });
+        hint: 'P', run: () => { setTab(1); repos.keys.P(); } });
   reg({ id: 'analyze.files', label: 'Open File explorer for current repo',
+        hint: 'F',
         run: () => {
           if (!appState.repoDetails) { showMessage('Open a repo on Analyze first', 'warning'); return; }
           setTab(2);
@@ -639,14 +640,14 @@ export function registerCoreActions() {
         }});
 
   reg({ id: 'analyze.search', label: 'Search public repositories...',
-        run: () => { setTab(2); analyze.keys.i(); } });
+        hint: 'i', run: () => { setTab(2); analyze.keys.i(); } });
   reg({ id: 'analyze.readme', label: 'View README of current repo',
-        run: () => { if (appState.repoDetails) analyze.keys.R(); } });
+        hint: 'R', run: () => { if (appState.repoDetails) analyze.keys.R(); } });
 
-  reg({ id: 'inbox.refresh',     label: 'Inbox: refresh notifications',       run: inbox.loadNotifications });
-  reg({ id: 'inbox.mark.read',   label: 'Inbox: mark current thread as read', run: inbox.markCurrentRead });
-  reg({ id: 'inbox.mark.all',    label: 'Inbox: mark all as read',            run: inbox.markAllRead });
-  reg({ id: 'inbox.unsubscribe', label: 'Inbox: unsubscribe from thread',     run: inbox.unsubscribeCurrent });
+  reg({ id: 'inbox.refresh',     label: 'Inbox: refresh notifications',       hint: 'r', run: inbox.loadNotifications });
+  reg({ id: 'inbox.mark.read',   label: 'Inbox: mark current thread as read', hint: 'm', run: inbox.markCurrentRead });
+  reg({ id: 'inbox.mark.all',    label: 'Inbox: mark all as read',            hint: 'M', run: inbox.markAllRead });
+  reg({ id: 'inbox.unsubscribe', label: 'Inbox: unsubscribe from thread',     hint: 'u', run: inbox.unsubscribeCurrent });
   reg({ id: 'inbox.cycle',       label: 'Inbox: cycle filter',                run: inbox.cycleFilter });
 
   reg({ id: 'settings.theme',  label: 'Change theme...',

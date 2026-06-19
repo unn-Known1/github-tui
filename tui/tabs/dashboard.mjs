@@ -340,7 +340,7 @@ export function renderDashboard(screen, y, h) {
           if (ly >= y + h - 1) break;
           screen.writeStr(leftX, ly, dayLabels[row], { dim: true });
           for (let col = 0; col < hm.weeks; col++) {
-            const cx = leftX + 2 + col * cellW;
+            const cx = leftX + 3 + col * cellW;
             if (cx >= heatRightX - 1) break;
             const val = hm.grid[row][col];
             const level = val === 0 ? 0
@@ -689,6 +689,8 @@ export const keys = {
   't': () => {
     const cycle = { 1: 7, 7: 30, 30: 1 };
     appState.trendingPeriod = cycle[appState.trendingPeriod] || 7;
+    const labels = { 1: 'today', 7: 'this week', 30: 'this month' };
+    showMessage('Trending: ' + labels[appState.trendingPeriod], 'info');
     reloadTrending();
   },
   '/': () => startInput('Filter trending: ', 'dashboard-filter'),

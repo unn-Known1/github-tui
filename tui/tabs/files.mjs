@@ -661,10 +661,12 @@ export function enter() {
   drillInto();
 }
 
+let _backInProgress = false;
 export async function backOrLeave() {
+  if (_backInProgress) return true;
   if (appState.filesBranchPicker) { appState.filesBranchPicker = false; render(); return true; }
-  if (appState.fileViewing) { await goUp(); return true; }
-  if (appState.filesPath) { await goUp(); return true; }
+  if (appState.fileViewing) { _backInProgress = true; await goUp(); _backInProgress = false; return true; }
+  if (appState.filesPath) { _backInProgress = true; await goUp(); _backInProgress = false; return true; }
   return false; // let analyze.handleBack take over
 }
 

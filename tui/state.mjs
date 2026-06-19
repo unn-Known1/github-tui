@@ -21,7 +21,7 @@ export function isStale(gen) { return gen !== asyncGeneration; }
 // Current tab index. 0-based. Drives the top tab strip and render dispatch.
 // ────────────────────────────────────────────────────────────────────────────
 export const TABS = [
-  { key: '1', label: 'Dashboard' },
+  { key: '1', label: 'Dash' },
   { key: '2', label: 'Repos' },
   { key: '3', label: 'Analyze' },
   { key: '4', label: 'Actions' },

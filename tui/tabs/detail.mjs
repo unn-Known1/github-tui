@@ -598,9 +598,11 @@ export function enter() {
     tabs.push('files');
   }
   const idx = tabs.indexOf(appState.detailTab);
-  appState.detailTab = tabs[(idx + 1) % tabs.length];
+  const nextTab = tabs[(idx + 1) % tabs.length];
+  appState.detailTab = nextTab;
   appState.detailScroll = 0;
   appState.detailFileCursor = 0;
+  showMessage(nextTab.charAt(0).toUpperCase() + nextTab.slice(1), 'info', 1000);
   render();
 }
 
