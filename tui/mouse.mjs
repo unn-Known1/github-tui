@@ -3,6 +3,7 @@
 import { appState, tabState, setTab, render, TABS, toggleCollapse, showMessage } from './state.mjs';
 import { getScreen, HEADER_HEIGHT } from './render.mjs';
 import { setTheme } from './theme.mjs';
+import { startInput } from './input.mjs';
 
 export function enableMouse() {
   process.stdout.write('\x1b[?1000h');
@@ -359,7 +360,7 @@ function handleContentClick(sx, sy) {
   switch (tabState.current) {
     case 0: dispatchDashboardClick(sx, sy); break;
     case 1: dispatchReposClick(sx, sy); break;
-    case 2: dispatchAnalyzeClick(sy); break;
+    case 2: dispatchAnalyzeClick(sx, sy); break;
     case 3: render(); break;
     case 4: dispatchInboxClick(sy); break;
     case 5: dispatchSettingsClick(sx, sy); break;
@@ -487,11 +488,39 @@ function dispatchReposClick(sx, sy) {
 
 // ── Analyze tab ───────────────────────────────────────────────
 
-function dispatchAnalyzeClick(sy) {
+function dispatchAnalyzeClick(sx, sy) {
+  // ── Search view: input box + recent repos ──
+  if (appState.analyzeView === 'search') {
+    const screen = getScreen();
+    const W = screen ? screen.width : 80;
+    const inputY = HEADER_HEIGHT + 5;  // contentY + 3
+    const inputW = Math.min(50, W - 12);
+
+    // Click on search input box → start typing.
+    if (sy >= inputY && sy <= inputY + 2 && sx >= 2 && sx < 2 + inputW + 2) {
+      startInput('Search repos: ', 'search');
+      render();
+      return;
+    }
+
+    // Click on a recent repo row → open it.
+    const recent = appState._recentReposBounds;
+    if (recent && sy > recent.y && sy <= recent.y + recent.count) {
+      const idx = sy - recent.y - 1;
+      const r = appState.recentRepos[idx];
+      if (r && r.full_name) {
+        const [owner, name] = r.full_name.split('/');
+        import('./tabs/analyze.mjs').then(a => a.loadRepoDetails(owner, name));
+      }
+      return;
+    }
+    return;
+  }
+
+  // ── Detail view: issues / PRs / packages list ──
   import('./tabs/analyze.mjs').then(mod => {
     const scroll = appState.detailsScroll;
 
-    // First data row for issues/PRs/packages starts at HEADER_HEIGHT + 9.
     const contentStartY = HEADER_HEIGHT + 9;
     const itemIdx = sy - contentStartY + scroll;
     let listLen = 0;
@@ -511,7 +540,6 @@ function dispatchAnalyzeClick(sy) {
       if (appState.detailsPane === 'packages') {
         appState.selectedAsset = itemIdx;
       } else if ((appState.detailsPane === 'issues' || appState.detailsPane === 'prs') && appState.repoDetails) {
-        // Open detail popup on click.
         const [owner, name] = appState.repoDetails.full_name.split('/');
         if (appState.detailsPane === 'issues') {
           const issue = appState.repoIssues[itemIdx];

@@ -797,7 +797,9 @@ function renderSearchInput(screen, y, h) {
   if (appState.recentRepos.length > 0) {
     tipY += 2;
     sectionHeader(screen, 2, tipY, '🕘 RECENT');
+    const recentStart = tipY;
     tipY++;
+    let recentIdx = 0;
     for (const r of appState.recentRepos.slice(0, 5)) {
       screen.writeStr(2, tipY, truncate(r.full_name, W - 4), { fg: 'white' });
       if (r.description) {
@@ -805,8 +807,10 @@ function renderSearchInput(screen, y, h) {
         screen.writeStr(2 + 2 + truncate(r.full_name, W - 4).length, tipY, desc, { dim: true });
       }
       tipY++;
+      recentIdx++;
       if (tipY > y + h - 2) break;
     }
+    appState._recentReposBounds = { x: 2, y: recentStart, count: recentIdx };
   }
 }
 
