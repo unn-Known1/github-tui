@@ -244,7 +244,7 @@ function renderRepoList(screen, y, h, W) {
     }
     const prefix = sel ? '▶ ' : '  ';
     const name = truncate(r.full_name || '?', W - 20);
-    const stars = '★' + (r.stargazers_count || 0);
+    const stars = '★ ' + (r.stargazers_count || 0);
     screen.writeStr(2, row, prefix + name, sel ? color('selection') : (color('repoName') || { fg: 'white' }));
     screen.writeStr(W - stars.length - 2, row, stars, sel ? color('selection') : { fg: 'yellow' });
   }

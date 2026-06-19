@@ -282,7 +282,7 @@ function renderStarredList(screen, y, h) {
     screen.writeStr(2, row, sel ? '▶' : '  ', sel ? color('selection') : color('dim'));
     const name = truncate(r.full_name || '?', Math.max(15, W - 36));
     screen.writeStr(5, row, name, sel ? color('selection') : color('repoName'));
-    const stars = '★' + shortNum(r.stargazers_count || 0);
+    const stars = '★ ' + shortNum(r.stargazers_count || 0);
     screen.writeStr(W - 22, row, stars, sel ? color('selection') : color('star'));
   }
 

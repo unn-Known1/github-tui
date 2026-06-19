@@ -566,7 +566,7 @@ function renderBookmarksOverlay(screen) {
     screen.writeStr(x + 3, row, name, sel ? color('selection') : (color('repoName') || { fg: 'white' }));
 
     // Stars
-    const stars = b.stars ? '★' + b.stars : '';
+      const stars = b.stars ? '★ ' + b.stars : '';
     if (stars) {
       screen.writeStr(x + 3 + name.length + 1, row, stars, sel ? color('selection') : { fg: 'yellow', dim: true });
     }

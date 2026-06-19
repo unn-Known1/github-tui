@@ -1345,7 +1345,7 @@ function renderRepoResults(screen, listY, h, W, maxVisible) {
     }
     screen.writeStr(2, row, sel ? '▶' : '  ', sel ? color('selection') : color('dim'));
     screen.writeStr(5, row, truncate(repo.full_name, 30), sel ? color('selection') : color('repoName'));
-    const stats = '★' + shortNum(repo.stargazers_count) +
+    const stats = '★ ' + shortNum(repo.stargazers_count) +
       '   ⑂' + shortNum(repo.forks_count) +
       '   ⚡' + shortNum(repo.open_issues_count);
     screen.writeStr(36, row, stats, sel ? color('selection') : color('dim'));

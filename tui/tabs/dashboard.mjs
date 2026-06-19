@@ -286,7 +286,7 @@ export function renderDashboard(screen, y, h) {
       } else {
         for (const r of top) {
           if (ly >= y + h - 1) break;
-          const stars = '★' + shortNum(r.stargazers_count || 0);
+          const stars = '★ ' + shortNum(r.stargazers_count || 0);
           const nameMax = leftW - stars.length - 2;
           screen.writeStr(leftX, ly, truncate(r.name, nameMax), color('repoName') || { fg: 'white' });
           screen.writeStr(leftX + leftW - stars.length, ly, stars, { fg: 'yellow' });
@@ -499,7 +499,7 @@ export function renderDashboard(screen, y, h) {
           for (let x = rightX; x < rightX + rightW; x++) screen.styleBuf[ry][x] = { bg: 'blue', fg: 'white', bold: true };
         }
         const name = truncate(r.full_name || '?', rightW - 8);
-        const stars = '★' + shortNum(r.stargazers_count || 0);
+        const stars = '★ ' + shortNum(r.stargazers_count || 0);
         screen.writeStr(rightX, ry, sel ? '▶ ' : '  ', sel ? { bg: 'blue', fg: 'white' } : null);
         screen.writeStr(rightX + 2, ry, name, sel ? { bg: 'blue', fg: 'white', bold: true } : (color('repoName') || { fg: 'white' }));
         screen.writeStr(rightX + rightW - stars.length, ry, stars, sel ? { bg: 'blue', fg: 'magenta' } : { fg: 'magenta' });
