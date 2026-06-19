@@ -517,6 +517,26 @@ function dispatchAnalyzeClick(sx, sy) {
     return;
   }
 
+  // ── Detail view: overview pane (click on release assets) ──
+  if (appState.detailsPane === 'overview') {
+    const assetBounds = appState._overviewAssetBounds;
+    if (assetBounds) {
+      import('./tabs/analyze.mjs').then(mod => {
+        for (const b of assetBounds) {
+          if (sy === b.y && sx >= b.x) {
+            const asset = appState.repoReleaseAssets[b.idx];
+            if (asset && mod && mod.downloadAsset) {
+              appState.selectedAsset = b.idx;
+              mod.downloadAsset(asset);
+            }
+            return;
+          }
+        }
+      }).catch(() => {});
+    }
+    return;
+  }
+
   // ── Detail view: issues / PRs / packages list ──
   import('./tabs/analyze.mjs').then(mod => {
     const scroll = appState.detailsScroll;

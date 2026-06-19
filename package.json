@@ -1,0 +1,41 @@
+{
+  "name": "github-tui",
+  "version": "0.5.5",
+  "description": "A fast, zero-dependency terminal user interface for GitHub — dashboards, repos, issues, PRs, inbox, actions, file explorer, themes, and more.",
+  "type": "module",
+  "bin": {
+    "github-tui": "app.mjs"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "keywords": [
+    "github",
+    "tui",
+    "terminal",
+    "cli",
+    "dashboard",
+    "issues",
+    "pull-requests",
+    "notifications",
+    "actions",
+    "ci",
+    "keyboard-first"
+  ],
+  "author": "unn-Known1 <ptelgm.yt@gmail.com>",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/unn-Known1/github-tui"
+  },
+  "bugs": {
+    "url": "https://github.com/unn-Known1/github-tui/issues"
+  },
+  "homepage": "https://github.com/unn-Known1/github-tui#readme",
+  "files": [
+    "app.mjs",
+    "tui/",
+    "README.md",
+    "LICENSE"
+  ]
+}

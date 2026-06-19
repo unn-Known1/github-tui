@@ -309,6 +309,10 @@ export async function loadRepoDetails(owner, name) {
   }
   appState.loading = false;
   if (!isStale(gen)) render();
+  // Silently pre-load release assets for overview + packages pane
+  if (appState.repoReleaseAssets.length === 0 && appState.repoReleases.length > 0) {
+    loadReleaseAssets(true);
+  }
 }
 
 export async function viewReadme() {
@@ -331,13 +335,15 @@ export async function viewReadme() {
   if (!isStale(gen)) render();
 }
 
-export async function loadReleaseAssets() {
+export async function loadReleaseAssets(silent = false) {
   const repo = appState.repoDetails;
   if (!repo || !appState.repoReleases.length) return;
   const gen = startAsync();
-  appState.loading = true;
-  appState.repoReleaseAssets = [];
-  render();
+  if (!silent) {
+    appState.loading = true;
+    appState.repoReleaseAssets = [];
+    render();
+  }
   try {
     const [owner, name] = repo.full_name.split('/');
     const allAssets = [];
@@ -354,7 +360,7 @@ export async function loadReleaseAssets() {
   } catch (e) {
     if (!isStale(gen)) showMessage('Failed to load release assets', 'error');
   }
-  appState.loading = false;
+  if (!silent) appState.loading = false;
   if (!isStale(gen)) render();
 }
 
@@ -1063,6 +1069,7 @@ function renderRepoDetails(screen, y, maxH) {
   const W = screen.width;
   const repo = appState.repoDetails;
   if (!repo) return;
+  appState._overviewAssetBounds = null;
 
   // Repo name.
   screen.writeStr(2, y, repo.full_name, { fg: 'white', bold: true });
@@ -1157,8 +1164,27 @@ function renderRepoDetails(screen, y, maxH) {
       }
       ry++;
     }
-    if (appState.repoReleases.length > 0 && ry < y + maxH - 2) {
-      sectionHeader(screen, rightX, ry++, 'LATEST RELEASES');
+    if (appState.repoReleaseAssets.length > 0 && ry < y + maxH - 2) {
+      sectionHeader(screen, rightX, ry++, 'RELEASE PACKAGES');
+      const maxRows = Math.min(5, maxH - (ry - y) - 1);
+      const bounds = [];
+      for (let i = 0; i < maxRows && i < appState.repoReleaseAssets.length; i++) {
+        if (ry >= y + maxH - 1) break;
+        const a = appState.repoReleaseAssets[i];
+        const sel = appState.selectedAsset === i;
+        screen.writeStr(rightX, ry, sel ? '▶' : ' ', sel ? { fg: 'cyan' } : undefined);
+        const name = truncate(a.name || '?', 20);
+        screen.writeStr(rightX + 2, ry, name);
+        const size = a.size ? formatBytes(a.size) : '';
+        if (size) screen.writeStr(rightX + 24, ry, size, { dim: true });
+        const tag = truncate(a.releaseTag || '', 8);
+        if (tag) screen.writeStr(rightX + 33, ry, tag, { dim: true });
+        bounds.push({ y: ry, x: rightX, idx: i });
+        ry++;
+      }
+      appState._overviewAssetBounds = bounds;
+    } else if (appState.repoReleases.length > 0 && ry < y + maxH - 2) {
+      sectionHeader(screen, rightX, ry++, 'RELEASES');
       for (const rel of appState.repoReleases.slice(0, 3)) {
         if (ry >= y + maxH - 1) break;
         const tag = truncate(rel.tag_name || rel.name || '?', 18);
