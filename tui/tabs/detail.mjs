@@ -354,12 +354,14 @@ function renderComments(screen, x, y, w, h, scroll) {
   }
   let row = y;
   let lineIdx = 0;
+  let commentNum = 0;
   for (const c of comments) {
+    commentNum++;
     if (lineIdx >= scroll + h) break;
     if (lineIdx >= scroll) {
       const author = (c.user && c.user.login) || '?';
       const when = c.created_at ? relTime(c.created_at) : '';
-      const header = author + ' ' + when;
+      const header = '── Comment #' + commentNum + ' ── ' + author + ' ' + when;
       screen.writeStr(x, row, truncate(header, w), color('accent'));
       row++;
       if (row >= y + h) break;
@@ -377,7 +379,7 @@ function renderComments(screen, x, y, w, h, scroll) {
     }
     if (lineIdx >= scroll + h) break;
     if (lineIdx >= scroll) {
-      screen.hline(row, '─', color('dim'));
+      screen.hline(row, '──', color('dim'));
       row++;
       if (row >= y + h) break;
     }
@@ -419,7 +421,7 @@ function renderReviews(screen, x, y, w, h, scroll) {
     }
     if (lineIdx >= scroll + h) break;
     if (lineIdx >= scroll) {
-      screen.hline(row, '─', color('dim'));
+      screen.hline(row, '──', color('dim'));
       row++;
       if (row >= y + h) break;
     }

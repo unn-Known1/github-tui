@@ -363,7 +363,10 @@ export function renderFilesPane(screen, y, maxH) {
   const entries = appState.filesEntries || [];
   const headerY = y + 2;
   screen.writeStr(4, headerY, ' Name', color('header'));
-  if (W > 40) screen.writeStr(W - 22, headerY, 'Size', color('header'));
+  const dirs = entries.filter(e => e.type === 'dir').length;
+  const files = entries.filter(e => e.type === 'file').length;
+  if (W > 40) screen.writeStr(W - 30, headerY, dirs + ' dir(s)  ' + files + ' file(s)', color('dim'));
+  if (W > 40) screen.writeStr(W - 18, headerY, 'Size', color('header'));
 
   const rows = Math.max(1, maxH - 5);
   const start = appState.filesScroll || 0;
@@ -381,17 +384,17 @@ export function renderFilesPane(screen, y, maxH) {
       for (let x = 0; x < W; x++) screen.styleBuf[row][x] = color('selection');
     }
 
-    screen.writeStr(2, row, sel ? '>' : ' ', sel ? color('selection') : null);
+    screen.writeStr(2, row, sel ? '▶' : ' ', sel ? color('selection') : null);
 
     let icon, c;
     if (ent.type === 'up')         { icon = '..'; c = color('dim'); }
-    else if (ent.type === 'dir')   { icon = '> '; c = color('accent'); }
-    else if (ent.type === 'file')  { icon = '  '; c = null; }
+    else if (ent.type === 'dir')   { icon = '📁'; c = color('accent'); }
+    else if (ent.type === 'file')  { icon = '📄'; c = null; }
     else                            { icon = '? '; c = color('dim'); }
     screen.writeStr(4, row, icon, c);
 
     const nameStyle = sel ? color('selection') : null;
-    screen.writeStr(11, row, ent.name.substring(0, W - 36), nameStyle);
+    screen.writeStr(7, row, ent.name.substring(0, W - 36), nameStyle);
 
     if (ent.type === 'file') {
       screen.writeStr(W - 22, row, formatBytes(ent.size || 0), color('dim'));

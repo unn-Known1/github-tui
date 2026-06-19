@@ -108,32 +108,55 @@ export function renderPalette(screen) {
   // Query line with input box styling.
   const q = appState.paletteQuery;
   const inputStyle = color('inputBox');
-  screen.writeStr(x + 2, y + 1, '> ', inputStyle);
-  screen.writeStr(x + 4, y + 1, truncate(q, boxW - 6) + '_', inputStyle);
+  screen.writeStr(x + 2, y + 1, '>', { fg: 'cyan', bold: true });
+  screen.writeStr(x + 4, y + 1, truncate(q, boxW - 8), inputStyle);
+  screen.writeStr(x + 4 + q.length, y + 1, '█', { fg: 'cyan' });
 
   const list = filter(q);
+  screen.hline(y + 2, '─', color('dim'));
+
   if (list.length === 0) {
     screen.writeStr(x + 2, y + 3, 'No matching actions', color('dim'));
     return;
   }
 
-  screen.hline(y + 2, '─', color('dim'));
+  const maxVisible = boxH - 5;
+  let scrollOff = 0;
+  if (appState.paletteCursor >= maxVisible) {
+    scrollOff = appState.paletteCursor - maxVisible + 1;
+  }
 
-  for (let i = 0; i < list.length && i < boxH - 4; i++) {
-    const a = list[i];
+  for (let i = 0; i < maxVisible && (i + scrollOff) < list.length; i++) {
+    const a = list[i + scrollOff];
     const row = y + 3 + i;
-    const sel = i === appState.paletteCursor;
+    const sel = (i + scrollOff) === appState.paletteCursor;
 
-    // Selection highlight.
     if (sel) {
       for (let xx = x + 1; xx < x + boxW - 1; xx++) {
         screen.styleBuf[row][xx] = color('selection');
       }
     }
 
-    screen.writeStr(x + 1, row, sel ? '>' : ' ', sel ? color('selection') : null);
-    screen.writeStr(x + 3, row, truncate(a.label, boxW - 30), sel ? color('selection') : null);
-    if (a.hint) screen.writeStr(x + boxW - a.hint.length - 3, row,
-      truncate(a.hint, 25), sel ? color('selection') : color('dim'));
+    screen.writeStr(x + 1, row, sel ? '▶' : ' ', sel ? color('selection') : null);
+    screen.writeStr(x + 3, row, truncate(a.label, boxW - 34), sel ? color('selection') : null);
+    if (a.hint) {
+      const hintText = truncate(a.hint, 12);
+      screen.writeStr(x + boxW - hintText.length - 3, row,
+        ' ' + hintText, sel ? color('selection') : { fg: 'cyan', dim: true });
+    }
   }
+
+  // Scroll indicator
+  if (list.length > maxVisible) {
+    const s = (scrollOff + 1) + '-' + Math.min(scrollOff + maxVisible, list.length) +
+      ' of ' + list.length;
+    screen.writeStr(x + 2, y + boxH - 2, s, color('dim'));
+  } else {
+    screen.writeStr(x + 2, y + boxH - 2, list.length + ' action' +
+      (list.length !== 1 ? 's' : '') + ' found', color('dim'));
+  }
+
+  // Footer hints
+  const hint = '↑↓ navigate   ⏎ run   Esc close';
+  screen.writeStr(x + boxW - hint.length - 3, y + boxH - 2, hint, color('dim'));
 }

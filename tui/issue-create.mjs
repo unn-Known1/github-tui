@@ -13,7 +13,9 @@ registerInputHandler('issue-title', async (value) => {
   const title = (value || '').trim();
   if (!title) { showMessage('Issue title cannot be empty', 'error'); return; }
   _issueTitle = title;
-  startInput('Issue body (optional, Enter to skip): ', 'issue-body');
+  const repos = appState.repos;
+  const repoName = repos[_issueRepoIndex] ? repos[_issueRepoIndex].full_name : '?';
+  startInput('Issue body for ' + repoName + ' (optional, Enter to skip): ', 'issue-body');
 });
 
 registerInputHandler('issue-body', async (value) => {
@@ -26,9 +28,9 @@ registerInputHandler('issue-body', async (value) => {
   try {
     const result = await createIssue(appState.token, owner, name, _issueTitle, _issueBody);
     if (result && result.html_url) {
-      showMessage('Created issue: ' + result.title, 'success');
+      showMessage('✓ Created issue: "' + result.title + '" on ' + repo.full_name, 'success');
     } else {
-      showMessage('Issue created', 'success');
+      showMessage('Issue created on ' + repo.full_name, 'success');
     }
   } catch (e) {
     showMessage(e.message || 'Failed to create issue', 'error');
@@ -47,14 +49,18 @@ registerInputHandler('issue-pick-repo', (value) => {
     return;
   }
   _issueRepoIndex = idx;
-  startInput('Issue title: ', 'issue-title');
+  const repoName = repos[idx].full_name;
+  showMessage('Selected: ' + repoName, 'info', 2000);
+  startInput('Issue title for ' + repoName + ': ', 'issue-title');
 });
 
 export function startCreateIssue() {
   const repos = appState.repos;
   if (!appState.token) { showMessage('Login first', 'warning'); return; }
   if (repos.length === 0) { showMessage('No repos loaded', 'warning'); return; }
-  const names = repos.map((r, i) => i + ': ' + r.name).join('  ');
-  showMessage('Available repos: ' + names, 'info', 5000);
-  startInput('Enter repo number (0-' + (repos.length - 1) + '): ', 'issue-pick-repo');
+  const shown = repos.slice(0, 8);
+  const names = shown.map((r, i) => i + ':' + r.name).join(' · ');
+  const more = repos.length > 8 ? ' …+' + (repos.length - 8) + ' more' : '';
+  showMessage(names + more, 'info', 6000);
+  startInput('Repo number (0-' + (repos.length - 1) + '): ', 'issue-pick-repo');
 }

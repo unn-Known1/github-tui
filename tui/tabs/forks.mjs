@@ -170,7 +170,7 @@ export function renderForks(screen, y, maxH) {
       for (let x = 0; x < W; x++) screen.styleBuf[row][x] = color('selection');
     }
 
-    screen.writeStr(nameCol, row, sel ? '> ' : '  ', sel ? color('selection') : null);
+    screen.writeStr(nameCol, row, sel ? '▶ ' : '  ', sel ? color('selection') : null);
     const ownerName = (fork.owner && fork.owner.login) || fork.full_name.split('/')[0];
     screen.writeStr(nameCol + 2, row, truncate(ownerName, starsCol - nameCol - 4), sel ? color('selection') : null);
     const statStyle = sel ? color('selection') : color('dim');

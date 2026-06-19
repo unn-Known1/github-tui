@@ -430,7 +430,7 @@ export function renderRepos(screen, y, h) {
     drawn++;
   }
 
-  scrollIndicators(screen, headerY + 2, Math.max(headerY + 2, curY - 1), start, repos.length);
+  scrollIndicators(screen, headerY + 2, Math.max(headerY + 2, curY - 1), start, repos.length, drawn);
 
   const footerY = curY + 1;
   if (footerY < y + h) {

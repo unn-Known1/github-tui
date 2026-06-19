@@ -134,11 +134,12 @@ export function errorState(screen, y, h, { message, detail }) {
 
 // Draw scroll indicators at the top and/or bottom of a scrollable list.
 // Shows "↑" when there's content above, "↓" when there's content below.
-export function scrollIndicators(screen, topY, botY, scroll, total) {
+export function scrollIndicators(screen, topY, botY, scroll, total, pageSize) {
   if (total <= 1) return;
   const W = screen.width;
   const hasAbove = scroll > 0;
-  const hasBelow = scroll + (botY - topY) < total;
+  const effectivePageSize = pageSize ?? (botY - topY + 1);
+  const hasBelow = scroll + effectivePageSize < total;
   if (!hasAbove && !hasBelow) return;
   if (topY === botY) {
     screen.writeStr(W - 2, topY, hasAbove && hasBelow ? '↕' : hasAbove ? '↑' : '↓', { dim: true });
@@ -181,7 +182,8 @@ function renderHeader(W) {
   const subtitleStyle = { dim: true };
 
   // Row 0: app title + version (left)  |  user (right)
-  screen.writeStr(2, 0, '▌ GitHub TUI', titleStyle);
+  screen.writeStr(2, 0, '◈', { fg: 'cyan' });
+  screen.writeStr(4, 0, 'GitHub TUI', titleStyle);
   const version = 'v0.5';
   screen.writeStr(16, 0, version, subtitleStyle);
 
@@ -339,6 +341,23 @@ function renderFooter(W, H) {
     screen.writeStr(2, statusY, tabLabel, { fg: 'cyan', bold: true });
     screen.writeStr(2 + tabLabel.length + 1, statusY, '│', { dim: true });
     screen.writeStr(2 + tabLabel.length + 3, statusY, hint.substring(0, W - tabLabel.length - 8), { fg: 'white' });
+  }
+
+  // Rate limit badge on the right when remaining is available and low.
+  const rl = lastRateLimit;
+  if (rl.remaining !== null && rl.limit !== null && rl.limit > 0) {
+    const pct = rl.remaining / rl.limit;
+    if (pct < 0.3) {
+      const badgeStyle = pct < 0.1 ? color('rateCrit') : color('rateWarn');
+      const badgeText = ' API ' + rl.remaining + '/' + rl.limit + ' ';
+      const bx = W - badgeText.length - 2;
+      if (bx > 4) {
+        for (let xx = bx; xx < bx + badgeText.length; xx++) {
+          screen.styleBuf[statusY][xx] = badgeStyle;
+        }
+        screen.writeStr(bx, statusY, badgeText, badgeStyle);
+      }
+    }
   }
 }
 
@@ -499,21 +518,32 @@ function renderBookmarksOverlay(screen) {
   for (let yy = 0; yy < H; yy++) {
     for (let xx = 0; xx < W; xx++) screen.styleBuf[yy][xx] = backdropStyle;
   }
-  const boxW = Math.min(70, W - 4);
-  const boxH = Math.min(bm.length + 5, H - 4);
+  const boxW = Math.min(72, W - 4);
+  const boxH = Math.min(bm.length + 6, H - 4);
   const x = Math.floor((W - boxW) / 2);
   const y = Math.floor((H - boxH) / 2);
   for (let yy = y; yy < y + boxH; yy++) {
     for (let xx = x; xx < x + boxW; xx++) screen.setCell(xx, yy, ' ', null);
   }
   screen.box(x, y, boxW, boxH, 'Bookmarks (' + bm.length + ')');
+
+  // Empty state
   if (bm.length === 0) {
-    screen.writeStr(x + 2, y + 2, 'No bookmarks. Press [b] on any repo to add one.', color('dim'));
+    screen.writeStr(x + 2, y + 2, '★', { fg: 'cyan' });
+    screen.writeStr(x + 2, y + 3, 'No bookmarks yet', { fg: 'white', bold: true });
+    screen.writeStr(x + 2, y + 4, 'Press [b] on any repo to add one.', color('dim'));
+    screen.writeStr(x + 2, y + 5, 'Then use this overlay to browse, open, or delete them.', color('dim'));
     return;
   }
-  const maxVisible = boxH - 4;
-  for (let i = 0; i < maxVisible && i < bm.length; i++) {
-    const idx = appState.bookmarksScroll + i;
+
+  // Column headers
+  screen.writeStr(x + 2, y + 1, 'REPO', color('header'));
+  if (boxW > 50) screen.writeStr(x + boxW - 28, y + 1, 'TAGS / URL', color('header'));
+
+  const maxVisible = boxH - 5;
+  const start = appState.bookmarksScroll;
+  for (let i = 0; i < maxVisible && start + i < bm.length; i++) {
+    const idx = start + i;
     if (idx >= bm.length) break;
     const b = bm[idx];
     const sel = idx === appState.bookmarksCursor;
@@ -522,13 +552,37 @@ function renderBookmarksOverlay(screen) {
       for (let xx = x + 1; xx < x + boxW - 1; xx++) screen.styleBuf[row][xx] = color('selection');
     }
     const prefix = sel ? '▶ ' : '  ';
-    const name = truncate(b.full_name || '?', boxW - 14);
+    const name = truncate(b.full_name || '?', boxW - 16);
+    screen.writeStr(x + 1, row, prefix, sel ? color('selection') : null);
+    screen.writeStr(x + 3, row, name, sel ? color('selection') : { fg: 'white' });
+
+    // Stars
     const stars = b.stars ? '★' + b.stars : '';
-    screen.writeStr(x + 1, row, prefix + name, sel ? color('selection') : { fg: 'white' });
-    if (stars) screen.writeStr(x + boxW - stars.length - 2, row, stars, sel ? color('selection') : { fg: 'yellow' });
+    if (stars) {
+      screen.writeStr(x + 3 + name.length + 1, row, stars, sel ? color('selection') : { fg: 'yellow', dim: true });
+    }
+
+    // Tags or URL snippet on the right
+    if (boxW > 50) {
+      const tagsStr = (b.tags && b.tags.length > 0) ? b.tags.slice(0, 2).join(',') : '';
+      const urlSnippet = b.url ? b.url.replace(/^https?:\/\//, '').substring(0, 24) : '';
+      const rightText = tagsStr ? '{' + truncate(tagsStr, 20) + '}' : truncate(urlSnippet, 24);
+      screen.writeStr(x + boxW - rightText.length - 3, row,
+        rightText, sel ? color('selection') : color('dim'));
+    }
   }
-  const hintY = y + boxH - 2;
-  screen.writeStr(x + 2, hintY, '[Enter] Open  [d] Delete  [y] Copy URL  [Esc] Close', { dim: true });
+
+  // Scroll indicator
+  scrollIndicators(screen, y + 2, y + 2 + Math.min(maxVisible, bm.length) - 1,
+    appState.bookmarksScroll, bm.length);
+
+  // Footer with count & hints
+  const footY = y + boxH - 2;
+  const range = (start + 1) + '-' + Math.min(start + maxVisible, bm.length) + ' of ' + bm.length;
+  screen.writeStr(x + 2, footY, range, color('dim'));
+
+  const hint = '[Enter] Open  [d] Delete  [y] URL  [Esc] Close';
+  screen.writeStr(x + boxW - hint.length - 3, footY, hint, color('dim'));
 }
 
 bindRender(doRender);

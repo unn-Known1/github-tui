@@ -146,20 +146,26 @@ export function renderSettings(screen, y, h) {
     renderRow(screen, row, leftMaxW, themeItem.label, themeItem.desc, true, themeItem.sel);
     row++;
   }
-  // Show all available themes as a small chip row.
+  // Show all available themes as a small chip row with accent-colored indicators.
   if (row < y + sectionH - 1) {
     row++;
     screen.writeStr(2, row, 'Available:', { dim: true });
     let cx = 14;
+    const accentColors = {
+      default: 'cyan', highContrast: 'white', dracula: 'magenta',
+      solarized: 'blue', nord: 'cyan', monokai: 'green', gruvbox: 'yellow', light: 'blue',
+    };
     for (const t of listThemes()) {
       const isCurrent = t === getThemeName();
-      const text = ' ' + t + ' ';
+      const accent = accentColors[t] || 'cyan';
+      const label = ' ' + t + ' ';
       const style = isCurrent
         ? { bg: 'cyan', fg: 'darkGray', bold: true }
         : { dim: true };
-      if (cx + text.length + 1 < leftMaxW - 2) {
-        screen.writeStr(cx, row, text, style);
-        cx += text.length + 1;
+      if (cx + label.length + 4 < leftMaxW - 2) {
+        screen.writeStr(cx, row, '█', { fg: accent });
+        screen.writeStr(cx + 2, row, label, style);
+        cx += label.length + 4;
       }
     }
   }

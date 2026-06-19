@@ -202,9 +202,9 @@ export function render(screen) {
     if (ln.kind === 'header') {
       screen.writeStr(x0 + 2, row, ln.text, { fg: 'cyan', bold: true });
     } else if (ln.kind === 'shortcut') {
-      const key = ln.key.padEnd(20).substring(0, 20);
-      screen.writeStr(x0 + 2, row, key, { fg: 'yellow' });
-      screen.writeStr(x0 + 22, row, truncate(ln.desc, boxW - 24), { fg: 'white' });
+      const key = ln.key.padEnd(18).substring(0, 18);
+      screen.writeStr(x0 + 2, row, key, { fg: 'yellow', bold: true });
+      screen.writeStr(x0 + 20, row, truncate(ln.desc, boxW - 22), { fg: 'white' });
     } else if (ln.kind === 'empty') {
       screen.writeStr(x0 + 2, row, ln.text, { dim: true });
     }
