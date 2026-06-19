@@ -10,7 +10,7 @@ import { color } from '../theme.mjs';
 import { emptyState, scrollIndicators } from '../render.mjs';
 import { loadDashboardWidgets } from './dashboard.mjs';
 import { isBookmarked } from '../store.mjs';
-import { isPinned, togglePin, loadPins } from '../store.mjs';
+import { togglePin } from '../store.mjs';
 import { loadRepoDetails } from './analyze.mjs';
 
 const REPOS_PER_PAGE = 30;
@@ -86,7 +86,7 @@ export function applyAllFilters(repos) {
   return out;
 }
 
-function floatPinsToTop(repos) {
+export function floatPinsToTop(repos) {
   if (appState.repoPins.length === 0) return repos;
   const pins = new Set(appState.repoPins);
   const pinned = [];
@@ -172,7 +172,8 @@ async function loadAllReposBackground(gen) {
       appState.reposPage = page;
       appState.reposHasMore = more.length >= REPOS_PER_PAGE;
       page++;
-    } catch {
+    } catch (e) {
+      if (!isStale(gen)) showMessage('Background repo loading failed: ' + ((e && e.message) || 'unknown'), 'error');
       break;
     }
   }
@@ -593,7 +594,11 @@ export function pageUp() {
       }
       appState.loading = false;
       render();
-    }).catch(() => { appState.loading = false; render(); });
+    }).catch((e) => {
+      if (!isStale(gen)) showMessage('Failed to load starred page: ' + ((e && e.message) || 'unknown'), 'error');
+      appState.loading = false;
+      if (!isStale(gen)) render();
+    });
   }
 }
 
@@ -616,7 +621,11 @@ export function pageDown() {
       }
       appState.loading = false;
       render();
-    }).catch(() => { appState.loading = false; render(); });
+    }).catch((e) => {
+      if (!isStale(gen)) showMessage('Failed to load starred page: ' + ((e && e.message) || 'unknown'), 'error');
+      appState.loading = false;
+      if (!isStale(gen)) render();
+    });
   }
 }
 

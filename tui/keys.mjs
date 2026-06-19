@@ -46,7 +46,9 @@ function currentRepoForAction() {
       return appState.forks[appState.selectedFork];
   }
   if (tabState.current === 1 && appState.repos.length > 0) {
-    return appState.repos[appState.repoSelected] || appState.repos[appState.repoScroll] || appState.repos[0];
+    let list = repos.applyAllFilters(repos.sortRepos(appState.repos, appState.repoSort));
+    list = repos.floatPinsToTop(list);
+    return list[appState.repoSelected] || null;
   }
   return null;
 }
@@ -133,10 +135,10 @@ function refreshCurrent() {
   } else if (t === 2 && appState.analyzeView === 'details' && appState.repoDetails) {
     const [o, n] = appState.repoDetails.full_name.split('/');
     analyze.loadRepoDetails(o, n);
+  } else if (t === 3) {
+    actions.loadActionsRepos();
   } else if (t === 4) {
     inbox.loadNotifications();
-  } else if (t === 5) {
-    actions.loadActionsRepos();
   }
 }
 
@@ -149,7 +151,10 @@ function quit() {
 // Main entry — process.stdin pipes every keystroke through here.
 // ──────────────────────────────────────────────────────────────────
 export function handleKey(key) {
-  // 0. Mouse events (SGR or legacy X10 format).
+  // 0. Ctrl+C always quits, no matter what overlay is open.
+  if (key === '\x03') { quit(); return; }
+
+  // 0a. Mouse events (SGR or legacy X10 format).
   const mouseEvent = parseMouseEvent(key);
   if (mouseEvent) {
     handleMouseEvent(mouseEvent);
@@ -234,12 +239,15 @@ export function handleKey(key) {
       if (i === 4 && appState.notifications.length === 0 && appState.token) {
         inbox.loadNotifications();
       }
-      if (i === 5 && appState.actionsRepos.length === 0 && appState.token) {
+      if (i === 3 && appState.actionsRepos.length === 0 && appState.token) {
         actions.loadActionsRepos();
+      }
+      if (i === 1 && appState.repos.length === 0 && appState.token) {
+        repos.loadUserData();
       }
       return;
     }
-    case 'q': case '\x03': quit(); return;
+    case 'q': quit(); return;
     case '\t':
       if (tabState.current === 0) {
         if (appState.dashboardCardsFocus) {
@@ -441,9 +449,9 @@ function handleEnter() {
   }
   if (t === 1) repos.enter();
   else if (t === 2) analyze.enter();
-  else if (t === 3) settings.enter();
+  else if (t === 3) actions.enter();
   else if (t === 4) inbox.enter();
-  else if (t === 5) actions.enter();
+  else if (t === 5) settings.enter();
 }
 function handleUp() {
   const t = tabState.current;
@@ -451,9 +459,9 @@ function handleUp() {
   if (t === 0) { dashboard.trendingUp(); return; }
   if (t === 1) repos.up(screen);
   else if (t === 2) analyze.up(screen);
-  else if (t === 3) settings.up();
+  else if (t === 3) actions.up();
   else if (t === 4) inbox.up();
-  else if (t === 5) actions.up();
+  else if (t === 5) settings.up();
 }
 function handleDown() {
   const t = tabState.current;
@@ -461,9 +469,9 @@ function handleDown() {
   if (t === 0) { dashboard.trendingDown(); return; }
   if (t === 1) repos.down(screen);
   else if (t === 2) analyze.down(screen);
-  else if (t === 3) settings.down();
+  else if (t === 3) actions.down();
   else if (t === 4) inbox.down(screen);
-  else if (t === 5) actions.down();
+  else if (t === 5) settings.down();
 }
 function handleBack() {
   const t = tabState.current;
@@ -472,13 +480,13 @@ function handleBack() {
   if (t === 1) {
     if (appState.reposView === 'starred') { repos.toggleReposView(); return; }
   }
+  if (t === 3) { actions.goBack(); return; }
   if (t === 4) {
     if (appState.showDetail) {
       import('./tabs/detail.mjs').then(m => m.closeDetail()).catch(() => {});
       return;
     }
   }
-  if (t === 5) { actions.goBack(); return; }
   setTab(0);
 }
 

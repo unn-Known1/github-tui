@@ -100,6 +100,7 @@ export const appState = {
   selectedAsset: 0,
   repoIssues: [],
   repoPullRequests: [],
+  issueStateFilter: 'open', // 'open' | 'closed' | 'all' — used by Issues/PRs panes
   repoTraffic: null,
   repoTrafficClones: null,
   repoTrafficPopularPaths: [],
@@ -126,6 +127,7 @@ export const appState = {
   trendingPage: 1,
   trendingHasMore: true,
   trendingSelected: 0,
+  trendingScroll: 0,
   dashboardFilter: '',
   starred: [],
   starredPage: 1,
@@ -233,9 +235,6 @@ export const appState = {
   // Section header positions (populated by collapsibleHeader during render, consumed by mouse).
   _sectionHeaders: {},  // { 'dashboard:profile': { x: 2, y: 7 }, ... }
 
-  // ── Mouse cursor position (0-based screen coords) ──
-  _mouseSx: -1,
-  _mouseSy: -1,
 };
 
 // ────────────────────────────────────────────────────────────────────────────

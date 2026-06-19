@@ -20,7 +20,8 @@ import { color } from '../theme.mjs';
 import { emptyState, loadingIndicator, scrollIndicators } from '../render.mjs';
 import { loadForks, loadMoreForks, renderForks, toggleForkSort } from './forks.mjs';
 import * as files from './files.mjs';
-import { openDetail } from './detail.mjs';
+import { openDetail as _openDetail } from './detail.mjs';
+export { _openDetail as openDetail };
 import { addSavedSearch } from '../store.mjs';
 import { downloadToFile } from '../github.mjs';
 import { safeCwdJoin } from '../utils.mjs';
@@ -183,6 +184,33 @@ export async function loadMoreSearchResults() {
   if (!isStale(gen)) render();
 }
 
+export function cycleIssueStateFilter() {
+  if (appState.analyzeView !== 'details') return;
+  if (appState.detailsPane !== 'issues' && appState.detailsPane !== 'prs') return;
+  const cycle = { 'open': 'closed', 'closed': 'all', 'all': 'open' };
+  appState.issueStateFilter = cycle[appState.issueStateFilter] || 'open';
+  showMessage('Issues/PRs state filter: ' + appState.issueStateFilter, 'info', 1500);
+  const repo = appState.repoDetails;
+  if (!repo) return;
+  const [owner, name] = repo.full_name.split('/');
+  const gen = startAsync();
+  if (appState.detailsPane === 'issues') {
+    getRepositoryIssues(appState.token, owner, name, 1, 100, appState.issueStateFilter).then(issues => {
+      if (isStale(gen)) return;
+      appState.repoIssues = Array.isArray(issues) ? issues.filter(i => !i.pull_request) : [];
+      appState.detailsScroll = 0;
+      render();
+    }).catch(e => { if (!isStale(gen)) showMessage(e.message || 'Failed to reload issues', 'error'); });
+  } else {
+    getRepositoryPullRequests(appState.token, owner, name, 1, 100, appState.issueStateFilter).then(prs => {
+      if (isStale(gen)) return;
+      appState.repoPullRequests = Array.isArray(prs) ? prs : [];
+      appState.detailsScroll = 0;
+      render();
+    }).catch(e => { if (!isStale(gen)) showMessage(e.message || 'Failed to reload PRs', 'error'); });
+  }
+}
+
 export function pageUp() {
   if (appState.analyzeView === 'results' && appState.searchPage > 1) {
     const page = appState.searchPage - 1;
@@ -200,7 +228,7 @@ export function pageUp() {
       }
       appState.loading = false;
       render();
-    }).catch(() => { appState.loading = false; render(); });
+    }).catch(e => { if (!isStale(gen)) showMessage(e.message || 'Page up failed', 'error'); appState.loading = false; render(); });
   } else if (appState.analyzeView === 'forks') {
     loadMoreForks();
   }
@@ -225,7 +253,7 @@ export function pageDown() {
       }
       appState.loading = false;
       render();
-    }).catch(() => { appState.loading = false; render(); });
+    }).catch(e => { if (!isStale(gen)) showMessage(e.message || 'Page down failed', 'error'); appState.loading = false; render(); });
   } else if (appState.analyzeView === 'forks') {
     loadMoreForks();
   }
@@ -252,12 +280,13 @@ export async function loadRepoDetails(owner, name) {
     render();
 
     const safe = (p) => p.catch(() => null);
+    const issueState = appState.issueStateFilter;
     const [langs, contribs, releases, issues, prs] = await Promise.all([
       safe(getRepositoryLanguages(appState.token, owner, name)),
       safe(getRepositoryContributors(appState.token, owner, name, 1, 10)),
       safe(getRepositoryReleases(appState.token, owner, name, 1, 5)),
-      safe(getRepositoryIssues(appState.token, owner, name, 1, 10)),
-      safe(getRepositoryPullRequests(appState.token, owner, name, 1, 10)),
+      safe(getRepositoryIssues(appState.token, owner, name, 1, 100, issueState)),
+      safe(getRepositoryPullRequests(appState.token, owner, name, 1, 100, issueState)),
     ]);
     if (isStale(gen)) return;
     appState.repoLanguages = langs || null;
@@ -903,11 +932,17 @@ function renderCodeResults(screen, listY, h, W, maxVisible) {
   }
 }
 
+function filterLabel(state) {
+  return state === 'all' ? 'ALL' : state === 'closed' ? 'CLOSED' : 'OPEN';
+}
+
 function renderIssuesPane(screen, y, maxH) {
+  const state = appState.issueStateFilter;
   renderIssuePRList(screen, y, maxH, {
-    title: 'OPEN ISSUES',
+    title: filterLabel(state) + ' ISSUES',
     items: appState.repoIssues,
-    emptyMsg: '(no open issues)',
+    hint: '[s] ' + filterLabel(state),
+    emptyMsg: state === 'all' ? '(no issues)' : '(no ' + filterLabel(state).toLowerCase() + ' issues)',
     numColor: { fg: 'yellow' },
     getCols: (W) => ({
       numW: 7, titleCol: 12,
@@ -924,10 +959,12 @@ function renderIssuesPane(screen, y, maxH) {
 }
 
 function renderPRsPane(screen, y, maxH) {
+  const state = appState.issueStateFilter;
   renderIssuePRList(screen, y, maxH, {
-    title: 'OPEN PULL REQUESTS',
+    title: filterLabel(state) + ' PULL REQUESTS',
     items: appState.repoPullRequests,
-    emptyMsg: '(no open PRs)',
+    hint: '[s] ' + filterLabel(state),
+    emptyMsg: state === 'all' ? '(no PRs)' : '(no ' + filterLabel(state).toLowerCase() + ' PRs)',
     numColor: { fg: 'cyan' },
     getCols: (W) => ({
       numW: 7, titleCol: 12,
@@ -946,7 +983,7 @@ function renderPRsPane(screen, y, maxH) {
 function renderIssuePRList(screen, y, maxH, opts) {
   const W = screen.width;
   const items = opts.items;
-  sectionHeader(screen, 2, y, opts.title + ' (' + items.length + ')');
+  sectionHeader(screen, 2, y, opts.title + ' (' + items.length + ')', opts.hint);
   if (items.length === 0) { screen.writeStr(2, y + 2, opts.emptyMsg, { dim: true }); return; }
   const start = appState.detailsScroll;
   const rows = Math.max(1, maxH - 3);
@@ -1213,6 +1250,7 @@ export const keys = {
   's': () => {
     if (appState.analyzeView === 'forks') toggleForkSort('stars');
     else if (isFilesPane()) files.keys.s();
+    else cycleIssueStateFilter();
   },
   'S': () => {
     if (appState.analyzeView === 'details') {

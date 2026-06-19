@@ -74,17 +74,17 @@ export function buildBreadcrumb() {
         segments.push('Forks');
       }
       break;
-    case 3: segments.push('Settings'); break;
-    case 4:
-      segments.push('Inbox');
-      if (appState.inboxFilter !== 'all') segments.push(appState.inboxFilter);
-      break;
-    case 5:
+    case 3:
       segments.push('Actions');
       if (appState.actionsView === 'runs' && appState.actionsRepos[appState.actionsRepoSelected]) {
         segments.push(appState.actionsRepos[appState.actionsRepoSelected].full_name);
       }
       break;
+    case 4:
+      segments.push('Inbox');
+      if (appState.inboxFilter !== 'all') segments.push(appState.inboxFilter);
+      break;
+    case 5: segments.push('Settings'); break;
   }
   return segments;
 }

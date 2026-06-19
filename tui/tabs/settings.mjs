@@ -151,6 +151,7 @@ export function renderSettings(screen, y, h) {
     row++;
     screen.writeStr(2, row, 'Available:', { dim: true });
     let cx = 14;
+    const themeChips = [];
     const accentColors = {
       default: 'cyan', highContrast: 'white', dracula: 'magenta',
       solarized: 'blue', nord: 'cyan', monokai: 'green', gruvbox: 'yellow', light: 'blue',
@@ -165,9 +166,11 @@ export function renderSettings(screen, y, h) {
       if (cx + label.length + 4 < leftMaxW - 2) {
         screen.writeStr(cx, row, '█', { fg: accent });
         screen.writeStr(cx + 2, row, label, style);
+        themeChips.push({ theme: t, x1: cx, x2: cx + 2 + label.length, y: row });
         cx += label.length + 4;
       }
     }
+    appState._themeChips = themeChips;
   }
   row += 2;
 

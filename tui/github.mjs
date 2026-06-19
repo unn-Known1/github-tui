@@ -204,12 +204,12 @@ export const getRepositoryForks = (token, owner, repo, page, perPage) =>
     '&per_page=' + (perPage||30) + '&sort=stargazers', { token });
 export const getCompare = (token, owner, repo, base, head) =>
   request('/repos/' + owner + '/' + repo + '/compare/' + base + '...' + head, { token });
-export const getRepositoryIssues = (token, owner, repo, page, perPage) =>
+export const getRepositoryIssues = (token, owner, repo, page, perPage, state = 'open') =>
   request('/repos/' + owner + '/' + repo + '/issues?page=' + (page||1) +
-    '&per_page=' + (perPage||100), { token });
-export const getRepositoryPullRequests = (token, owner, repo, page, perPage) =>
+    '&per_page=' + (perPage||100) + '&state=' + state, { token });
+export const getRepositoryPullRequests = (token, owner, repo, page, perPage, state = 'open') =>
   request('/repos/' + owner + '/' + repo + '/pulls?page=' + (page||1) +
-    '&per_page=' + (perPage||100), { token });
+    '&per_page=' + (perPage||100) + '&state=' + state, { token });
 export const getRepositoryContributors = (token, owner, repo, page, perPage) =>
   request('/repos/' + owner + '/' + repo + '/contributors?page=' + (page||1) +
     '&per_page=' + (perPage||100), { token });

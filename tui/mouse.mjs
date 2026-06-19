@@ -2,17 +2,16 @@
 
 import { appState, tabState, setTab, render, TABS, toggleCollapse, showMessage } from './state.mjs';
 import { getScreen, HEADER_HEIGHT } from './render.mjs';
+import { setTheme } from './theme.mjs';
 
 export function enableMouse() {
   process.stdout.write('\x1b[?1000h');
   process.stdout.write('\x1b[?1002h');
-  process.stdout.write('\x1b[?1003h');
   process.stdout.write('\x1b[?1006h');
 }
 
 export function disableMouse() {
   process.stdout.write('\x1b[?1006l');
-  process.stdout.write('\x1b[?1003l');
   process.stdout.write('\x1b[?1002l');
   process.stdout.write('\x1b[?1000l');
 }
@@ -53,13 +52,6 @@ export function handleMouseEvent(event) {
 
   const { button, col, row, pressed } = event;
 
-  // Motion (button 32–63) — just store cursor position; no re-render.
-  if (button >= 32 && button < 64) {
-    appState._mouseSx = col - 1;
-    appState._mouseSy = row - 1;
-    return;
-  }
-
   // Scroll wheel.
   if (button === 64) { scrollUp(); return; }
   if (button === 65) { scrollDown(); return; }
@@ -78,6 +70,25 @@ export function handleMouseEvent(event) {
 function handleClick(col, row) {
   const sx = col - 1;
   const sy = row - 1;
+
+  // Detail popup is open — close it if the click is outside the popup box.
+  if (appState.showDetail) {
+    const screen = getScreen();
+    if (screen) {
+      const W = screen.width;
+      const H = screen.height;
+      const boxW = Math.min(100, W - 4);
+      const boxH = H - 4;
+      const bx = Math.floor((W - boxW) / 2);
+      const by = 2;
+      const inside = sx >= bx && sx < bx + boxW && sy >= by && sy < by + boxH;
+      if (!inside) {
+        import('./tabs/detail.mjs').then(m => m.closeDetail()).catch(() => {});
+        return;
+      }
+    }
+    // Click inside the popup — let it fall through to content-area handling.
+  }
 
   // Tab bar at screen row HEADER_HEIGHT (4).
   if (sy === HEADER_HEIGHT) {
@@ -154,8 +165,9 @@ function handleDblClick(sx, sy) {
     const th = appState._sectionHeaders['dashboard:trending'];
     if (th && th.y > 0 && sy > th.y) {
       const listIdx = sy - th.y - 1;
-      if (listIdx >= 0 && listIdx < appState.trending.length) {
-        const r = appState.trending[listIdx];
+      const absIdx = listIdx + appState.trendingScroll;
+      if (absIdx >= 0 && absIdx < appState.trending.length) {
+        const r = appState.trending[absIdx];
         if (r && r.full_name) {
           const [owner, name] = r.full_name.split('/');
           setTab(2);
@@ -204,7 +216,10 @@ const PANES = [
 function handlePaneTabClick(sx) {
   let px = 2;
   for (const p of PANES) {
-    const text = '[' + p.key + '] ' + p.label;
+    let label = p.label;
+    if (p.id === 'issues') label = 'Issues (' + appState.repoIssues.length + ')';
+    else if (p.id === 'prs') label = 'PRs (' + appState.repoPullRequests.length + ')';
+    const text = '[' + p.key + '] ' + label;
     const pW = text.length + 2;
     if (sx >= px && sx < px + pW) {
       appState.detailsPane = p.id;
@@ -233,7 +248,7 @@ function loadPane(paneId) {
 
 function handleCollapsibleClick(sx, sy) {
   const t = tabState.current;
-  const prefix = ['dashboard', 'repos', 'analyze', 'settings', 'inbox'][t] || '';
+  const prefix = ['dashboard', 'repos', 'analyze', 'actions', 'inbox', 'settings'][t] || '';
   const headers = appState._sectionHeaders;
   if (!headers) return false;
   for (const section of Object.keys(headers)) {
@@ -258,6 +273,7 @@ function handleContentClick(sx, sy) {
     case 2: dispatchAnalyzeClick(sy); break;
     case 3: render(); break;
     case 4: dispatchInboxClick(sy); break;
+    case 5: dispatchSettingsClick(sx, sy); break;
     default: render();
   }
 }
@@ -298,8 +314,9 @@ function dispatchDashboardClick(sx, sy) {
     const th = appState._sectionHeaders['dashboard:trending'];
     if (th && th.y > 0 && sy > th.y) {
       const listIdx = sy - th.y - 1;  // items start after header
-      if (listIdx >= 0 && listIdx < appState.trending.length) {
-        appState.trendingSelected = listIdx;
+      const absIdx = listIdx + appState.trendingScroll;
+      if (absIdx >= 0 && absIdx < appState.trending.length) {
+        appState.trendingSelected = absIdx;
         render();
         return;
       }
@@ -339,8 +356,11 @@ function dispatchReposClick(sx, sy) {
     const list = appState.reposView === 'starred' ? appState.starred : appState.repos;
     const scroll = appState.reposView === 'starred' ? appState.starredScroll : appState.repoScroll;
 
-    // Content area starts at CONTENT_Y (HEADER_HEIGHT + 2).  Skip title rows.
-    const itemIdx = sy - (HEADER_HEIGHT + 4) + scroll;
+    // Approximate row mapping: for own view, data starts at HEADER_HEIGHT+8
+    // (contentY+title+hline+chips+header+hline); for starred at HEADER_HEIGHT+5.
+    // NOTE: does not account for PINNED section headers or comfortable 2-row items.
+    const rowOff = appState.reposView === 'starred' ? (HEADER_HEIGHT + 5) : (HEADER_HEIGHT + 8);
+    const itemIdx = sy - rowOff + scroll;
     if (itemIdx >= 0 && itemIdx < list.length) {
       if (appState.reposView === 'starred') {
         appState.starredScroll = Math.max(0, itemIdx - 5);
@@ -357,17 +377,40 @@ function dispatchReposClick(sx, sy) {
 // ── Analyze tab ───────────────────────────────────────────────
 
 function dispatchAnalyzeClick(sy) {
-  import('./tabs/analyze.mjs').then(() => {
-    const contentStartY = HEADER_HEIGHT + 7;
+  import('./tabs/analyze.mjs').then(mod => {
     const scroll = appState.detailsScroll;
+
+    // First data row for issues/PRs/packages starts at HEADER_HEIGHT + 9.
+    const contentStartY = HEADER_HEIGHT + 9;
     const itemIdx = sy - contentStartY + scroll;
     let listLen = 0;
     if (appState.detailsPane === 'issues')   listLen = appState.repoIssues.length;
     else if (appState.detailsPane === 'prs') listLen = appState.repoPullRequests.length;
     else if (appState.detailsPane === 'packages') listLen = appState.repoReleaseAssets.length;
+
+    // Click on filter indicator row → cycle filter state.
+    if ((appState.detailsPane === 'issues' || appState.detailsPane === 'prs') &&
+        (sy === HEADER_HEIGHT + 7 || sy === HEADER_HEIGHT + 8)) {
+      if (mod && mod.cycleIssueStateFilter) mod.cycleIssueStateFilter();
+      return;
+    }
+
     if (itemIdx >= 0 && itemIdx < listLen) {
       appState.detailsScroll = itemIdx;
-      if (appState.detailsPane === 'packages') appState.selectedAsset = itemIdx;
+      if (appState.detailsPane === 'packages') {
+        appState.selectedAsset = itemIdx;
+      } else if ((appState.detailsPane === 'issues' || appState.detailsPane === 'prs') && appState.repoDetails) {
+        // Open detail popup on click.
+        const [owner, name] = appState.repoDetails.full_name.split('/');
+        if (appState.detailsPane === 'issues') {
+          const issue = appState.repoIssues[itemIdx];
+          if (issue && mod && mod.openDetail) mod.openDetail('issue', owner, name, issue.number);
+        } else {
+          const pr = appState.repoPullRequests[itemIdx];
+          if (pr && mod && mod.openDetail) mod.openDetail('pull_request', owner, name, pr.number);
+        }
+        return;
+      }
       render();
     }
   }).catch(() => {});
@@ -389,7 +432,9 @@ function dispatchInboxClick(sy) {
 
 function scrollUp() {
   const t = tabState.current;
-  if (t === 1) {
+  if (t === 0) {
+    import('./tabs/dashboard.mjs').then(m => m.trendingUp()).catch(() => {});
+  } else if (t === 1) {
     if (appState.reposView === 'starred') {
       if (appState.starredScroll > 0) { appState.starredScroll--; render(); }
     } else {
@@ -397,14 +442,14 @@ function scrollUp() {
     }
   } else if (t === 2) {
     if (appState.detailsScroll > 0) { appState.detailsScroll--; render(); }
-  } else if (t === 4) {
-    if (appState.inboxScroll > 0) { appState.inboxScroll--; render(); }
-  } else if (t === 5) {
+  } else if (t === 3) {
     if (appState.actionsView === 'repos') {
       if (appState.actionsRepoScroll > 0) { appState.actionsRepoScroll--; render(); }
     } else {
       if (appState.actionsScroll > 0) { appState.actionsScroll--; render(); }
     }
+  } else if (t === 4) {
+    if (appState.inboxScroll > 0) { appState.inboxScroll--; render(); }
   }
 }
 
@@ -413,7 +458,9 @@ function scrollDown() {
   const screen = getScreen();
   if (!screen) return;
 
-  if (t === 1) {
+  if (t === 0) {
+    import('./tabs/dashboard.mjs').then(m => m.trendingDown()).catch(() => {});
+  } else if (t === 1) {
     const maxV = Math.max(1, Math.min(15, screen.height - 12));
     if (appState.reposView === 'starred') {
       if (appState.starredScroll + maxV < appState.starred.length) { appState.starredScroll++; render(); }
@@ -423,10 +470,7 @@ function scrollDown() {
   } else if (t === 2) {
     appState.detailsScroll++;
     render();
-  } else if (t === 4) {
-    const maxV = Math.max(1, screen.height - 12);
-    if (appState.inboxScroll + maxV < appState.notifications.length) { appState.inboxScroll++; render(); }
-  } else if (t === 5) {
+  } else if (t === 3) {
     if (appState.actionsView === 'repos') {
       const maxV = Math.max(1, screen.height - 12);
       if (appState.actionsRepoScroll + maxV < appState.actionsRepos.length) { appState.actionsRepoScroll++; render(); }
@@ -434,5 +478,24 @@ function scrollDown() {
       appState.actionsScroll++;
       render();
     }
+  } else if (t === 4) {
+    const maxV = Math.max(1, screen.height - 12);
+    if (appState.inboxScroll + maxV < appState.notifications.length) { appState.inboxScroll++; render(); }
   }
+}
+
+// ── Settings tab ─────────────────────────────────────────────
+function dispatchSettingsClick(sx, sy) {
+  const chips = appState._themeChips;
+  if (!chips) { render(); return; }
+  for (const chip of chips) {
+    if (sx >= chip.x1 && sx < chip.x2 && sy === chip.y) {
+      if (setTheme(chip.theme)) {
+        showMessage('Theme: ' + chip.theme, 'success');
+      }
+      render();
+      return;
+    }
+  }
+  render();
 }

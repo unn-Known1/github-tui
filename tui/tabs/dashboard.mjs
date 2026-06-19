@@ -10,7 +10,7 @@ import {
 } from '../github.mjs';
 import { relTime, eventGlyph, greeting, shortNum, truncate, openUrl } from '../utils.mjs';
 import { color } from '../theme.mjs';
-import { emptyState, collapsibleHeader, loadingIndicator } from '../render.mjs';
+import { emptyState, collapsibleHeader, loadingIndicator, getScreen } from '../render.mjs';
 import { loadRepoDetails } from './analyze.mjs';
 
 export async function loadDashboardWidgets(force = false) {
@@ -31,6 +31,9 @@ export async function loadDashboardWidgets(force = false) {
     if (isStale(gen)) return;
     appState.events = Array.isArray(events) ? events : [];
     appState.trending = Array.isArray(trending) ? trending : [];
+    appState.trendingPage = 1;
+    appState.trendingScroll = 0;
+    appState.trendingSelected = 0;
     appState.trendingHasMore = appState.trending.length >= 100;
     appState.starred = Array.isArray(starred) ? starred : [];
     appState.dashboardRecentIssues = Array.isArray(issues) ? issues : [];
@@ -478,8 +481,10 @@ export function renderDashboard(screen, y, h) {
         screen.writeStr(rightX, ry++, '(none)', { dim: true });
       }
     } else {
-      const maxTrending = Math.min(trendingList.length, Math.max(3, Math.floor((y + h - bodyY) * 0.30)));
-      for (let i = 0; i < maxTrending && i < trendingList.length; i++) {
+      const maxTrending = Math.max(3, Math.floor((y + h - bodyY) * 0.30));
+      const scroll = appState.trendingScroll;
+      const end = Math.min(scroll + maxTrending, trendingList.length);
+      for (let i = scroll; i < end; i++) {
         if (ry >= y + h - 1) break;
         const r = trendingList[i];
         const sel = i === appState.trendingSelected;
@@ -510,14 +515,16 @@ export function renderDashboard(screen, y, h) {
 }
 
 export async function loadMoreTrending() {
-  if (!appState.trendingHasMore || !appState.token) return;
+  if (!appState.trendingHasMore || !appState.token || appState.loading) return;
   const gen = startAsync();
+  appState.loading = true;
+  render();
   try {
     const since = new Date(Date.now() - 7 * 86400000).toISOString().split('T')[0];
     const q = 'created:>' + since;
     const page = appState.trendingPage + 1;
     const more = await searchRepositories(appState.token, q, page, 10);
-    if (isStale(gen)) return;
+    if (isStale(gen)) { appState.loading = false; render(); return; }
     if (Array.isArray(more) && more.length > 0) {
       appState.trending = [...appState.trending, ...more];
       appState.trendingPage = page;
@@ -525,8 +532,10 @@ export async function loadMoreTrending() {
     } else {
       appState.trendingHasMore = false;
     }
+    appState.loading = false;
     render();
   } catch (e) {
+    appState.loading = false;
     if (!isStale(gen)) showMessage('Failed to load more trending', 'error');
   }
 }
@@ -534,24 +543,38 @@ export async function loadMoreTrending() {
 export function openTrendingRepo() {
   const trendingList = getFilteredTrending();
   if (trendingList.length === 0) return;
-  const r = trendingList[appState.trendingSelected] || trendingList[0];
+  const idx = Math.min(appState.trendingSelected, trendingList.length - 1);
+  const r = trendingList[idx] || trendingList[0];
   const [owner, name] = r.full_name.split('/');
   setTab(2);
   loadRepoDetails(owner, name);
 }
 
 export function trendingUp() {
+  const trendingList = getFilteredTrending();
+  if (trendingList.length === 0) return;
   appState.trendingSelected = Math.max(0, appState.trendingSelected - 1);
+  if (appState.trendingSelected < appState.trendingScroll) {
+    appState.trendingScroll = appState.trendingSelected;
+  }
   render();
 }
 
 export function trendingDown() {
   const trendingList = getFilteredTrending();
-  appState.trendingSelected = Math.min(
-    trendingList.length - 1,
-    appState.trendingSelected + 1
-  );
-  render();
+  if (trendingList.length === 0) return;
+  if (appState.trendingSelected < trendingList.length - 1) {
+    appState.trendingSelected++;
+    const screen = getScreen();
+    const H = screen ? screen.height : 24;
+    const maxTrending = Math.max(3, Math.floor((H - 17) * 0.30));
+    if (appState.trendingSelected >= appState.trendingScroll + maxTrending) {
+      appState.trendingScroll++;
+    }
+    render();
+  } else if (appState.trendingHasMore) {
+    loadMoreTrending();
+  }
 }
 
 export function pageUp() {
@@ -569,6 +592,7 @@ export function pageUp() {
         appState.trendingPage = page;
         appState.trendingHasMore = true;
         appState.trendingSelected = 0;
+        appState.trendingScroll = 0;
       }
       appState.loading = false;
       render();
@@ -591,6 +615,7 @@ export function pageDown() {
         appState.trendingPage = page;
         appState.trendingHasMore = more.length >= 10;
         appState.trendingSelected = 0;
+        appState.trendingScroll = 0;
       } else {
         appState.trendingHasMore = false;
       }
