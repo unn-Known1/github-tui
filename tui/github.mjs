@@ -252,7 +252,10 @@ export const getTrendingRepos = async (token, days, perPage) => {
   return r.items || [];
 };
 export const getStarredRepos = (token, page, perPage) =>
-  request('/user/starred?page=' + (page||1) + '&per_page=' + (perPage||30), { token });
+  request('/user/starred?page=' + (page||1) + '&per_page=' + (perPage||30), {
+    token,
+    accept: 'application/vnd.github.v3.star+json',
+  });
 export const isStarred = async (token, owner, repo) => {
   try { await request('/user/starred/' + owner + '/' + repo, { token }); return true; }
   catch (e) { return false; }

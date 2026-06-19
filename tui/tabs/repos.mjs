@@ -542,7 +542,10 @@ async function loadStarredRepos() {
   try {
     const starred = await getStarredRepos(appState.token, 1, 100);
     if (isStale(gen)) { appState.loading = false; return; }
-    appState.starred = Array.isArray(starred) ? starred : [];
+    appState.starred = Array.isArray(starred) ? starred.map(s => ({
+      ...s.repo,
+      starred_at: s.created_at,
+    })) : [];
     appState.starredPage = 1;
     appState.starredHasMore = appState.starred.length >= 100;
     showMessage('Loaded ' + appState.starred.length + ' starred repos', 'success');
