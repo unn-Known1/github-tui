@@ -722,7 +722,7 @@ export function rightCard() {
 }
 
 // ── Collapsible sections ──
-const DASHBOARD_SECTIONS = ['profile', 'stars', 'topRepos', 'activity', 'languages', 'issues', 'prs', 'stale', 'trending'];
+const DASHBOARD_SECTIONS = ['profile', 'stars', 'topRepos', 'contributions', 'languages', 'recentActivity', 'issues', 'prs', 'stale', 'trending'];
 
 export function getSections() {
   return DASHBOARD_SECTIONS.map(s => 'dashboard:' + s);

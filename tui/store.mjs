@@ -5,16 +5,23 @@ import { BOOKMARKS_FILE, SAVED_SEARCHES_FILE, CONFIG_DIR, readJson, writeJson } 
 import { join } from 'path';
 const PINS_FILE = join(CONFIG_DIR, 'pins.json');
 
+// ── In-memory caches (loaded once, written through) ──
+let _bookmarks = null;
+let _savedSearches = null;
+let _pins = null;
+
 // ────────────────────────────────────────────────────────────────────────────
 // Bookmarks — "read later" / private starring distinct from GitHub stars.
 // Shape: [{ id, full_name, url, description, language, stars, tags:[], addedAt }]
 // ────────────────────────────────────────────────────────────────────────────
 
 export function loadBookmarks() {
-  return readJson(BOOKMARKS_FILE, []);
+  if (_bookmarks === null) _bookmarks = readJson(BOOKMARKS_FILE, []);
+  return _bookmarks;
 }
 
 export function saveBookmarks(list) {
+  _bookmarks = list;
   writeJson(BOOKMARKS_FILE, list);
 }
 
@@ -54,10 +61,12 @@ export function isBookmarked(fullName) {
 // ────────────────────────────────────────────────────────────────────────────
 
 export function loadSavedSearches() {
-  return readJson(SAVED_SEARCHES_FILE, []);
+  if (_savedSearches === null) _savedSearches = readJson(SAVED_SEARCHES_FILE, []);
+  return _savedSearches;
 }
 
 export function saveSavedSearches(list) {
+  _savedSearches = list;
   writeJson(SAVED_SEARCHES_FILE, list);
 }
 
@@ -98,8 +107,14 @@ export function saveRepoPrefs(prefs) {
 // Shape: array of full_name strings.
 // ────────────────────────────────────────────────────────────────────────────
 
-export function loadPins() { return readJson(PINS_FILE, []); }
-export function savePins(list) { writeJson(PINS_FILE, list); }
+export function loadPins() {
+  if (_pins === null) _pins = readJson(PINS_FILE, []);
+  return _pins;
+}
+export function savePins(list) {
+  _pins = list;
+  writeJson(PINS_FILE, list);
+}
 export function isPinned(fullName) { return loadPins().includes(fullName); }
 export function togglePin(fullName) {
   const list = loadPins();

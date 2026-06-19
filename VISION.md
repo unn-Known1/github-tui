@@ -2,7 +2,7 @@
 
 > *The fastest way to live in GitHub without a browser tab — discovery, triage, review, and CI in one terminal.*
 
-**Current version:** v0.5.6
+**Current version:** v0.5.7
 
 ---
 
@@ -20,7 +20,7 @@
 
 ---
 
-## 📊 What's Built (v0.1 → v0.5.6)
+## 📊 What's Built (v0.1 → v0.5.7)
 
 | Feature | Status |
 |---|---|

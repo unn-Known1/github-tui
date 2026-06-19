@@ -90,6 +90,10 @@ export const appState = {
   codeSearchHasMore: true,
   userSearchPage: 1,
   userSearchHasMore: true,
+  userSelectedRepo: 0,
+  userSearchScroll: 0,
+  codeSelectedRepo: 0,
+  codeSearchScroll: 0,
   detailsPane: 'overview', // 'overview' | 'issues' | 'prs' | 'readme' | 'files'
   detailsScroll: 0,
   repoDetails: null,

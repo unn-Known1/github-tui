@@ -37,6 +37,7 @@ export async function submitSearch(value) {
   const gen = startAsync();
   appState.loading = true;
   appState.searchQuery = query;
+  appState.searchType = 'repos';
   appState.repoDetails = null;
   appState.forks = [];
   appState.selectedRepo = 0;
@@ -68,8 +69,8 @@ export async function submitUserSearch(value) {
   appState.loading = true;
   appState.searchQuery = query;
   appState.searchType = 'users';
-  appState.selectedRepo = 0;
-  appState.searchScroll = 0;
+  appState.userSelectedRepo = 0;
+  appState.userSearchScroll = 0;
   appState.userSearchPage = 1;
   appState.analyzeView = 'results';
   render();
@@ -93,8 +94,8 @@ export async function submitCodeSearch(value) {
   appState.loading = true;
   appState.searchQuery = query;
   appState.searchType = 'code';
-  appState.selectedRepo = 0;
-  appState.searchScroll = 0;
+  appState.codeSelectedRepo = 0;
+  appState.codeSearchScroll = 0;
   appState.codeSearchPage = 1;
   appState.analyzeView = 'results';
   render();
@@ -214,48 +215,126 @@ export function cycleIssueStateFilter() {
 }
 
 export function pageUp() {
-  if (appState.analyzeView === 'results' && appState.searchPage > 1) {
-    const page = appState.searchPage - 1;
-    const gen = startAsync();
-    appState.loading = true;
-    render();
-    searchRepositories(appState.token, appState.searchQuery, page, SEARCH_PER_PAGE).then(more => {
-      if (isStale(gen)) { appState.loading = false; return; }
-      if (Array.isArray(more)) {
-        appState.searchResults = more;
-        appState.searchPage = page;
-        appState.searchHasMore = more.length >= SEARCH_PER_PAGE;
-        appState.selectedRepo = 0;
-        appState.searchScroll = 0;
-      }
-      appState.loading = false;
+  if (appState.analyzeView === 'results') {
+    const type = appState.searchType || 'repos';
+    if (type === 'users' && appState.userSearchPage > 1) {
+      const page = appState.userSearchPage - 1;
+      const gen = startAsync();
+      appState.loading = true;
       render();
-    }).catch(e => { if (!isStale(gen)) showMessage(e.message || 'Page up failed', 'error'); appState.loading = false; render(); });
+      searchUsers(appState.token, appState.searchQuery, page, USER_SEARCH_PER_PAGE).then(more => {
+        if (isStale(gen)) { appState.loading = false; return; }
+        if (Array.isArray(more)) {
+          appState.userSearchResults = more;
+          appState.userSearchPage = page;
+          appState.userSearchHasMore = more.length >= USER_SEARCH_PER_PAGE;
+          appState.userSelectedRepo = 0;
+          appState.userSearchScroll = 0;
+        }
+        appState.loading = false;
+        render();
+      }).catch(e => { if (!isStale(gen)) showMessage(e.message || 'Page up failed', 'error'); appState.loading = false; render(); });
+    } else if (type === 'code' && appState.codeSearchPage > 1) {
+      const page = appState.codeSearchPage - 1;
+      const gen = startAsync();
+      appState.loading = true;
+      render();
+      searchCode(appState.token, appState.searchQuery, page, CODE_SEARCH_PER_PAGE).then(more => {
+        if (isStale(gen)) { appState.loading = false; return; }
+        if (Array.isArray(more)) {
+          appState.codeSearchResults = more;
+          appState.codeSearchPage = page;
+          appState.codeSearchHasMore = more.length >= CODE_SEARCH_PER_PAGE;
+          appState.codeSelectedRepo = 0;
+          appState.codeSearchScroll = 0;
+        }
+        appState.loading = false;
+        render();
+      }).catch(e => { if (!isStale(gen)) showMessage(e.message || 'Page up failed', 'error'); appState.loading = false; render(); });
+    } else if (type === 'repos' && appState.searchPage > 1) {
+      const page = appState.searchPage - 1;
+      const gen = startAsync();
+      appState.loading = true;
+      render();
+      searchRepositories(appState.token, appState.searchQuery, page, SEARCH_PER_PAGE).then(more => {
+        if (isStale(gen)) { appState.loading = false; return; }
+        if (Array.isArray(more)) {
+          appState.searchResults = more;
+          appState.searchPage = page;
+          appState.searchHasMore = more.length >= SEARCH_PER_PAGE;
+          appState.selectedRepo = 0;
+          appState.searchScroll = 0;
+        }
+        appState.loading = false;
+        render();
+      }).catch(e => { if (!isStale(gen)) showMessage(e.message || 'Page up failed', 'error'); appState.loading = false; render(); });
+    }
   } else if (appState.analyzeView === 'forks') {
     loadMoreForks();
   }
 }
 
 export function pageDown() {
-  if (appState.analyzeView === 'results' && appState.searchHasMore) {
-    const page = appState.searchPage + 1;
-    const gen = startAsync();
-    appState.loading = true;
-    render();
-    searchRepositories(appState.token, appState.searchQuery, page, SEARCH_PER_PAGE).then(more => {
-      if (isStale(gen)) { appState.loading = false; return; }
-      if (Array.isArray(more) && more.length > 0) {
-        appState.searchResults = more;
-        appState.searchPage = page;
-        appState.searchHasMore = more.length >= SEARCH_PER_PAGE;
-        appState.selectedRepo = 0;
-        appState.searchScroll = 0;
-      } else {
-        appState.searchHasMore = false;
-      }
-      appState.loading = false;
+  if (appState.analyzeView === 'results') {
+    const type = appState.searchType || 'repos';
+    if (type === 'users' && appState.userSearchHasMore) {
+      const page = appState.userSearchPage + 1;
+      const gen = startAsync();
+      appState.loading = true;
       render();
-    }).catch(e => { if (!isStale(gen)) showMessage(e.message || 'Page down failed', 'error'); appState.loading = false; render(); });
+      searchUsers(appState.token, appState.searchQuery, page, USER_SEARCH_PER_PAGE).then(more => {
+        if (isStale(gen)) { appState.loading = false; return; }
+        if (Array.isArray(more) && more.length > 0) {
+          appState.userSearchResults = more;
+          appState.userSearchPage = page;
+          appState.userSearchHasMore = more.length >= USER_SEARCH_PER_PAGE;
+          appState.userSelectedRepo = 0;
+          appState.userSearchScroll = 0;
+        } else {
+          appState.userSearchHasMore = false;
+        }
+        appState.loading = false;
+        render();
+      }).catch(e => { if (!isStale(gen)) showMessage(e.message || 'Page down failed', 'error'); appState.loading = false; render(); });
+    } else if (type === 'code' && appState.codeSearchHasMore) {
+      const page = appState.codeSearchPage + 1;
+      const gen = startAsync();
+      appState.loading = true;
+      render();
+      searchCode(appState.token, appState.searchQuery, page, CODE_SEARCH_PER_PAGE).then(more => {
+        if (isStale(gen)) { appState.loading = false; return; }
+        if (Array.isArray(more) && more.length > 0) {
+          appState.codeSearchResults = more;
+          appState.codeSearchPage = page;
+          appState.codeSearchHasMore = more.length >= CODE_SEARCH_PER_PAGE;
+          appState.codeSelectedRepo = 0;
+          appState.codeSearchScroll = 0;
+        } else {
+          appState.codeSearchHasMore = false;
+        }
+        appState.loading = false;
+        render();
+      }).catch(e => { if (!isStale(gen)) showMessage(e.message || 'Page down failed', 'error'); appState.loading = false; render(); });
+    } else if (type === 'repos' && appState.searchHasMore) {
+      const page = appState.searchPage + 1;
+      const gen = startAsync();
+      appState.loading = true;
+      render();
+      searchRepositories(appState.token, appState.searchQuery, page, SEARCH_PER_PAGE).then(more => {
+        if (isStale(gen)) { appState.loading = false; return; }
+        if (Array.isArray(more) && more.length > 0) {
+          appState.searchResults = more;
+          appState.searchPage = page;
+          appState.searchHasMore = more.length >= SEARCH_PER_PAGE;
+          appState.selectedRepo = 0;
+          appState.searchScroll = 0;
+        } else {
+          appState.searchHasMore = false;
+        }
+        appState.loading = false;
+        render();
+      }).catch(e => { if (!isStale(gen)) showMessage(e.message || 'Page down failed', 'error'); appState.loading = false; render(); });
+    }
   } else if (appState.analyzeView === 'forks') {
     loadMoreForks();
   }
@@ -656,7 +735,7 @@ function renderChecksPane(screen, y, maxH) {
   const failed = completed.filter(r => r.conclusion === 'failure');
   const pending = runs.filter(r => r.status !== 'completed');
 
-  if (y < y + maxH - 1) {
+  {
     const summary = '✅ ' + success.length + ' passed   ❌ ' + failed.length + ' failed   ⏳ ' + pending.length + ' pending';
     screen.writeStr(2, y, summary, { dim: true });
     y++;
@@ -1006,6 +1085,7 @@ function renderAdvisoriesPane(screen, y, maxH, W) {
 function renderBranchProtectionPane(screen, y, maxH, W) {
   const prot = appState.branchProtection;
   const branch = appState.repoDetails?.default_branch || 'main';
+  const startY = y;
 
   screen.writeStr(2, y, 'Branch: ' + branch, color('title'));
   y += 2;
@@ -1034,7 +1114,7 @@ function renderBranchProtectionPane(screen, y, maxH, W) {
   ];
 
   for (const [label, value, detail] of checks) {
-    if (y >= y + maxH - 1) break;
+    if (y >= startY + maxH - 1) break;
     screen.writeStr(2, y, label + ':', { dim: true });
     screen.writeStr(30, y, value);
     if (detail && 30 + value.length + 2 < W) {
@@ -1049,7 +1129,7 @@ function renderBranchProtectionPane(screen, y, maxH, W) {
     screen.writeStr(2, y, 'Required checks:', color('accent'));
     y++;
     for (const ctx of prot.required_status_checks.contexts.slice(0, 5)) {
-      if (y >= y + maxH - 1) break;
+      if (y >= startY + maxH - 1) break;
       screen.writeStr(4, y++, truncate(ctx, W - 8));
     }
   }
@@ -1060,11 +1140,11 @@ function renderBranchProtectionPane(screen, y, maxH, W) {
     screen.writeStr(2, y, 'Push restrictions:', color('accent'));
     y++;
     for (const t of (prot.restrict_pushes.teams || []).slice(0, 3)) {
-      if (y >= y + maxH - 1) break;
+      if (y >= startY + maxH - 1) break;
       screen.writeStr(4, y++, 'Team: ' + truncate(t, W - 10));
     }
     for (const a of (prot.restrict_pushes.apps || []).slice(0, 3)) {
-      if (y >= y + maxH - 1) break;
+      if (y >= startY + maxH - 1) break;
       screen.writeStr(4, y++, 'App: ' + truncate(a.slug || a.name || '?', W - 10));
     }
   }
@@ -1298,11 +1378,11 @@ function renderUserResults(screen, listY, h, W, maxVisible) {
   }
   sectionHeader(screen, 2, listY, '◫ USERS', '[' + results.length + ']');
   screen.hline(listY + 1, '─', { dim: true });
-  const start = appState.searchScroll;
+  const start = appState.userSearchScroll;
   for (let i = 0; i < maxVisible && start + i < results.length; i++) {
     const user = results[start + i];
     const row = listY + 2 + i;
-    const sel = start + i === appState.selectedRepo;
+    const sel = start + i === appState.userSelectedRepo;
     if (sel) {
       for (let x = 0; x < W; x++) screen.styleBuf[row][x] = color('selection');
     }
@@ -1311,10 +1391,10 @@ function renderUserResults(screen, listY, h, W, maxVisible) {
     const type = user.type || '';
     screen.writeStr(28, row, type, sel ? color('selection') : color('dim'));
   }
-  scrollIndicators(screen, listY + 2, listY + 1 + maxVisible, appState.searchScroll, results.length);
+  scrollIndicators(screen, listY + 2, listY + 1 + maxVisible, appState.userSearchScroll, results.length);
 
   const countY = listY + 2 + maxVisible;
-  if (countY < y + h) {
+  if (countY < listY + h) {
     const pageInfo = appState.userSearchHasMore || appState.userSearchPage > 1
       ? '   Page ' + appState.userSearchPage + '   [PgUp/PgDn]' : '';
     screen.writeStr(2, countY, results.length + ' results' + pageInfo, { dim: true });
@@ -1333,11 +1413,11 @@ function renderCodeResults(screen, listY, h, W, maxVisible) {
   }
   sectionHeader(screen, 2, listY, '◫ CODE', '[' + results.length + ']');
   screen.hline(listY + 1, '─', { dim: true });
-  const start = appState.searchScroll;
+  const start = appState.codeSearchScroll;
   for (let i = 0; i < maxVisible && start + i < results.length; i++) {
     const item = results[start + i];
     const row = listY + 2 + i;
-    const sel = start + i === appState.selectedRepo;
+    const sel = start + i === appState.codeSelectedRepo;
     if (sel) {
       for (let x = 0; x < W; x++) screen.styleBuf[row][x] = color('selection');
     }
@@ -1347,7 +1427,7 @@ function renderCodeResults(screen, listY, h, W, maxVisible) {
     screen.writeStr(5, row, path, sel ? color('selection') : { fg: 'white' });
     screen.writeStr(32, row, truncate(repo, W - 35), sel ? color('selection') : { fg: 'cyan' });
   }
-  scrollIndicators(screen, listY + 2, listY + 1 + maxVisible, appState.searchScroll, results.length);
+  scrollIndicators(screen, listY + 2, listY + 1 + maxVisible, appState.codeSearchScroll, results.length);
 
   const countY = listY + 2 + maxVisible;
   if (countY < y + h) {
@@ -1649,6 +1729,8 @@ export function handleBack() {
     render();
   } else if (v === 'results') {
     appState.searchResults = [];
+    appState.userSearchResults = [];
+    appState.codeSearchResults = [];
     appState.searchQuery = '';
     appState.analyzeView = 'search';
     render();
@@ -1659,8 +1741,17 @@ export function jumpTop() {
   if (isFilesPane()) files.jumpTop();
   else if (isSecurityPane()) { appState.securityAlertCursor = 0; appState.securityAlertScroll = 0; render(); }
   else if (appState.analyzeView === 'results') {
-    appState.selectedRepo = 0;
-    appState.searchScroll = 0;
+    const type = appState.searchType || 'repos';
+    if (type === 'users') {
+      appState.userSelectedRepo = 0;
+      appState.userSearchScroll = 0;
+    } else if (type === 'code') {
+      appState.codeSelectedRepo = 0;
+      appState.codeSearchScroll = 0;
+    } else {
+      appState.selectedRepo = 0;
+      appState.searchScroll = 0;
+    }
     render();
   } else if (appState.analyzeView === 'forks') {
     appState.selectedFork = 0;
@@ -1830,12 +1921,27 @@ export function up(screen) {
     render(); return;
   }
   if (appState.analyzeView === 'results') {
-    const list = getResultList();
-    if (list && list.length > 0) {
-      if (appState.selectedRepo > appState.searchScroll) appState.selectedRepo--;
-      else if (appState.searchScroll > 0) { appState.searchScroll--; appState.selectedRepo--; }
-      render();
+    const type = appState.searchType || 'repos';
+    if (type === 'users') {
+      const list = appState.userSearchResults;
+      if (list.length > 0) {
+        if (appState.userSelectedRepo > appState.userSearchScroll) appState.userSelectedRepo--;
+        else if (appState.userSearchScroll > 0) { appState.userSearchScroll--; appState.userSelectedRepo--; }
+      }
+    } else if (type === 'code') {
+      const list = appState.codeSearchResults;
+      if (list.length > 0) {
+        if (appState.codeSelectedRepo > appState.codeSearchScroll) appState.codeSelectedRepo--;
+        else if (appState.codeSearchScroll > 0) { appState.codeSearchScroll--; appState.codeSelectedRepo--; }
+      }
+    } else {
+      const list = appState.searchResults;
+      if (list.length > 0) {
+        if (appState.selectedRepo > appState.searchScroll) appState.selectedRepo--;
+        else if (appState.searchScroll > 0) { appState.searchScroll--; appState.selectedRepo--; }
+      }
     }
+    render();
     return;
   }
   if (appState.analyzeView === 'forks' && appState.forks.length > 0) {
@@ -1860,17 +1966,40 @@ export function down(screen) {
     render(); return;
   }
   if (appState.analyzeView === 'results') {
-    const list = getResultList();
+    const type = appState.searchType || 'repos';
     const maxVisible = Math.max(1, Math.min(8, screen.height - 16));
-    if (list && list.length > 0) {
-      if (appState.selectedRepo < appState.searchScroll + maxVisible - 1) {
-        appState.selectedRepo = Math.min(list.length - 1, appState.selectedRepo + 1);
-      } else if (appState.searchScroll + maxVisible < list.length) {
-        appState.searchScroll++;
-        appState.selectedRepo = Math.min(list.length - 1, appState.selectedRepo + 1);
+    if (type === 'users') {
+      const list = appState.userSearchResults;
+      if (list.length > 0) {
+        if (appState.userSelectedRepo < appState.userSearchScroll + maxVisible - 1) {
+          appState.userSelectedRepo = Math.min(list.length - 1, appState.userSelectedRepo + 1);
+        } else if (appState.userSearchScroll + maxVisible < list.length) {
+          appState.userSearchScroll++;
+          appState.userSelectedRepo = Math.min(list.length - 1, appState.userSelectedRepo + 1);
+        }
       }
-      render();
+    } else if (type === 'code') {
+      const list = appState.codeSearchResults;
+      if (list.length > 0) {
+        if (appState.codeSelectedRepo < appState.codeSearchScroll + maxVisible - 1) {
+          appState.codeSelectedRepo = Math.min(list.length - 1, appState.codeSelectedRepo + 1);
+        } else if (appState.codeSearchScroll + maxVisible < list.length) {
+          appState.codeSearchScroll++;
+          appState.codeSelectedRepo = Math.min(list.length - 1, appState.codeSelectedRepo + 1);
+        }
+      }
+    } else {
+      const list = appState.searchResults;
+      if (list.length > 0) {
+        if (appState.selectedRepo < appState.searchScroll + maxVisible - 1) {
+          appState.selectedRepo = Math.min(list.length - 1, appState.selectedRepo + 1);
+        } else if (appState.searchScroll + maxVisible < list.length) {
+          appState.searchScroll++;
+          appState.selectedRepo = Math.min(list.length - 1, appState.selectedRepo + 1);
+        }
+      }
     }
+    render();
   } else if (appState.analyzeView === 'forks') {
     const maxVisible = Math.max(1, Math.min(6, screen.height - 16));
     if (appState.forks.length > 0) {
@@ -1891,12 +2020,12 @@ export function enter() {
   const type = appState.searchType || 'repos';
   if (v === 'results') {
     if (type === 'users') {
-      const user = appState.userSearchResults[appState.selectedRepo];
+      const user = appState.userSearchResults[appState.userSelectedRepo];
       if (user && user.login) {
         openUserProfile(user.login);
       }
     } else if (type === 'code') {
-      const item = appState.codeSearchResults[appState.selectedRepo];
+      const item = appState.codeSearchResults[appState.codeSelectedRepo];
       if (item && item.html_url) {
         openUrl(item.html_url).then(res => {
           if (res.ok) showMessage('Opened in browser', 'success');

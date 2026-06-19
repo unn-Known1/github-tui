@@ -295,7 +295,7 @@ Every tab module exports `render(screen, y, h)`, an optional `keys` map for tab-
 - Mostly read-only client today — actions ship in waves:
   - ✅ **shipped:** star/unstar, bookmark, pin, save file, save folder, zipball, `git clone`, `gh clone`, notification mark/unsubscribe.
   - ✅ **shipped (v0.5):** commenting on issues/PRs, reactions, close/reopen, merge PRs, PR diff viewer, review comments.
-  - ✅ **shipped (v0.5.6):** rate limit indicator, traffic/milestones/labels/checks/security panes, mouse support, collapsible sections, hover effects, followers section.
+  - ✅ **shipped (v0.5.7):** rate limit indicator, traffic/milestones/labels/checks/security panes, mouse support, collapsible sections, hover effects, followers section.
 - Only the GitHub REST v3 API is used (no GraphQL yet).
 - Requires a true TTY — won't run when stdin is piped.
 - The naive file-viewer syntax coloring is style-only — no real lexer. Adequate for reading, not editing.
@@ -310,7 +310,7 @@ Every tab module exports `render(screen, y, h)`, an optional `keys` map for tab-
 
 **Shipped in v0.5:** Issue/PR detail popup with rendered body, labels, comments, and file diffs. Comment from TUI, emoji reactions, close/reopen, merge PRs with confirmation. PR diff viewer with unified diff and syntax coloring. Inbox notifications open detail popup for issues/PRs.
 
-**Shipped in v0.5.6 (this release):**
+**Shipped in v0.5.7 (this release):**
 - **Rate limit indicator** — visual `█░` bar in header + explicit `/rate_limit` endpoint
 - **Traffic pane** — views, clones, popular paths, popular referrers
 - **Milestones pane** — title, state, due date, open/closed issues

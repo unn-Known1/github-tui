@@ -38,7 +38,7 @@ const tabModules = [dashboard, repos, analyze, actions, inbox, settings];
 function currentRepoForAction() {
   if (tabState.current === 2) {
     const v = appState.analyzeView;
-    if (v === 'results' && appState.searchResults[appState.selectedRepo])
+    if (v === 'results' && appState.searchType === 'repos' && appState.searchResults[appState.selectedRepo])
       return appState.searchResults[appState.selectedRepo];
     if (v === 'details' && appState.repoDetails)
       return appState.repoDetails;
@@ -278,8 +278,11 @@ export function handleKey(key) {
   if (handleInputKey(key)) return;
 
   // 4. Tab-switch + globals.
+  // Skip number keys 1-6 when in Analyze security pane (they switch sub-panes).
+  const isSecurityPane = tabState.current === 2 && appState.analyzeView === 'details' && appState.detailsPane === 'security';
   switch (key) {
     case '1': case '2': case '3': case '4': case '5': case '6': {
+      if (isSecurityPane) break; // let per-tab handler deal with it
       const i = parseInt(key, 10) - 1;
       setTab(i);
       if (i === 4 && appState.notifications.length === 0 && appState.token) {
@@ -370,6 +373,7 @@ function handleSpace() {
   if (t === 0) dashboard.pageDown();
   else if (t === 1) repos.space();
   else if (t === 2) analyze.pageDown();
+  else if (t === 3) actions.enter();
   else if (t === 4) inbox.pageDown();
 }
 function handlePageUp() {
@@ -377,6 +381,7 @@ function handlePageUp() {
   if (t === 0) dashboard.pageUp();
   else if (t === 1) repos.pageUp();
   else if (t === 2) analyze.pageUp();
+  else if (t === 3) { /* Actions: no page-up for now */ }
   else if (t === 4) inbox.pageUp();
 }
 function handlePageDown() {
@@ -384,12 +389,23 @@ function handlePageDown() {
   if (t === 0) dashboard.pageDown();
   else if (t === 1) repos.pageDown();
   else if (t === 2) analyze.pageDown();
+  else if (t === 3) { /* Actions: no page-down for now */ }
   else if (t === 4) inbox.pageDown();
 }
 function handleTop() {
   const t = tabState.current;
   const screen = getScreen();
-  if (t === 0) return;
+  if (t === 0) {
+    if (appState.dashboardCardsFocus) {
+      appState.dashboardSelectedCard = 0;
+      render();
+    } else {
+      appState.trendingSelected = 0;
+      appState.trendingScroll = 0;
+      render();
+    }
+    return;
+  }
   if (t === 1) {
     if (appState.reposView === 'starred') {
       appState.starredSelected = 0;
@@ -417,13 +433,37 @@ function handleTop() {
 function handleBottom() {
   const t = tabState.current;
   const screen = getScreen();
-  if (t === 0) return;
+  if (t === 0) {
+    if (appState.dashboardCardsFocus) {
+      appState.dashboardSelectedCard = 4;
+      render();
+    } else {
+      const trendingList = appState.trending || [];
+      if (trendingList.length > 0) {
+        appState.trendingSelected = trendingList.length - 1;
+        const H = screen ? screen.height : 24;
+        const maxTrending = Math.max(3, Math.floor((H - 17) * 0.30));
+        appState.trendingScroll = Math.max(0, trendingList.length - maxTrending);
+      }
+      render();
+    }
+    return;
+  }
   if (t === 1) repos.bottom(screen);
   else if (t === 2) {
     if (appState.analyzeView === 'results') {
+      const type = appState.searchType || 'repos';
       const maxVisible = Math.max(1, Math.min(8, screen.height - 16));
-      appState.selectedRepo = Math.max(0, appState.searchResults.length - 1);
-      appState.searchScroll = Math.max(0, appState.searchResults.length - maxVisible);
+      if (type === 'users') {
+        appState.userSelectedRepo = Math.max(0, appState.userSearchResults.length - 1);
+        appState.userSearchScroll = Math.max(0, appState.userSearchResults.length - maxVisible);
+      } else if (type === 'code') {
+        appState.codeSelectedRepo = Math.max(0, appState.codeSearchResults.length - 1);
+        appState.codeSearchScroll = Math.max(0, appState.codeSearchResults.length - maxVisible);
+      } else {
+        appState.selectedRepo = Math.max(0, appState.searchResults.length - 1);
+        appState.searchScroll = Math.max(0, appState.searchResults.length - maxVisible);
+      }
     } else if (appState.analyzeView === 'forks') {
       const maxVisible = Math.max(1, Math.min(6, screen.height - 16));
       appState.selectedFork = Math.max(0, appState.forks.length - 1);

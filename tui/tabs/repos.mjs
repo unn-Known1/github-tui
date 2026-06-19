@@ -163,8 +163,9 @@ export async function loadUserData() {
 }
 
 async function loadAllReposBackground(gen) {
+  const MAX_PAGES = 10;
   let page = 2;
-  while (appState.reposHasMore) {
+  while (appState.reposHasMore && page <= MAX_PAGES) {
     try {
       const more = await getUserRepositories(appState.token, page, REPOS_PER_PAGE);
       if (isStale(gen)) { appState.loading = false; return; }
@@ -712,5 +713,11 @@ export function getSections() {
 }
 
 export function getCurrentSection() {
-  return 'repos:pinned';
+  if (appState.reposView === 'starred') return 'repos:repos';
+  let list = sortRepos(appState.repos, appState.repoSort);
+  list = applyAllFilters(list);
+  list = floatPinsToTop(list);
+  const repo = list[appState.repoSelected];
+  if (repo && isPinnedLocal(repo.full_name)) return 'repos:pinned';
+  return 'repos:repos';
 }

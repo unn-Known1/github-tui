@@ -185,7 +185,7 @@ function renderHeader(W) {
   // Row 0: app title + version (left)  |  user (right)
   screen.writeStr(2, 0, '◈', { fg: 'cyan' });
   screen.writeStr(4, 0, 'GitHub TUI', titleStyle);
-  const version = 'v0.5.6';
+  const version = 'v0.5.7';
   screen.writeStr(16, 0, version, subtitleStyle);
 
   // User greeting on the right of the top line.
