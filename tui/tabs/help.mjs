@@ -8,7 +8,7 @@ import { truncate } from '../utils.mjs';
 // All shortcuts organized by category for the searchable help overlay.
 const CATEGORIES = [
   { id: 'global',     name: 'GLOBAL',            shortcuts: [
-    { key: '1-5',       desc: 'Switch tabs (Dashboard/Repos/Analyze/Settings/Inbox)' },
+    { key: '1-6',       desc: 'Switch tabs (Dashboard/Repos/Analyze/Actions/Inbox/Settings)' },
     { key: 'Tab',       desc: 'Next tab (or focus stat cards on Dashboard)' },
     { key: 'Shift+Tab', desc: 'Previous tab' },
     { key: 'Ctrl-P / :', desc: 'Open command palette' },
@@ -23,6 +23,7 @@ const CATEGORIES = [
     { key: 'o',         desc: 'Open current item in browser' },
     { key: 'y',         desc: 'Copy URL to clipboard (OSC-52)' },
     { key: 'b',         desc: 'Toggle bookmark' },
+    { key: 'B',         desc: 'Browse all bookmarks' },
     { key: '*',         desc: 'Toggle star on GitHub' },
     { key: 'r',         desc: 'Refresh current view' },
     { key: 'w',         desc: 'Show "What\'s new" / tour' },
@@ -72,6 +73,14 @@ const CATEGORIES = [
     { key: 'B',         desc: 'Branch / tag picker' },
     { key: 'y',         desc: 'Copy raw github URL' },
     { key: 'Y',         desc: 'Copy file contents (OSC-52)' },
+  ]},
+  { id: 'actions',    name: 'ACTIONS',           shortcuts: [
+    { key: '↑↓ / j k',  desc: 'Navigate repos or runs' },
+    { key: 'Enter',     desc: 'View runs for selected repo / open run in browser' },
+    { key: 'r',         desc: 'Re-run selected workflow' },
+    { key: 'x',         desc: 'Cancel running workflow' },
+    { key: 't',         desc: 'Back to repo list (from runs view)' },
+    { key: '/',         desc: 'Filter repos' },
   ]},
   { id: 'inbox',      name: 'INBOX',             shortcuts: [
     { key: 'm',         desc: 'Mark current as read' },

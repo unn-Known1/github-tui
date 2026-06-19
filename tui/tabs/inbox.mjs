@@ -219,7 +219,7 @@ export function renderInbox(screen, y, h) {
       title: 'Login required',
       message: 'Sign in to view your GitHub notifications.',
       hint: '',
-      keyHint: 'Press [4] for Settings',
+      keyHint: 'Press [6] for Settings',
     });
     return;
   }

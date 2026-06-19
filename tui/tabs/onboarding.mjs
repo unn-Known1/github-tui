@@ -39,12 +39,13 @@ const STEPS = [
     icon: '⌨',
     title: 'The keyboard is your friend',
     body: [
-      'Five tabs at the top:',
+      'Six tabs at the top:',
       '  [1] Dashboard  · greeting, activity, stats, trending',
       '  [2] Repos     · your repos with filters, sort, pins',
       '  [3] Analyze   · search any public repo, view details',
-      '  [4] Settings  · theme, login, system info',
+      '  [4] Actions   · CI / workflow runs',
       '  [5] Inbox     · triage notifications',
+      '  [6] Settings  · theme, login, system info',
       '',
       'Power keys (work everywhere):',
       '  [Ctrl-P]  open the command palette',
@@ -209,7 +210,7 @@ export function renderOnboarding(screen, opts = {}) {
       cx += text.length + 1;
     }
     bodyY++;
-    screen.writeStr(x0 + 3, bodyY, 'Change theme later with [4] Settings → Appearance.', { dim: true });
+    screen.writeStr(x0 + 3, bodyY, 'Change theme later with [6] Settings → Appearance.', { dim: true });
   }
 
   // Hint.

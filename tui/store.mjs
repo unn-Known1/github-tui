@@ -80,6 +80,20 @@ export function removeSavedSearch(id) {
 }
 
 // ────────────────────────────────────────────────────────────────────────────
+// Repo preferences — sort, filter, density settings that survive restarts.
+// Shape: { repoSort, repoTypeFilter, reposLangFilter, repoStaleOnly, repoDensity }
+// ────────────────────────────────────────────────────────────────────────────
+const REPO_PREFS_FILE = join(CONFIG_DIR, 'repo-prefs.json');
+
+export function loadRepoPrefs() {
+  return readJson(REPO_PREFS_FILE, {});
+}
+
+export function saveRepoPrefs(prefs) {
+  writeJson(REPO_PREFS_FILE, prefs);
+}
+
+// ────────────────────────────────────────────────────────────────────────────
 // Pins — sticky favorites that float to the top of the Repos list.
 // Shape: array of full_name strings.
 // ────────────────────────────────────────────────────────────────────────────

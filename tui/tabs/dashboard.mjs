@@ -165,7 +165,7 @@ export function renderDashboard(screen, y, h) {
       title: 'Welcome to GitHub TUI',
       message: 'Sign in with a Personal Access Token to see your dashboard.',
       hint: '',
-      keyHint: 'Press [4] for Settings  →  [Enter] on Login',
+      keyHint: 'Press [6] for Settings  →  [Enter] on Login',
     });
     return;
   }
@@ -612,7 +612,8 @@ export function pageUp() {
 export function pageDown() {
   if (appState.trendingHasMore) {
     const page = appState.trendingPage + 1;
-    const since = new Date(Date.now() - 7 * 86400000).toISOString().split('T')[0];
+    const days = appState.trendingPeriod || 7;
+    const since = new Date(Date.now() - days * 86400000).toISOString().split('T')[0];
     const q = 'created:>' + since;
     const gen = startAsync();
     appState.loading = true;
@@ -696,16 +697,7 @@ export const keys = {
   },
   '/': () => startInput('Filter trending: ', 'dashboard-filter'),
   'n': () => {
-    const repos = appState.repos;
-    if (repos.length > 0) {
-      const url = repos[0].html_url + '/issues/new';
-      openUrl(url).then(res => {
-        if (res.ok) showMessage('Opened new issue page', 'success');
-        else showMessage(res.error || 'Open failed', 'error');
-      });
-    } else {
-      showMessage('No repos to create issues for', 'warning');
-    }
+    import('../issue-create.mjs').then(m => m.startCreateIssue());
   },
 };
 

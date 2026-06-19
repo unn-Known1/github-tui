@@ -446,16 +446,120 @@ function renderFileViewer(screen, y, maxH) {
 function decorateLine(ln, path) {
   if (!path) return null;
   const ext = (path.split('.').pop() || '').toLowerCase();
-  if (/^\s*(#|\/\/)/.test(ln)) return color('dim');
+
+  // Comments
+  if (/^\s*(#|\/\/|\/\*|\*\/|\*)/.test(ln)) return color('dim');
   if (/^\s*```/.test(ln)) return color('dim');
-  if (ext === 'md') {
+
+  // Markdown
+  if (ext === 'md' || ext === 'mdx') {
     if (/^#{1,6}\s/.test(ln)) return { bold: true };
     if (/^\s*[-*+]\s/.test(ln)) return color('accent');
+    if (/^\s*>\s/.test(ln)) return color('dim');
+    if (/^\s*\d+\.\s/.test(ln)) return color('accent');
+    return null;
   }
-  if (['js','mjs','ts','tsx','jsx','py','go','rs','java','c','cpp','h'].includes(ext)) {
-    if (/^\s*(import|export|from|require|use|package|class|function|def|const|let|var|fn|impl|trait|pub|module|namespace)\b/.test(ln))
+
+  // JSON / YAML / TOML
+  if (ext === 'json') {
+    if (/^\s*[\}"']/.test(ln)) return color('accent');
+    return null;
+  }
+  if (ext === 'yaml' || ext === 'yml' || ext === 'toml') {
+    if (/^\s*[\w-]+\s*:/.test(ln)) return color('accent');
+    if (/^\s*#/.test(ln)) return color('dim');
+    return null;
+  }
+
+  // Shell scripts
+  if (ext === 'sh' || ext === 'bash' || ext === 'zsh') {
+    if (/^\s*#/.test(ln)) return color('dim');
+    if (/^\s*(if|then|else|elif|fi|for|do|done|while|case|esac|function|return|export|source|alias)\b/.test(ln))
       return color('accent');
+    if (/^\s*(echo|cd|ls|mkdir|rm|cp|mv|chmod|chown|git|npm|node|python|curl|wget)\b/.test(ln))
+      return { fg: 'yellow' };
+    return null;
   }
+
+  // Config / Dockerfiles
+  if (ext === 'dockerfile' || path.toLowerCase().includes('dockerfile')) {
+    if (/^\s*(FROM|RUN|COPY|ADD|CMD|ENTRYPOINT|ENV|ARG|EXPOSE|WORKDIR|USER|LABEL|HEALTHCHECK|SHELL)\b/.test(ln))
+      return color('accent');
+    if (/^\s*#/.test(ln)) return color('dim');
+    return null;
+  }
+  if (ext === 'env') {
+    if (/^\s*#/.test(ln)) return color('dim');
+    if (/^\s*\w+=/.test(ln)) return color('accent');
+    return null;
+  }
+
+  // CSS / SCSS / Less
+  if (['css', 'scss', 'less', 'sass'].includes(ext)) {
+    if (/^\s*\/[/*]/.test(ln)) return color('dim');
+    if (/^\s*[\.#][\w-]+/.test(ln)) return color('accent');
+    if (/^\s*[\w-]+\s*:/.test(ln)) return { fg: 'cyan' };
+    return null;
+  }
+
+  // HTML / XML / JSX
+  if (['html', 'htm', 'xml', 'svg', 'jsx', 'tsx'].includes(ext)) {
+    if (/^\s*<!--/.test(ln)) return color('dim');
+    if (/^\s*<\//.test(ln)) return color('accent');
+    if (/^\s*</.test(ln)) return color('accent');
+    return null;
+  }
+
+  // SQL
+  if (ext === 'sql') {
+    if (/^\s*(SELECT|FROM|WHERE|INSERT|UPDATE|DELETE|CREATE|DROP|ALTER|JOIN|ON|AND|OR|GROUP|ORDER|BY|HAVING|LIMIT|UNION|AS)\b/i.test(ln))
+      return color('accent');
+    if (/^\s*--/.test(ln)) return color('dim');
+    return null;
+  }
+
+  // Programming languages
+  const CODE_EXTS = ['js','mjs','ts','tsx','jsx','py','go','rs','java','c','cpp','h','hpp','rb','php','cs','swift','kt','scala','lua','r','pl','ex','exs','erl','hs','ml','clj','dart','zig','nim','v','cr'];
+  if (CODE_EXTS.includes(ext)) {
+    // Keywords
+    if (/^\s*(import|export|from|require|use|package|class|function|def|const|let|var|fn|impl|trait|pub|module|namespace|interface|type|struct|enum|async|await|return|if|else|for|while|do|switch|case|break|continue|try|catch|finally|throw|new|this|self|super|static|final|abstract|extends|implements|override|virtual|yield|static)\b/.test(ln))
+      return color('accent');
+    // Strings
+    if (/^\s*["'`]/.test(ln) && /["'`]\s*[;:,=)]?\s*$/.test(ln.trim()))
+      return { fg: 'green' };
+    // Numbers
+    if (/^\s*\d+[\d.]*\b/.test(ln) && ln.trim().length < 20)
+      return { fg: 'yellow' };
+    // Decorators / annotations
+    if (/^\s*[@#]/.test(ln))
+      return { fg: 'magenta' };
+  }
+
+  // Makefiles
+  if (ext === 'mk' || path.toLowerCase() === 'makefile') {
+    if (/^\s*[\w-]+\s*[:+?]?=/.test(ln)) return color('accent');
+    if (/^\t/.test(ln)) return { fg: 'yellow' };
+    if (/^\s*#/.test(ln)) return color('dim');
+    return null;
+  }
+
+  // Gitignore / gitattributes
+  if (ext === 'gitignore' || ext === 'gitattributes') {
+    if (/^\s*#/.test(ln)) return color('dim');
+    if (/^\s*!/.test(ln)) return { fg: 'green' };
+    return null;
+  }
+
+  // License files
+  if (ext === 'license' || ext === 'licence') {
+    if (/^\s*(MIT|Apache|BSD|GPL|LGPL|MPL|ISC|CC|UNLICENSE)/i.test(ln)) return { bold: true };
+    return null;
+  }
+
+  // Fallback: detect common patterns
+  if (/^\s*(TODO|FIXME|HACK|XXX|NOTE|BUG)\b/.test(ln)) return { fg: 'yellow', bold: true };
+  if (/^\s*console\.(log|error|warn)\b/.test(ln)) return { fg: 'yellow' };
+
   return null;
 }
 

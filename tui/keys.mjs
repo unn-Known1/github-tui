@@ -303,6 +303,7 @@ export function handleKey(key) {
     case 'o': openCurrent(); return;
     case 'y': copyCurrentUrl(); return;
     case 'b': toggleBookmark(); return;
+    case 'B': bookmarks.openBookmarks(); return;
     case 'w': onboarding.startWelcome(); return;
     case '\r': case '\n': handleEnter(); return;
     case '\x1b[A': case 'k': handleUp(); return;
@@ -384,10 +385,6 @@ function handleTop() {
     render();
   } else if (t === 2) {
     analyze.jumpTop();
-  } else if (t === 4) {
-    appState.selectedNotification = 0;
-    appState.inboxScroll = 0;
-    render();
   } else if (t === 3) {
     appState.actionsSelected = 0;
     appState.actionsScroll = 0;

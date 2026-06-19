@@ -9,7 +9,7 @@ import { loadTheme } from './tui/theme.mjs';
 import { initScreen, getScreen, render } from './tui/render.mjs';
 import { handleKey, registerCoreActions } from './tui/keys.mjs';
 import { loadUserData } from './tui/tabs/repos.mjs';
-import { loadBookmarks, loadSavedSearches, loadPins } from './tui/store.mjs';
+import { loadBookmarks, loadSavedSearches, loadPins, loadRepoPrefs, saveRepoPrefs } from './tui/store.mjs';
 import { getRateLimit } from './tui/github.mjs';
 
 async function refreshRateLimit() {
@@ -54,6 +54,14 @@ async function main() {
   loadCollapsed();
   loadSession();
 
+  // Restore repo preferences.
+  const repoPrefs = loadRepoPrefs();
+  if (repoPrefs.repoSort) appState.repoSort = repoPrefs.repoSort;
+  if (repoPrefs.repoTypeFilter) appState.repoTypeFilter = repoPrefs.repoTypeFilter;
+  if (repoPrefs.reposLangFilter) appState.reposLangFilter = repoPrefs.reposLangFilter;
+  if (repoPrefs.repoStaleOnly != null) appState.repoStaleOnly = repoPrefs.repoStaleOnly;
+  if (repoPrefs.repoDensity) appState.repoDensity = repoPrefs.repoDensity;
+
   // Initialize screen + register palette actions.
   const screen = initScreen();
   registerCoreActions();
@@ -70,6 +78,20 @@ async function main() {
     render();
   });
   screen.updateSize();
+
+  // Save repo prefs on exit.
+  function saveCurrentRepoPrefs() {
+    saveRepoPrefs({
+      repoSort: appState.repoSort,
+      repoTypeFilter: appState.repoTypeFilter,
+      reposLangFilter: appState.reposLangFilter,
+      repoStaleOnly: appState.repoStaleOnly,
+      repoDensity: appState.repoDensity,
+    });
+  }
+  process.on('exit', saveCurrentRepoPrefs);
+  process.on('SIGINT', saveCurrentRepoPrefs);
+  process.on('SIGTERM', saveCurrentRepoPrefs);
 
   // Auto-load if we already have a saved token.
   if (appState.token) {

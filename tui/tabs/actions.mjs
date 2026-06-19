@@ -5,7 +5,7 @@ import { appState, render, startAsync, isStale, showMessage, setTab } from '../s
 import { getWorkflowRuns, rerunWorkflow, cancelWorkflowRun } from '../github.mjs';
 import { openUrl, relTime, truncate } from '../utils.mjs';
 import { color } from '../theme.mjs';
-import { emptyState, loadingIndicator, scrollIndicators } from '../render.mjs';
+import { emptyState, loadingIndicator, scrollIndicators, collapsibleHeader } from '../render.mjs';
 import { startInput, registerInputHandler } from '../input.mjs';
 
 const RUNS_PER_PAGE = 30;
@@ -121,7 +121,7 @@ export function renderActions(screen, y, h) {
       icon: '🔒  NOT SIGNED IN',
       title: 'CI / Actions',
       message: 'Sign in to view your workflow runs.',
-      keyHint: 'Press [4] for Settings  →  [Enter] on Login',
+      keyHint: 'Press [6] for Settings  →  [Enter] on Login',
     });
     return;
   }
@@ -129,10 +129,16 @@ export function renderActions(screen, y, h) {
   screen.writeStr(2, y, 'CI / ACTIONS', { fg: 'white', bold: true });
   screen.hline(y + 1, '─', { dim: true });
 
+  const section = appState.actionsView === 'runs' ? 'actions:runs' : 'actions:repos';
+  const expanded = collapsibleHeader(screen, 2, y + 2, section,
+    appState.actionsView === 'runs' ? 'WORKFLOW RUNS' : 'REPOSITORIES',
+    appState.actionsView === 'runs' ? '[t] back to repos' : null);
+  if (!expanded) return;
+
   if (appState.actionsView === 'repos') {
-    renderRepoList(screen, y + 3, h - 3, W);
+    renderRepoList(screen, y + 4, h - 4, W);
   } else {
-    renderRunList(screen, y + 3, h - 3, W);
+    renderRunList(screen, y + 4, h - 4, W);
   }
 }
 
@@ -252,6 +258,12 @@ registerInputHandler('actions-filter', (value) => {
 
 export const keys = {
   '/': () => startInput('Filter repos: ', 'actions-filter'),
+  't': () => {
+    if (appState.actionsView === 'runs') {
+      appState.actionsView = 'repos';
+      render();
+    }
+  },
 };
 
 export function up() {
@@ -320,5 +332,12 @@ export function enter() {
 
 export function space() {}
 
-export function getSections() { return []; }
-export function getCurrentSection() { return null; }
+const ACTIONS_SECTIONS = ['repos', 'runs'];
+
+export function getSections() {
+  return ACTIONS_SECTIONS.map(s => 'actions:' + s);
+}
+
+export function getCurrentSection() {
+  return appState.actionsView === 'runs' ? 'actions:runs' : 'actions:repos';
+}
