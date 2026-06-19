@@ -269,6 +269,15 @@ export async function loadRepoDetails(owner, name) {
   appState.repoReleases = [];
   appState.repoIssues = [];
   appState.repoPullRequests = [];
+  appState._readmeText = null;
+  appState.repoReleaseAssets = [];
+  appState.repoTraffic = null;
+  appState.repoTrafficClones = null;
+  appState.repoMilestones = [];
+  appState.repoLabels = [];
+  appState.repoCheckRuns = [];
+  appState.repoCheckSuites = [];
+  appState.repoDependabotAlerts = [];
   render();
   try {
     const details = await getRepositoryDetails(appState.token, owner, name);
@@ -1198,6 +1207,7 @@ export function handleBack() {
       return;
     }
     appState.repoDetails = null;
+    appState._readmeText = null;
     appState.analyzeView = 'results';
     render();
   } else if (v === 'results') {

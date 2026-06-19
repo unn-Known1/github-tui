@@ -313,13 +313,22 @@ function handlePaneTabClick(sx) {
 }
 
 function loadPane(paneId) {
-  import('./tabs/analyze.mjs').then(a => {
-    if (paneId === 'traffic') a.loadTraffic();
-    else if (paneId === 'milestones') a.loadMilestones();
-    else if (paneId === 'labels') a.loadLabels();
-    else if (paneId === 'checks') a.loadChecks();
-    else if (paneId === 'security') a.loadSecurity();
-  }).catch(() => {});
+  if (paneId === 'readme') {
+    import('./tabs/analyze.mjs').then(a => a.viewReadme()).catch(() => {});
+  } else if (paneId === 'files') {
+    import('./tabs/files.mjs').then(f => f.openFilesPane()).catch(() => {});
+  } else if (paneId === 'packages') {
+    appState.selectedAsset = 0;
+    import('./tabs/analyze.mjs').then(a => a.loadReleaseAssets()).catch(() => {});
+  } else if (paneId === 'traffic' || paneId === 'milestones' || paneId === 'labels' || paneId === 'checks' || paneId === 'security') {
+    import('./tabs/analyze.mjs').then(a => {
+      if (paneId === 'traffic') a.loadTraffic();
+      else if (paneId === 'milestones') a.loadMilestones();
+      else if (paneId === 'labels') a.loadLabels();
+      else if (paneId === 'checks') a.loadChecks();
+      else if (paneId === 'security') a.loadSecurity();
+    }).catch(() => {});
+  }
 }
 
 // ── Collapsible section headers ──────────────────────────────
@@ -333,11 +342,9 @@ function handleCollapsibleClick(sx, sy) {
   if (!headers) return false;
   for (const section of Object.keys(headers)) {
     if (!section.startsWith(prefix)) continue;
-    const { x, y } = headers[section];
-    // Click anywhere on the header row to collapse/expand
-    if (y === sy && sx >= x) {
-      const target = section === 'dashboard:activity-heatmap' ? 'dashboard:activity' : section;
-      toggleCollapse(target);
+    const { x, y, w } = headers[section];
+    if (y === sy && sx >= x && sx < x + (w || 10)) {
+      toggleCollapse(section);
       render();
       return true;
     }

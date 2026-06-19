@@ -112,6 +112,7 @@ export const appState = {
   userFollowers: [],
   userFollowing: [],
   repoDependabotAlerts: [],
+  _readmeText: null,
 
   // ── Forks sub-view ──
   forks: [],

@@ -171,8 +171,9 @@ export function collapsibleHeader(screen, x, y, section, label, hint) {
     const hx = W - hint.length - 2;
     if (hx > x + label.length + 6) screen.writeStr(hx, y, hint, { dim: true });
   }
-  // Record position for mouse click detection.
-  appState._sectionHeaders[section] = { x, y };
+  // Record position for mouse click detection. Include full text width so the
+  // click target covers the entire header (arrow + space + label).
+  appState._sectionHeaders[section] = { x, y, w: arrow.length + 1 + label.length };
   return !collapsed;
 }
 
@@ -406,6 +407,7 @@ function doRender() {
   const W = screen.width;
   const H = screen.height;
   screen.clear();
+  appState._sectionHeaders = {};
 
   // ── Minimum terminal size check ──
   if (W < MIN_W || H < MIN_H) {

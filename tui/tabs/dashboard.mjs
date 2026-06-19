@@ -318,9 +318,7 @@ export function renderDashboard(screen, y, h) {
       const activityLabel = commitCount === 0
         ? (totalEvents === 0 ? 'CONTRIBUTIONS' : 'CONTRIBUTIONS · ' + totalEvents)
         : 'CONTRIBUTIONS · ' + commitCount + ' commits';
-      const activityVisible = sectionHeader(screen, leftX, ly, activityLabel, null, 'dashboard:activity');
-      // Store position separately so clicking the heatmap header toggles the same section
-      appState._sectionHeaders['dashboard:activity-heatmap'] = { x: leftX, y: ly };
+      const activityVisible = sectionHeader(screen, leftX, ly, activityLabel, null, 'dashboard:contributions');
       ly++;
 
       if (activityVisible) {
@@ -392,7 +390,7 @@ export function renderDashboard(screen, y, h) {
   // RIGHT COLUMN ────────────────────────────────────────────
   let ry = bodyY;
 
-  const activityVisible = sectionHeader(screen, rightX, ry, 'RECENT ACTIVITY', '[Enter] open first', 'dashboard:activity');
+  const activityVisible = sectionHeader(screen, rightX, ry, 'RECENT ACTIVITY', '[Enter] open first', 'dashboard:recentActivity');
   ry++;
   if (activityVisible) {
     if (appState.events.length === 0) {
