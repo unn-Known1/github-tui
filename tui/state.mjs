@@ -368,7 +368,9 @@ export function loadSession() {
     const s = JSON.parse(raw);
     if (s.tab != null && s.tab >= 0 && s.tab < TABS.length) tabState.current = s.tab;
     if (s.recentRepos) appState.recentRepos = s.recentRepos;
-    if (s.analyzeView) appState.analyzeView = s.analyzeView;
+    // Only restore analyzeView to 'search' — details/results data isn't persisted,
+    // so restoring those views would show a blank page.
+    if (s.analyzeView === 'search') appState.analyzeView = 'search';
     if (s.searchQuery) appState.searchQuery = s.searchQuery;
     if (s.searchType) appState.searchType = s.searchType;
     if (s.reposView) appState.reposView = s.reposView;
