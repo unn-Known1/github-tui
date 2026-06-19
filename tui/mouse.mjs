@@ -89,23 +89,85 @@ function handleClick(col, row) {
   const sx = col - 1;
   const sy = row - 1;
 
-  // Detail popup is open — close it if the click is outside the popup box.
+  // Detail popup is open — handle interactive elements or close on outside click.
   if (appState.showDetail) {
     const screen = getScreen();
-    if (screen) {
-      const W = screen.width;
-      const H = screen.height;
-      const boxW = Math.min(100, W - 4);
-      const boxH = H - 4;
-      const bx = Math.floor((W - boxW) / 2);
-      const by = 2;
-      const inside = sx >= bx && sx < bx + boxW && sy >= by && sy < by + boxH;
-      if (!inside) {
-        import('./tabs/detail.mjs').then(m => m.closeDetail()).catch(() => {});
-        return;
+    if (!screen) return;
+    const W = screen.width;
+    const H = screen.height;
+    const boxW = Math.min(100, W - 4);
+    const boxH = H - 4;
+    const bx = Math.floor((W - boxW) / 2);
+    const by = 2;
+    const inside = sx >= bx && sx < bx + boxW && sy >= by && sy < by + boxH;
+    if (!inside) {
+      import('./tabs/detail.mjs').then(m => m.closeDetail()).catch(() => {});
+      return;
+    }
+    // Click inside — handle interactive elements, then swallow.
+    if (!appState.detailLoading && appState.detailData) {
+      const innerX = bx + 2;
+      const tabY = by + 3;
+
+      // ── Action buttons (right-aligned) on the tab/action row ──
+      if (sy === tabY) {
+        const data = appState.detailData;
+        const actions = ['c Comment', 'r React'];
+        if (appState.detailType === 'pull_request' && data.mergeable) actions.push('M Merge');
+        if (data.state === 'open') actions.push('x Close');
+        else actions.push('x Reopen');
+        let ax = bx + boxW - 2;
+        for (let i = actions.length - 1; i >= 0; i--) {
+          ax -= actions[i].length + 1;
+          if (sx >= ax && sx < ax + actions[i].length) {
+            import('./tabs/detail.mjs').then(m => {
+              if (actions[i] === 'c Comment') m.openCommentInput();
+              else if (actions[i] === 'r React') m.toggleReactionPicker();
+              else if (actions[i] === 'M Merge') m.mergePR();
+              else m.closeOrReopen();
+            }).catch(() => {});
+            return;
+          }
+        }
+
+        // ── Detail pane tabs (left-aligned) on the same row ──
+        const tabs = [['body', 'Body'], ['comments', 'Comments (' + appState.detailComments.length + ')']];
+        if (appState.detailType === 'pull_request') {
+          tabs.push(['reviews', 'Reviews (' + appState.detailReviews.length + ')']);
+          tabs.push(['files', 'Files (' + appState.detailFiles.length + ')']);
+        }
+        let tx = innerX;
+        for (const [id, label] of tabs) {
+          const isActive = appState.detailTab === id;
+          const text = isActive ? ' [' + label + '] ' : '  ' + label + '  ';
+          if (sx >= tx && sx < tx + text.length) {
+            if (!isActive) {
+              appState.detailTab = id;
+              appState.detailScroll = 0;
+              appState.detailFileCursor = 0;
+              render();
+            }
+            return;
+          }
+          tx += text.length;
+        }
+      }
+
+      // ── File list item click (select file) ──
+      if (appState.detailTab === 'files' && !appState.detailDiffView) {
+        const contentY = tabY + 2;
+        const files = appState.detailFiles;
+        if (files.length > 0 && sy >= contentY) {
+          const idx = sy - contentY + appState.detailScroll;
+          if (idx >= 0 && idx < files.length) {
+            appState.detailFileCursor = idx;
+            render();
+            return;
+          }
+        }
       }
     }
-    // Click inside the popup — let it fall through to content-area handling.
+    return; // Swallow all inside-popup clicks
   }
 
   // Tab bar at screen row HEADER_HEIGHT (4).
