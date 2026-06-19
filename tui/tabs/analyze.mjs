@@ -1130,7 +1130,8 @@ function renderRepoDetails(screen, y, maxH) {
   for (let i = 0; i < rows; i++) {
     const [k, v] = details[i];
     screen.writeStr(2, y + 3 + i, k, { dim: true });
-    screen.writeStr(18, y + 3 + i, truncate(String(v), leftWidth - 14));
+    const maxW = (k === 'URL:') ? W - 4 : leftWidth - 14;
+    screen.writeStr(18, y + 3 + i, truncate(String(v), maxW));
   }
 
   // Right column: languages, contributors, releases.
