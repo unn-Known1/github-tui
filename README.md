@@ -34,13 +34,36 @@ A fast, zero-dependency terminal user interface for GitHub — six tabs, a comma
 
 ## 🚀 Run
 
-Requires Node.js 18+. No install step.
+Requires Node.js 18+.
+
+### Quick start (no install)
 
 ```bash
+npx github-tui
+```
+
+### Global install
+
+```bash
+npm install -g github-tui
+github-tui
+```
+
+### From source
+
+```bash
+git clone https://github.com/unn-Known1/github-tui.git
+cd github-tui
 node app.mjs
 ```
 
-First launch lands you on the Dashboard. Press `4` for Settings, then `Enter` on **Login**, and paste your GitHub Personal Access Token (the input is masked).
+### Update
+
+```bash
+npm update -g github-tui
+```
+
+First launch lands you on the Dashboard. Press `6` for Settings, then `Enter` on **Login**, and paste your GitHub Personal Access Token (the input is masked).
 
 ## 🔑 Creating a GitHub Personal Access Token
 
