@@ -128,6 +128,7 @@ export const appState = {
   trendingHasMore: true,
   trendingSelected: 0,
   trendingScroll: 0,
+  trendingPeriod: 7,  // 1 = today, 7 = this week, 30 = this month
   dashboardFilter: '',
   starred: [],
   starredPage: 1,

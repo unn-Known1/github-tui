@@ -20,9 +20,10 @@ export async function loadDashboardWidgets(force = false) {
   const username = appState.user.login;
   try {
     const safe = (p) => p.catch(() => null);
+    const days = appState.trendingPeriod || 7;
     const [events, trending, starred, issues, prs, followers] = await Promise.all([
       safe(getUserEvents(appState.token, username, 100)),
-      safe(getTrendingRepos(appState.token, 7, 100)),
+      safe(getTrendingRepos(appState.token, days, 100)),
       safe(getStarredRepos(appState.token, 1, 100)),
       safe(getUserIssues(appState.token, 1, 10)),
       safe(getUserPullRequests(appState.token, 1, 10)),
@@ -309,10 +310,17 @@ export function renderDashboard(screen, y, h) {
       const dayLabels = ['S', 'M', 'T', 'W', 'T', 'F', 'S'];
       const heatW = heatRightX - leftX - 4;
       const cellW = Math.max(1, Math.min(2, Math.floor(heatW / hm.weeks)));
+      const commitCount = appState.events
+        .filter(ev => ev.type === 'PushEvent')
+        .reduce((sum, ev) => sum + (ev.payload.size || ev.payload.distinct_size || 0), 0);
       const totalEvents = hm.grid.flat().reduce((a, b) => a + b, 0);
 
-      const activityLabel = totalEvents === 0 ? 'ACTIVITY' : 'ACTIVITY · ' + totalEvents;
+      const activityLabel = commitCount === 0
+        ? (totalEvents === 0 ? 'CONTRIBUTIONS' : 'CONTRIBUTIONS · ' + totalEvents)
+        : 'CONTRIBUTIONS · ' + commitCount + ' commits';
       const activityVisible = sectionHeader(screen, leftX, ly, activityLabel, null, 'dashboard:activity');
+      // Store position separately so clicking the heatmap header toggles the same section
+      appState._sectionHeaders['dashboard:activity-heatmap'] = { x: leftX, y: ly };
       ly++;
 
       if (activityVisible) {
@@ -468,7 +476,8 @@ export function renderDashboard(screen, y, h) {
 
   if (ry < y + h - 2) {
     const trendingList = getFilteredTrending();
-    const trendingVisible = sectionHeader(screen, rightX, ry, 'TRENDING THIS WEEK', null, 'dashboard:trending');
+    const periodLabel = appState.trendingPeriod === 1 ? 'TRENDING TODAY' : appState.trendingPeriod === 7 ? 'TRENDING THIS WEEK' : 'TRENDING THIS MONTH';
+    const trendingVisible = sectionHeader(screen, rightX, ry, periodLabel, '[t] toggle', 'dashboard:trending');
     if (appState.dashboardFilter) {
       screen.writeStr(rightX + 24, ry, 'filter: "' + appState.dashboardFilter + '"', { dim: true, fg: 'yellow' });
     }
@@ -520,7 +529,8 @@ export async function loadMoreTrending() {
   appState.loading = true;
   render();
   try {
-    const since = new Date(Date.now() - 7 * 86400000).toISOString().split('T')[0];
+    const days = appState.trendingPeriod || 7;
+    const since = new Date(Date.now() - days * 86400000).toISOString().split('T')[0];
     const q = 'created:>' + since;
     const page = appState.trendingPage + 1;
     const more = await searchRepositories(appState.token, q, page, 10);
@@ -580,7 +590,8 @@ export function trendingDown() {
 export function pageUp() {
   if (appState.trendingPage > 1) {
     const page = appState.trendingPage - 1;
-    const since = new Date(Date.now() - 7 * 86400000).toISOString().split('T')[0];
+    const days = appState.trendingPeriod || 7;
+    const since = new Date(Date.now() - days * 86400000).toISOString().split('T')[0];
     const q = 'created:>' + since;
     const gen = startAsync();
     appState.loading = true;
@@ -661,7 +672,30 @@ function getFilteredTrending() {
   return appState.trending.filter(r => (r.full_name || '').toLowerCase().includes(q));
 }
 
+function reloadTrending() {
+  if (!appState.token) return;
+  const days = appState.trendingPeriod;
+  const gen = startAsync();
+  appState.loading = true;
+  render();
+  getTrendingRepos(appState.token, days, 100).then(more => {
+    if (isStale(gen)) return;
+    appState.trending = Array.isArray(more) ? more : [];
+    appState.trendingPage = 1;
+    appState.trendingScroll = 0;
+    appState.trendingSelected = 0;
+    appState.trendingHasMore = appState.trending.length >= 100;
+    appState.loading = false;
+    render();
+  }).catch(() => { appState.loading = false; render(); });
+}
+
 export const keys = {
+  't': () => {
+    const cycle = { 1: 7, 7: 30, 30: 1 };
+    appState.trendingPeriod = cycle[appState.trendingPeriod] || 7;
+    reloadTrending();
+  },
   '/': () => startInput('Filter trending: ', 'dashboard-filter'),
   'n': () => {
     const repos = appState.repos;

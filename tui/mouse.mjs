@@ -52,9 +52,27 @@ export function handleMouseEvent(event) {
 
   const { button, col, row, pressed } = event;
 
-  // Scroll wheel.
-  if (button === 64) { scrollUp(); return; }
-  if (button === 65) { scrollDown(); return; }
+  // Motion (button 32–63) — live hover selection on trending list.
+  if (button >= 32 && button < 64) {
+    const sx = col - 1;
+    const sy = row - 1;
+    if (tabState.current === 0 && inTrendingSection(sx, sy)) {
+      const th = appState._sectionHeaders['dashboard:trending'];
+      if (th && th.y > 0 && sy > th.y) {
+        const listIdx = sy - th.y - 1;
+        const absIdx = listIdx + appState.trendingScroll;
+        if (absIdx >= 0 && absIdx < appState.trending.length && absIdx !== appState.trendingSelected) {
+          appState.trendingSelected = absIdx;
+          render();
+        }
+      }
+    }
+    return;
+  }
+
+  // Scroll wheel — pass position so handlers can scope by section.
+  if (button === 64) { scrollUp(col - 1, row - 1); return; }
+  if (button === 65) { scrollDown(col - 1, row - 1); return; }
 
   // Click — only left button presses.
   if (button === 0 && pressed) {
@@ -254,8 +272,10 @@ function handleCollapsibleClick(sx, sy) {
   for (const section of Object.keys(headers)) {
     if (!section.startsWith(prefix)) continue;
     const { x, y } = headers[section];
-    if (y === sy && Math.abs(sx - x) <= 3) {
-      toggleCollapse(section);
+    // Click anywhere on the header row to collapse/expand
+    if (y === sy && sx >= x) {
+      const target = section === 'dashboard:activity-heatmap' ? 'dashboard:activity' : section;
+      toggleCollapse(target);
       render();
       return true;
     }
@@ -430,10 +450,22 @@ function dispatchInboxClick(sy) {
 
 // ── Scroll wheel ──────────────────────────────────────────────
 
-function scrollUp() {
+function inTrendingSection(sx, sy) {
+  const screen = getScreen();
+  if (!screen) return false;
+  const W = screen.width;
+  const splitX = Math.floor(W / 2);
+  const rightX = splitX + 2;
+  const th = appState._sectionHeaders['dashboard:trending'];
+  return sx >= rightX && th && th.y > 0 && sy > th.y;
+}
+
+function scrollUp(sx, sy) {
   const t = tabState.current;
   if (t === 0) {
-    import('./tabs/dashboard.mjs').then(m => m.trendingUp()).catch(() => {});
+    if (inTrendingSection(sx, sy)) {
+      import('./tabs/dashboard.mjs').then(m => m.trendingUp()).catch(() => {});
+    }
   } else if (t === 1) {
     if (appState.reposView === 'starred') {
       if (appState.starredScroll > 0) { appState.starredScroll--; render(); }
@@ -453,13 +485,15 @@ function scrollUp() {
   }
 }
 
-function scrollDown() {
+function scrollDown(sx, sy) {
   const t = tabState.current;
   const screen = getScreen();
   if (!screen) return;
 
   if (t === 0) {
-    import('./tabs/dashboard.mjs').then(m => m.trendingDown()).catch(() => {});
+    if (inTrendingSection(sx, sy)) {
+      import('./tabs/dashboard.mjs').then(m => m.trendingDown()).catch(() => {});
+    }
   } else if (t === 1) {
     const maxV = Math.max(1, Math.min(15, screen.height - 12));
     if (appState.reposView === 'starred') {
