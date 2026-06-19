@@ -289,8 +289,6 @@ export function renderInbox(screen, y, h) {
 
     if (sel) {
       for (let x = 0; x < listW + 4; x++) screen.styleBuf[row][x] = color('selection');
-    } else if (i % 2 === 1) {
-      for (let x = 0; x < listW + 4; x++) screen.styleBuf[row][x] = { bg: 'darkGray', fg: 'white' };
     }
 
     screen.writeStr(2, row, sel ? '▶' : '  ', sel ? color('selection') : color('dim'));

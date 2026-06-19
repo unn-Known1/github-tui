@@ -197,18 +197,16 @@ function renderHeader(W) {
   const subtitleStyle = { dim: true };
 
   // Row 0: app title + version (left)  |  user (right)
-  // Background bar for top row
-  for (let x = 0; x < W; x++) screen.styleBuf[0][x] = { bg: 'darkGray', fg: 'white', bold: true };
-  screen.writeStr(2, 0, '◈', { bg: 'darkGray', fg: 'cyan', bold: true });
-  screen.writeStr(4, 0, 'GitHub TUI', { bg: 'darkGray', fg: 'white', bold: true });
+  screen.writeStr(2, 0, '◈', { fg: 'cyan', bold: true });
+  screen.writeStr(4, 0, 'GitHub TUI', titleStyle);
   const version = 'v' + VERSION;
-  screen.writeStr(15, 0, version, { bg: 'darkGray', fg: 'gray', dim: true });
+  screen.writeStr(15, 0, version, { fg: 'gray', dim: true });
 
   // User greeting on the right of the top line.
   if (appState.user) {
     const login = '@' + appState.user.login;
     const x = Math.max(2, W - login.length - 2);
-    screen.writeStr(x, 0, login, { bg: 'darkGray', fg: 'cyan', bold: true });
+    screen.writeStr(x, 0, login, { fg: 'cyan', bold: true });
   }
 
   // Row 1: tagline (left)  |  rate-limit (right)
@@ -276,21 +274,22 @@ function renderTabStrip(y, W) {
     const label = tab.label;
     const key = tab.key;
 
-    // Background: active gets a colored bg, inactive gets subtle dark bg.
+    // Background: active gets a chip-like colored bg.
     if (isActive) {
       for (let xx = bx; xx < bx + tabW && xx < W - 1; xx++) {
         screen.styleBuf[tabRowY][xx] = { bg: 'cyan', fg: 'white', bold: true };
       }
     } else {
+      // Subtle dimmed style for inactive tabs.
       for (let xx = bx; xx < bx + tabW && xx < W - 1; xx++) {
-        screen.styleBuf[tabRowY][xx] = { bg: 'darkGray', fg: 'gray' };
+        screen.styleBuf[tabRowY][xx] = { dim: true };
       }
     }
 
     // Tab text: "[1] Dash"
     const text = '[' + key + '] ' + label;
     const tx = bx + 1;
-    screen.writeStr(tx, tabRowY, text, isActive ? { bg: 'cyan', fg: 'white', bold: true } : { bg: 'darkGray', fg: 'gray' });
+    screen.writeStr(tx, tabRowY, text, isActive ? { bg: 'cyan', fg: 'white', bold: true } : { fg: 'gray', dim: true });
 
     // Badge for inbox with unread items.
     if (i === 4 && unreadCount > 0) {

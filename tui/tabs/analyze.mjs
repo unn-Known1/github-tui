@@ -1342,8 +1342,6 @@ function renderRepoResults(screen, listY, h, W, maxVisible) {
     const sel = start + i === appState.selectedRepo;
     if (sel) {
       for (let x = 0; x < W; x++) screen.styleBuf[row][x] = color('selection');
-    } else if (i % 2 === 1) {
-      for (let x = 0; x < W; x++) screen.styleBuf[row][x] = { bg: 'darkGray', fg: 'white' };
     }
     screen.writeStr(2, row, sel ? '▶' : '  ', sel ? color('selection') : color('dim'));
     screen.writeStr(5, row, truncate(repo.full_name, 30), sel ? color('selection') : color('repoName'));
