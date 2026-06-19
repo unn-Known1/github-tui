@@ -1,8 +1,9 @@
-// Actions/CI tab — browse workflow runs for your repos.
+// Actions/CI tab — browse workflow runs, view jobs + steps inline.
 // v0.7 milestone: runs list, status indicators, re-run, cancel.
+// v0.6 enhancement: expandable run detail with jobs and steps.
 
 import { appState, render, startAsync, isStale, showMessage, setTab } from '../state.mjs';
-import { getWorkflowRuns, rerunWorkflow, cancelWorkflowRun } from '../github.mjs';
+import { getWorkflowRuns, getWorkflowJobs, rerunWorkflow, cancelWorkflowRun } from '../github.mjs';
 import { openUrl, relTime, truncate } from '../utils.mjs';
 import { color } from '../theme.mjs';
 import { emptyState, loadingIndicator, scrollIndicators, collapsibleHeader } from '../render.mjs';
@@ -29,6 +30,24 @@ function getStatusIcon(run) {
   return STATUS_ICONS[run.conclusion] || { ch: '?', style: { dim: true } };
 }
 
+function jobStatusIcon(job) {
+  if (job.status === 'in_progress') return { ch: '◌', style: { fg: 'yellow' } };
+  if (job.status === 'queued') return { ch: '◻', style: { dim: true } };
+  return STATUS_ICONS[job.conclusion] || { ch: '?', style: { dim: true } };
+}
+
+function stepStatusIcon(step) {
+  if (step.status === 'in_progress') return { ch: '◌', style: { fg: 'yellow' } };
+  if (step.status === 'queued') return { ch: '◻', style: { dim: true } };
+  if (step.status === 'completed') {
+    if (step.conclusion === 'success') return { ch: '✓', style: { fg: 'green' } };
+    if (step.conclusion === 'failure') return { ch: '✗', style: { fg: 'red' } };
+    if (step.conclusion === 'skipped') return { ch: '⊘', style: { dim: true } };
+    if (step.conclusion === 'cancelled') return { ch: '⊘', style: { fg: 'yellow' } };
+  }
+  return { ch: '?', style: { dim: true } };
+}
+
 export async function loadActionsRepos() {
   if (!appState.token) return;
   appState.actionsRepos = appState.repos || [];
@@ -48,6 +67,9 @@ export async function loadWorkflowRuns() {
   appState.actionsRuns = [];
   appState.actionsSelected = 0;
   appState.actionsScroll = 0;
+  appState.actionsExpandedRun = null;
+  appState.actionsJobs = {};
+  appState.actionsJobSteps = {};
   render();
   try {
     const result = await getWorkflowRuns(appState.token, owner, name, RUNS_PER_PAGE);
@@ -60,6 +82,46 @@ export async function loadWorkflowRuns() {
   }
   appState.actionsLoading = false;
   if (!isStale(gen)) render();
+}
+
+export async function toggleRunDetail() {
+  const run = appState.actionsRuns[appState.actionsSelected];
+  if (!run) return;
+  const runId = run.id;
+
+  // Toggle collapse
+  if (appState.actionsExpandedRun === runId) {
+    appState.actionsExpandedRun = null;
+    render();
+    return;
+  }
+
+  // Expand — load jobs if not cached
+  appState.actionsExpandedRun = runId;
+  if (!appState.actionsJobs[runId]) {
+    const repos = getFilteredRepos();
+    const repo = repos[appState.actionsRepoSelected];
+    if (!repo) return;
+    const [owner, name] = repo.full_name.split('/');
+    const gen = startAsync();
+    appState.actionsLoading = true;
+    render();
+    try {
+      const result = await getWorkflowJobs(appState.token, owner, name, runId);
+      if (isStale(gen)) { appState.actionsLoading = false; return; }
+      const jobs = result && result.jobs ? result.jobs : [];
+      appState.actionsJobs[runId] = jobs;
+      // Cache steps for each job
+      for (const job of jobs) {
+        appState.actionsJobSteps[job.id] = job.steps || [];
+      }
+    } catch (e) {
+      if (!isStale(gen)) showMessage('Failed to load jobs: ' + e.message, 'error');
+      appState.actionsJobs[runId] = [];
+    }
+    appState.actionsLoading = false;
+  }
+  render();
 }
 
 export async function rerunSelected() {
@@ -109,8 +171,13 @@ function openSelectedRun() {
 
 export function goBack() {
   if (appState.actionsView === 'runs') {
-    appState.actionsView = 'repos';
-    render();
+    if (appState.actionsExpandedRun) {
+      appState.actionsExpandedRun = null;
+      render();
+    } else {
+      appState.actionsView = 'repos';
+      render();
+    }
   }
 }
 
@@ -207,42 +274,104 @@ function renderRunList(screen, y, h, W) {
   }
 
   // Header
-  screen.writeStr(2, y, 'STATUS', { fg: 'cyan', bold: true });
-  screen.writeStr(10, y, 'WORKFLOW', { fg: 'cyan', bold: true });
-  screen.writeStr(40, y, 'BRANCH', { fg: 'cyan', bold: true });
-  screen.writeStr(56, y, 'AGE', { fg: 'cyan', bold: true });
+  screen.writeStr(2, y, '', { dim: true });
+  screen.writeStr(5, y, 'WORKFLOW', { fg: 'cyan', bold: true });
+  screen.writeStr(38, y, 'BRANCH', { fg: 'cyan', bold: true });
+  screen.writeStr(54, y, 'EVENT', { fg: 'cyan', bold: true });
+  screen.writeStr(66, y, 'AGE', { fg: 'cyan', bold: true });
   y++;
 
   const maxVisible = Math.max(1, h - 3);
-  for (let i = 0; i < maxVisible && i < runs.length; i++) {
+  let curY = y;
+  let drawn = 0;
+
+  for (let i = 0; i < runs.length && drawn < maxVisible; i++) {
     const idx = appState.actionsScroll + i;
     if (idx >= runs.length) break;
     const run = runs[idx];
     const sel = idx === appState.actionsSelected;
-    const row = y + i;
+    const isExpanded = appState.actionsExpandedRun === run.id;
+
+    // Run row
+    if (curY >= y + maxVisible) break;
+    const row = curY;
     if (sel) {
       for (let x = 0; x < W; x++) screen.styleBuf[row][x] = color('selection');
     }
     const icon = getStatusIcon(run);
-    const prefix = sel ? '▶ ' : '  ';
-    const status = icon.ch;
+    const arrow = isExpanded ? '▾' : '▸';
     const wfName = truncate(run.name || run.display_title || '(unnamed)', 26);
     const branch = truncate(run.head_branch || '?', 14);
+    const event = truncate(run.event || '?', 10);
     const when = relTime(run.created_at);
-    screen.writeStr(2, row, prefix, sel ? color('selection') : null);
-    screen.writeStr(4, row, status, sel ? color('selection') : icon.style);
-    screen.writeStr(10, row, wfName, sel ? color('selection') : (color('repoName') || { fg: 'white' }));
+    const runNumber = '#' + run.run_number;
+
+    screen.writeStr(2, row, sel ? '▶' : ' ', sel ? color('selection') : null);
+    screen.writeStr(4, row, arrow, sel ? color('selection') : color('dim'));
+    screen.writeStr(6, row, icon.ch, sel ? color('selection') : icon.style);
+    screen.writeStr(8, row, truncate(runNumber, 6), sel ? color('selection') : color('dim'));
+    screen.writeStr(15, row, wfName, sel ? color('selection') : (color('repoName') || { fg: 'white' }));
     screen.writeStr(40, row, branch, sel ? color('selection') : { fg: 'cyan' });
-    screen.writeStr(56, row, when, sel ? color('selection') : { dim: true });
+    screen.writeStr(56, row, event, sel ? color('selection') : color('dim'));
+    screen.writeStr(68, row, when, sel ? color('selection') : { dim: true });
+    curY++;
+    drawn++;
+
+    // Expanded: show jobs
+    if (isExpanded) {
+      const jobs = appState.actionsJobs[run.id] || [];
+      if (jobs.length === 0 && appState.actionsLoading) {
+        if (curY < y + maxVisible) {
+          screen.writeStr(6, curY, 'Loading jobs...', { dim: true });
+          curY++;
+          drawn++;
+        }
+      } else {
+        for (const job of jobs) {
+          if (curY >= y + maxVisible) break;
+          const ji = jobStatusIcon(job);
+          const jobName = truncate(job.name || '?', W - 16);
+          const jobWhen = job.started_at ? relTime(job.started_at) : '';
+          const jobDur = job.completed_at && job.started_at
+            ? Math.round((new Date(job.completed_at) - new Date(job.started_at)) / 1000) + 's'
+            : '';
+
+          screen.writeStr(6, curY, '  ');
+          screen.writeStr(8, curY, ji.ch, ji.style);
+          screen.writeStr(10, curY, jobName, color('repoName') || { fg: 'white' });
+          if (jobDur && 10 + jobName.length + 2 < W) {
+            screen.writeStr(10 + jobName.length + 2, curY, jobDur, { dim: true });
+          }
+          curY++;
+          drawn++;
+
+          // Show steps
+          const steps = appState.actionsJobSteps[job.id] || [];
+          for (const step of steps) {
+            if (curY >= y + maxVisible) break;
+            const si = stepStatusIcon(step);
+            const stepName = truncate(step.name || '?', W - 14);
+            screen.writeStr(10, curY, '  ');
+            screen.writeStr(12, curY, si.ch, si.style);
+            screen.writeStr(14, curY, stepName, color('dim'));
+            curY++;
+            drawn++;
+          }
+        }
+      }
+    }
   }
 
   scrollIndicators(screen, y, y + maxVisible - 1, appState.actionsScroll, runs.length);
 
   // Status bar hint
-  const hintY = y + Math.min(maxVisible, runs.length);
+  const hintY = y + Math.min(maxVisible, drawn);
   if (hintY < y + h - 1) {
-    screen.hline(hintY + 1, '─', { dim: true });
-    screen.writeStr(2, hintY + 2, '[Enter] Open  [r] Re-run  [x] Cancel  [Esc] Back', { dim: true });
+    screen.hline(hintY, '─', { dim: true });
+    const hint = appState.actionsExpandedRun
+      ? '[Enter] Close detail   [o] Open in browser   [r] Re-run   [x] Cancel   [Esc] Back'
+      : '[Enter] Expand jobs   [o] Open in browser   [r] Re-run   [x] Cancel   [Esc] Back';
+    screen.writeStr(2, hintY + 1, hint, { dim: true });
   }
 }
 
@@ -261,13 +390,16 @@ export const keys = {
   't': () => {
     if (appState.actionsView === 'runs') {
       appState.actionsView = 'repos';
+      appState.actionsExpandedRun = null;
       render();
     }
+  },
+  'o': () => {
+    if (appState.actionsView === 'runs') openSelectedRun();
   },
 };
 
 export function up() {
-  const screen = { height: process.stdout.rows || 24 };
   if (appState.actionsView === 'repos') {
     const repos = getFilteredRepos();
     if (repos.length === 0) return;
@@ -277,6 +409,7 @@ export function up() {
     }
     render();
   } else {
+    if (appState.actionsExpandedRun) return; // don't move selection when viewing jobs
     appState.actionsSelected = Math.max(0, appState.actionsSelected - 1);
     if (appState.actionsSelected < appState.actionsScroll) {
       appState.actionsScroll = Math.max(0, appState.actionsScroll - 1);
@@ -296,6 +429,7 @@ export function down() {
     }
     render();
   } else {
+    if (appState.actionsExpandedRun) return; // don't move selection when viewing jobs
     const runs = appState.actionsRuns;
     const maxVisible = Math.max(1, Math.min(10, (process.stdout.rows || 24) - 16));
     if (runs.length === 0) return;
@@ -326,7 +460,7 @@ export function enter() {
   if (appState.actionsView === 'repos') {
     loadWorkflowRuns();
   } else {
-    openSelectedRun();
+    toggleRunDetail();
   }
 }
 

@@ -8,7 +8,7 @@ import {
   mkdirSync, unlinkSync, chmodSync,
 } from 'fs';
 
-export const APP_VERSION = '0.5.5';
+export const APP_VERSION = '0.5.6';
 
 export const CONFIG_DIR = join(homedir(), '.github-tui');
 export const TOKEN_FILE = join(CONFIG_DIR, 'token');

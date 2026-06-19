@@ -292,6 +292,8 @@ export const rerunWorkflow = (token, owner, repo, runId) =>
 export const cancelWorkflowRun = (token, owner, repo, runId) =>
   request('/repos/' + owner + '/' + repo + '/actions/runs/' + runId + '/cancel',
     { token, method: 'POST' });
+export const getWorkflowJobs = (token, owner, repo, runId) =>
+  request('/repos/' + owner + '/' + repo + '/actions/runs/' + runId + '/jobs', { token });
 
 // ─── Branches, zipball, per-file commits, raw bytes ──────────────────
 export const getBranches = (token, owner, repo, perPage) =>

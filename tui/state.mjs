@@ -165,6 +165,9 @@ export const appState = {
   actionsRepoScroll: 0,
   actionsLoading: false,
   actionsFilter: '',
+  actionsExpandedRun: null,   // run id when expanded to show jobs
+  actionsJobs: {},            // { [runId]: jobs[] }
+  actionsJobSteps: {},        // { [jobId]: steps[] }
 
   // ── Inbox ──
   notifications: [],

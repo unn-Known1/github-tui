@@ -2,7 +2,7 @@
 
 > *A living brainstorm of every realistic use case, persona, and feature that could make this app indispensable for every kind of GitHub user — from solo hackers to enterprise platform teams.*
 
-**Current version:** v0.5.5 (complete feature set: dashboard, repos, analyze with 10 panes, inbox, settings, mouse support, collapsible sections, 8 themes).
+**Current version:** v0.5.6 (complete feature set: dashboard, repos, analyze with 10 panes, inbox, settings, mouse support, collapsible sections, 8 themes).
 
 **Next milestone:** v0.6 — "Cache & Offline" (disk-backed ETag cache, offline mode, background prefetch).
 
@@ -36,14 +36,14 @@
 | Issue / PR detail popup | ✅ shipped v0.5 | Full detail view with rendered body, labels, comments, reviews, file diffs |
 | Comment / react / close-reopen / merge | ✅ shipped v0.5 | POST endpoints + confirmation modals |
 | PR diff viewer | ✅ shipped v0.5 | Unified diff with syntax-colored additions/deletions |
-| Review Comments | ✅ shipped v0.5.5 | Reviews tab in PR detail with state icons |
+| Review Comments | ✅ shipped v0.5.6 | Reviews tab in PR detail with state icons |
 | README viewer pane | ✅ shipped v0.3 | `R` opens it; naive Markdown styling |
 | Forks ahead/behind compares (parallel) | ✅ shipped v0.2 | 5-worker concurrent pool |
-| Traffic pane | ✅ shipped v0.5.5 | Views, clones, popular paths, popular referrers |
-| Milestones pane | ✅ shipped v0.5.5 | Title, state, due date, open/closed issues |
-| Labels pane | ✅ shipped v0.5.5 | Color dots, name, description |
-| Checks/CI pane | ✅ shipped v0.5.5 | Check runs with pass/fail/pending summary |
-| Security pane | ✅ shipped v0.5.5 | Dependabot alerts with severity icons |
+| Traffic pane | ✅ shipped v0.5.6 | Views, clones, popular paths, popular referrers |
+| Milestones pane | ✅ shipped v0.5.6 | Title, state, due date, open/closed issues |
+| Labels pane | ✅ shipped v0.5.6 | Color dots, name, description |
+| Checks/CI pane | ✅ shipped v0.5.6 | Check runs with pass/fail/pending summary |
+| Security pane | ✅ shipped v0.5.6 | Dependabot alerts with severity icons |
 | Inbox: list + open in browser | ✅ shipped v0.2 | Color-coded types, by-repo summary, relative time |
 | Inbox: mark-as-read / all / unsubscribe | ✅ shipped v0.3 | Keys `m`/`M`/`u` |
 | Inbox: filter cycle | ✅ shipped v0.3 | `f` cycles all → unread → mentions → review |
@@ -52,20 +52,20 @@
 | Settings panel with system info | ✅ shipped v0.2 | Version, paths, Node, platform, terminal |
 | Token scope inspector | ✅ shipped v0.3 | `lastScopes` from `x-oauth-scopes` |
 | Secure local auth (chmod 600 + masked + 401 auto-clear) | ✅ shipped v0.2 | |
-| Live API rate-limit indicator | ✅ shipped v0.5.5 | Visual `█░` bar in header + explicit endpoint |
+| Live API rate-limit indicator | ✅ shipped v0.5.6 | Visual `█░` bar in header + explicit endpoint |
 | ETag-aware caching | ✅ shipped v0.3 | In-memory; auto `If-None-Match` |
 | Command palette (Ctrl-P / `:`) | ✅ shipped v0.3 | ~30 registered actions, fuzzy match |
-| Themes (8 themes) | ✅ shipped v0.5.5 | default/highContrast/dracula/solarized/nord/monokai/gruvbox/light |
+| Themes (8 themes) | ✅ shipped v0.5.6 | default/highContrast/dracula/solarized/nord/monokai/gruvbox/light |
 | Bookmarks store | ✅ shipped v0.3 | `b` toggles; `B` browse overlay; `~/.github-tui/bookmarks.json` |
 | Star / unstar from anywhere | ✅ shipped v0.3 | `*` |
 | OSC-52 clipboard copy | ✅ shipped v0.3 | `y` |
 | Help overlay (`?`) | ✅ shipped v0.5 | Updated for all keys including detail popup |
-| Mouse support | ✅ shipped v0.5.5 | Click tabs/panes/items, scroll wheel, hover effects |
-| Collapsible sections | ✅ shipped v0.5.5 | `z`/`Z`/`X` keys, disk persistence |
-| Saved searches | ✅ shipped v0.5.5 | `Ctrl-P` → "Save current search"; run/delete via palette |
-| Repo preferences persistence | ✅ shipped v0.5.5 | Sort, filter, density saved to `~/.github-tui/repo-prefs.json` |
+| Mouse support | ✅ shipped v0.5.6 | Click tabs/panes/items, scroll wheel, hover effects |
+| Collapsible sections | ✅ shipped v0.5.6 | `z`/`Z`/`X` keys, disk persistence |
+| Saved searches | ✅ shipped v0.5.6 | `Ctrl-P` → "Save current search"; run/delete via palette |
+| Repo preferences persistence | ✅ shipped v0.5.6 | Sort, filter, density saved to `~/.github-tui/repo-prefs.json` |
 | Disk-backed cache (beyond ETag) | 🔲 planned v0.6 | Survives restarts; offline mode |
-| Workflows / Actions CI tab | ✅ shipped v0.5.5 | `4` → Actions; repos → runs; re-run/cancel; collapsible sections |
+| Workflows / Actions CI tab | ✅ shipped v0.5.6 | `4` → Actions; repos → runs; re-run/cancel; collapsible sections |
 | Code search across orgs | 🔲 planned v0.8 | `searchCode` ready |
 | OAuth device-flow + OS keychain | 🔲 planned v0.9 | |
 | User-editable keybindings | 🔲 planned | File path reserved: `~/.github-tui/keys.json` |
@@ -396,7 +396,7 @@ Real sequences a user runs through, end-to-end. Status reflects today.
 2. App pulls my events from the last 24h, dedups, summarises.
 3. Output rendered in a pop-up, copy with `y` (OSC-52). *(`y` already works for URLs)*
 
-### R5 — "CI Cockpit" ✅ *shipped v0.5.5*
+### R5 — "CI Cockpit" ✅ *shipped v0.5.6*
 1. `4` → Actions tab.
 2. Browse repos → view workflow runs → see status.
 3. `r` re-run failed. `x` cancel.
@@ -472,7 +472,7 @@ Real sequences a user runs through, end-to-end. Status reflects today.
 - 7 themes (added nord, monokai, gruvbox).
 - Help overlay updated for all new keybindings.
 
-### v0.5.5 — "Repo Analytics + Input Systems" ✅ SHIPPED
+### v0.5.6 — "Repo Analytics + Input Systems" ✅ SHIPPED
 - **Rate limit indicator** — visual `█░` bar in header + explicit `/rate_limit` endpoint.
 - **Traffic pane** — views, clones, popular paths, popular referrers.
 - **Milestones pane** — title, state, due date, open/closed issues.
