@@ -17,7 +17,7 @@ import {
 import { startInput, registerInputHandler } from '../input.mjs';
 import { shortNum, truncate, openUrl } from '../utils.mjs';
 import { color } from '../theme.mjs';
-import { emptyState } from '../render.mjs';
+import { emptyState, loadingIndicator, scrollIndicators } from '../render.mjs';
 import { loadForks, loadMoreForks, renderForks, toggleForkSort } from './forks.mjs';
 import * as files from './files.mjs';
 import { openDetail } from './detail.mjs';
@@ -383,13 +383,18 @@ function renderTrafficPane(screen, y, maxH) {
   y++;
 
   if (!views && !clones) {
-    screen.writeStr(2, y++, 'Loading traffic...', { dim: true });
+    if (appState.loading) {
+      loadingIndicator(screen, 2, y, 'loading traffic');
+      y++;
+      return;
+    }
+    screen.writeStr(2, y++, 'No traffic data — may require push access', { dim: true });
     return;
   }
 
   if (!views || (views.count === 0 && (!clones || clones.count === 0))) {
-    screen.writeStr(2, y++, 'No traffic data available', { dim: true });
-    screen.writeStr(2, y++, '(Traffic requires push access)', { dim: true });
+    screen.writeStr(2, y++, 'No traffic data yet — stats appear once a repo has visitors', { dim: true });
+    screen.writeStr(2, y++, 'Press [T] to retry', { fg: 'cyan' });
     return;
   }
 
@@ -471,7 +476,7 @@ function renderMilestonesPane(screen, y, maxH) {
   y++;
 
   if (milestones.length === 0) {
-    screen.writeStr(2, y++, 'No milestones found', { dim: true });
+    screen.writeStr(2, y++, 'No milestones — create one on GitHub to track progress', { dim: true });
     return;
   }
 
@@ -518,7 +523,7 @@ function renderLabelsPane(screen, y, maxH) {
   y++;
 
   if (labels.length === 0) {
-    screen.writeStr(2, y++, 'No labels found', { dim: true });
+    screen.writeStr(2, y++, 'No labels — manage labels on GitHub to categorize issues', { dim: true });
     return;
   }
 
@@ -585,7 +590,7 @@ function renderChecksPane(screen, y, maxH) {
   y++;
 
   if (runs.length === 0 && suites.length === 0) {
-    screen.writeStr(2, y++, 'No check runs found for default branch', { dim: true });
+    screen.writeStr(2, y++, 'No checks — push commits to see CI status here', { dim: true });
     return;
   }
 
@@ -627,7 +632,11 @@ function renderPackagesPane(screen, y, maxH) {
   const assets = appState.repoReleaseAssets;
   sectionHeader(screen, 2, y, '📦 RELEASE PACKAGES (' + assets.length + ')');
   if (assets.length === 0) {
-    screen.writeStr(2, y + 2, appState.loading ? 'Loading assets...' : '(no release packages found)', { dim: true });
+    if (appState.loading) {
+      loadingIndicator(screen, 2, y + 2, 'loading assets');
+    } else {
+      screen.writeStr(2, y + 2, '(no release packages found)', { dim: true });
+    }
     return;
   }
   screen.hline(y + 1, '─', { dim: true });
@@ -652,6 +661,7 @@ function renderPackagesPane(screen, y, maxH) {
       screen.writeStr(68, row, dl, sel ? color('selection') : color('downloadCount'));
     }
   }
+  scrollIndicators(screen, y + 2, y + 1 + rows, start, assets.length);
   const infoY = y + 2 + Math.min(rows, assets.length);
   if (infoY < y + maxH) {
     const range = (start + 1) + '-' + Math.min(start + rows, assets.length) + ' of ' + assets.length;
@@ -685,7 +695,7 @@ function renderSecurityPane(screen, y, maxH) {
   y++;
 
   if (alerts.length === 0) {
-    screen.writeStr(2, y++, 'No Dependabot alerts found', { dim: true });
+    screen.writeStr(2, y++, 'No Dependabot alerts — dependencies look clean', { dim: true });
     return;
   }
 
@@ -812,6 +822,8 @@ function renderRepoResults(screen, listY, h, W, maxVisible) {
       '   ⚡' + shortNum(repo.open_issues_count);
     screen.writeStr(36, row, stats, sel ? color('selection') : color('dim'));
   }
+  scrollIndicators(screen, listY + 2, listY + 1 + maxVisible, appState.searchScroll, results.length);
+
   const countY = listY + 2 + maxVisible;
   if (countY < y + h) {
     const pageInfo = appState.searchHasMore || appState.searchPage > 1
@@ -845,6 +857,8 @@ function renderUserResults(screen, listY, h, W, maxVisible) {
     const type = user.type || '';
     screen.writeStr(28, row, type, sel ? color('selection') : color('dim'));
   }
+  scrollIndicators(screen, listY + 2, listY + 1 + maxVisible, appState.searchScroll, results.length);
+
   const countY = listY + 2 + maxVisible;
   if (countY < y + h) {
     const pageInfo = appState.userSearchHasMore || appState.userSearchPage > 1
@@ -879,6 +893,8 @@ function renderCodeResults(screen, listY, h, W, maxVisible) {
     screen.writeStr(5, row, path, sel ? color('selection') : { fg: 'white' });
     screen.writeStr(32, row, truncate(repo, W - 35), sel ? color('selection') : { fg: 'cyan' });
   }
+  scrollIndicators(screen, listY + 2, listY + 1 + maxVisible, appState.searchScroll, results.length);
+
   const countY = listY + 2 + maxVisible;
   if (countY < y + h) {
     const pageInfo = appState.codeSearchHasMore || appState.codeSearchPage > 1
@@ -951,6 +967,7 @@ function renderIssuePRList(screen, y, maxH, opts) {
     }
     opts.renderExtra(screen, item, cols.extraCol, W, row);
   }
+  scrollIndicators(screen, y + 2, y + 1 + rows, start, items.length);
   if (items.length > rows) {
     screen.writeStr(2, y + 2 + rows,
       (start + 1) + '-' + Math.min(start + rows, items.length) + ' of ' + items.length +
@@ -984,6 +1001,7 @@ function renderReadmePane(screen, y, maxH) {
       screen.writeStr(2, row, truncate(ln, W - 6));
     }
   }
+  scrollIndicators(screen, y + 2, y + 1 + rows, start, lines.length);
   if (lines.length > rows) {
     screen.writeStr(2, y + 2 + rows,
       'Lines ' + (start + 1) + '-' + Math.min(start + rows, lines.length) +

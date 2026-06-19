@@ -5,7 +5,7 @@ import { appState, render, startAsync, isStale, showMessage, setTab } from '../s
 import { getWorkflowRuns, rerunWorkflow, cancelWorkflowRun } from '../github.mjs';
 import { openUrl, relTime, truncate } from '../utils.mjs';
 import { color } from '../theme.mjs';
-import { emptyState } from '../render.mjs';
+import { emptyState, loadingIndicator, scrollIndicators } from '../render.mjs';
 import { startInput, registerInputHandler } from '../input.mjs';
 
 const RUNS_PER_PAGE = 30;
@@ -148,7 +148,11 @@ function renderRepoList(screen, y, h, W) {
   y += 2;
   const repos = getFilteredRepos();
   if (repos.length === 0) {
-    screen.writeStr(2, y, 'No repos loaded. Refresh from Dashboard or Repos tab.', { dim: true });
+    emptyState(screen, y - 2, Math.max(8, h), {
+      icon: '○',
+      title: 'No repos loaded',
+      message: 'First visit the Dashboard or Repos tab to load your repos',
+    });
     return;
   }
   const maxVisible = Math.max(1, h - 2);
@@ -167,6 +171,7 @@ function renderRepoList(screen, y, h, W) {
     screen.writeStr(2, row, prefix + name, sel ? color('selection') : { fg: 'white' });
     screen.writeStr(W - stars.length - 2, row, stars, sel ? color('selection') : { fg: 'yellow' });
   }
+  scrollIndicators(screen, y, y + maxVisible - 1, appState.actionsRepoScroll, repos.length);
 }
 
 function renderRunList(screen, y, h, W) {
@@ -181,21 +186,25 @@ function renderRunList(screen, y, h, W) {
   }
 
   if (appState.actionsLoading) {
-    screen.writeStr(2, y, 'Loading workflow runs...', { dim: true });
+    loadingIndicator(screen, 2, y, 'loading workflow runs');
     return;
   }
 
   const runs = appState.actionsRuns;
   if (runs.length === 0) {
-    screen.writeStr(2, y, 'No workflow runs found for this repo.', { dim: true });
+    emptyState(screen, y - 2, Math.max(8, h), {
+      icon: '○',
+      title: 'No workflow runs',
+      message: 'Configure GitHub Actions in this repo to see runs here',
+    });
     return;
   }
 
   // Header
-  screen.writeStr(2, y, 'STATUS', { fg: 'white', bold: true, underline: true });
-  screen.writeStr(10, y, 'WORKFLOW', { fg: 'white', bold: true, underline: true });
-  screen.writeStr(40, y, 'BRANCH', { fg: 'white', bold: true, underline: true });
-  screen.writeStr(56, y, 'AGE', { fg: 'white', bold: true, underline: true });
+  screen.writeStr(2, y, 'STATUS', { fg: 'cyan', bold: true });
+  screen.writeStr(10, y, 'WORKFLOW', { fg: 'cyan', bold: true });
+  screen.writeStr(40, y, 'BRANCH', { fg: 'cyan', bold: true });
+  screen.writeStr(56, y, 'AGE', { fg: 'cyan', bold: true });
   y++;
 
   const maxVisible = Math.max(1, h - 3);
@@ -220,6 +229,8 @@ function renderRunList(screen, y, h, W) {
     screen.writeStr(40, row, branch, sel ? color('selection') : { fg: 'cyan' });
     screen.writeStr(56, row, when, sel ? color('selection') : { dim: true });
   }
+
+  scrollIndicators(screen, y, y + maxVisible - 1, appState.actionsScroll, runs.length);
 
   // Status bar hint
   const hintY = y + Math.min(maxVisible, runs.length);

@@ -8,7 +8,7 @@ import {
 } from '../github.mjs';
 import { relTime, notifTypeColor, notificationToHtmlUrl, openUrl, truncate } from '../utils.mjs';
 import { color } from '../theme.mjs';
-import { emptyState } from '../render.mjs';
+import { emptyState, loadingIndicator, scrollIndicators } from '../render.mjs';
 import { openDetail } from './detail.mjs';
 import { startInput, registerInputHandler } from '../input.mjs';
 
@@ -224,11 +224,15 @@ export function renderInbox(screen, y, h) {
     return;
   }
   if (allList.length === 0) {
+    if (appState.loading) {
+      loadingIndicator(screen, 2, y + 2, 'loading notifications');
+      return;
+    }
     emptyState(screen, y + 2, h - 2, {
       icon: '🎉',
-      title: appState.loading ? 'Loading...' : 'Inbox zero!',
-      message: appState.loading ? 'Fetching notifications...' : 'You have no notifications — enjoy the quiet.',
-      hint: appState.loading ? '' : '[r] Refresh',
+      title: 'Inbox zero!',
+      message: 'You have no notifications — enjoy the quiet.',
+      hint: '[r] Refresh',
     });
     return;
   }
@@ -314,6 +318,8 @@ export function renderInbox(screen, y, h) {
     const when = n.updated_at ? relTime(n.updated_at) : '';
     screen.writeStr(Math.min(listW - 4, 68), row, when, sel ? color('selection') : color('date'));
   }
+
+  scrollIndicators(screen, headerY + 2, headerY + 1 + maxRows, appState.inboxScroll, list.length);
 
   const infoY = headerY + 2 + Math.min(maxRows, list.length) + 1;
   if (infoY < y + h) {

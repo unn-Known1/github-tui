@@ -26,6 +26,16 @@ export function initScreen() { screen = new Screen(); return screen; }
 const SPINNER = ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏'];
 let spinnerIdx = 0;
 
+export function getSpinner() {
+  spinnerIdx = (spinnerIdx + 1) % SPINNER.length;
+  return SPINNER[spinnerIdx];
+}
+
+export function loadingIndicator(screen, x, y, label = 'loading', style) {
+  const s = style || { fg: 'cyan' };
+  screen.writeStr(x, y, getSpinner() + ' ' + label, s);
+}
+
 // Minimum terminal dimensions.
 const MIN_W = 60;
 const MIN_H = 20;
@@ -83,7 +93,7 @@ export function buildBreadcrumb() {
 export function emptyState(screen, y, h, { icon, title, message, hint, keyHint }) {
   const W = screen.width;
   const lines = [];
-  if (icon)   lines.push({ text: icon,    style: { fg: 'cyan' },  yOff: 0, big: true });
+  if (icon)   lines.push({ text: icon,    style: { fg: 'cyan' },  yOff: 0 });
   if (title)  lines.push({ text: title,   style: color('title'),  yOff: 2 });
   if (message) lines.push({ text: message, style: color('dim'),   yOff: 4 });
   if (hint)   lines.push({ text: hint,    style: color('dim'),    yOff: 5 });
@@ -98,6 +108,43 @@ export function emptyState(screen, y, h, { icon, title, message, hint, keyHint }
     if (row >= y + h) break;
     const cx = Math.max(CONTENT_PADDING, Math.floor((W - line.text.length) / 2));
     screen.writeStr(cx, row, line.text, line.style);
+  }
+}
+
+// Draw a centered error-state card: icon + message + retry hint.
+export function errorState(screen, y, h, { message, detail }) {
+  const W = screen.width;
+  const lines = [];
+  lines.push({ text: '⚠',    style: { fg: 'red', bold: true },  yOff: 0 });
+  lines.push({ text: 'Error', style: { fg: 'red', bold: true },  yOff: 2 });
+  if (message) lines.push({ text: message, style: color('dim'),   yOff: 4 });
+  if (detail)  lines.push({ text: detail,  style: color('dim'),   yOff: 5 });
+  lines.push({ text: 'Press [r] to retry', style: { fg: 'red' }, yOff: 7 });
+
+  const totalH = lines[lines.length - 1].yOff + 1;
+  const startY = y + Math.max(0, Math.floor((h - totalH) / 2));
+
+  for (const line of lines) {
+    const row = startY + line.yOff;
+    if (row >= y + h) break;
+    const cx = Math.max(CONTENT_PADDING, Math.floor((W - line.text.length) / 2));
+    screen.writeStr(cx, row, line.text, line.style);
+  }
+}
+
+// Draw scroll indicators at the top and/or bottom of a scrollable list.
+// Shows "↑" when there's content above, "↓" when there's content below.
+export function scrollIndicators(screen, topY, botY, scroll, total) {
+  if (total <= 1) return;
+  const W = screen.width;
+  const hasAbove = scroll > 0;
+  const hasBelow = scroll + (botY - topY) < total;
+  if (!hasAbove && !hasBelow) return;
+  if (topY === botY) {
+    screen.writeStr(W - 2, topY, hasAbove && hasBelow ? '↕' : hasAbove ? '↑' : '↓', { dim: true });
+  } else {
+    if (hasAbove) screen.writeStr(W - 2, topY, '↑', { dim: true });
+    if (hasBelow) screen.writeStr(W - 2, botY, '↓', { dim: true });
   }
 }
 
@@ -171,8 +218,7 @@ function renderHeader(W) {
     screen.breadcrumb(2, 2, crumb, Math.floor(W * 0.6));
   }
   if (appState.loading) {
-    spinnerIdx = (spinnerIdx + 1) % SPINNER.length;
-    const txt = SPINNER[spinnerIdx] + ' loading';
+    const txt = getSpinner() + ' loading';
     const x = Math.max(2, W - txt.length - 2);
     screen.writeStr(x, 2, txt, { fg: 'cyan' });
   } else {
@@ -227,7 +273,7 @@ function renderTabStrip(y, W) {
     // Tab text: "[1] Dashboard"
     const text = '[' + key + '] ' + label;
     const tx = bx + 1;
-    screen.writeStr(tx, tabRowY, text, isActive ? color('tabActive') : { dim: true });
+    screen.writeStr(tx, tabRowY, text, isActive ? color('tabActive') : { fg: 'gray', dim: true });
 
     // Badge for inbox with unread items.
     if (i === 4 && unreadCount > 0) {
@@ -242,8 +288,15 @@ function renderTabStrip(y, W) {
     }
   });
 
-  // Separator under tab strip.
+  // Separator under tab strip — highlight under active tab.
   screen.hline(sepY, '─', { dim: true });
+  const activeTab = TABS[tabState.current];
+  if (activeTab) {
+    const ax = tabXs[tabState.current];
+    for (let xx = ax; xx < ax + tabW && xx < W - 1; xx++) {
+      screen.setCell(xx, sepY, '━', { fg: 'cyan', bold: true });
+    }
+  }
 }
 
 // Render the bottom status bar (1 row + separator above).
@@ -282,8 +335,10 @@ function renderFooter(W, H) {
   // Default: context-aware key hint line.
   const hint = statusLine();
   if (hint) {
-    // Style the [key] parts: we just print plain — keeping it readable.
-    screen.writeStr(1, statusY, hint.substring(0, W - 2), { fg: 'gray' });
+    const tabLabel = TABS[tabState.current]?.label || '';
+    screen.writeStr(2, statusY, tabLabel, { fg: 'cyan', bold: true });
+    screen.writeStr(2 + tabLabel.length + 1, statusY, '│', { dim: true });
+    screen.writeStr(2 + tabLabel.length + 3, statusY, hint.substring(0, W - tabLabel.length - 8), { fg: 'white' });
   }
 }
 

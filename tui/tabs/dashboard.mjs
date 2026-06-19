@@ -10,7 +10,7 @@ import {
 } from '../github.mjs';
 import { relTime, eventGlyph, greeting, shortNum, truncate, openUrl } from '../utils.mjs';
 import { color } from '../theme.mjs';
-import { emptyState, collapsibleHeader } from '../render.mjs';
+import { emptyState, collapsibleHeader, loadingIndicator } from '../render.mjs';
 import { loadRepoDetails } from './analyze.mjs';
 
 export async function loadDashboardWidgets(force = false) {
@@ -278,7 +278,7 @@ export function renderDashboard(screen, y, h) {
         .sort((a, b) => (b.stargazers_count || 0) - (a.stargazers_count || 0))
         .slice(0, 5);
       if (top.length === 0) {
-        screen.writeStr(leftX, ly++, '(no repos)', { dim: true });
+        screen.writeStr(leftX, ly++, 'No repos — add repos to your GitHub account', { dim: true });
       } else {
         for (const r of top) {
           if (ly >= y + h - 1) break;
@@ -314,7 +314,7 @@ export function renderDashboard(screen, y, h) {
 
       if (activityVisible) {
       if (totalEvents === 0) {
-        screen.writeStr(leftX, ly++, '(no activity)', { dim: true });
+        screen.writeStr(leftX, ly++, 'No recent activity — push code or open issues to get started', { dim: true });
       } else {
 
   const heatStyle = (level) => {
@@ -362,7 +362,7 @@ export function renderDashboard(screen, y, h) {
       const barW = Math.max(3, halfW - Math.floor(halfW * 0.58) - 14);
       let lly = heatTopY + 1;
       if (sorted.length === 0) {
-        screen.writeStr(langLeftX, lly, '(no metadata)', { dim: true });
+        screen.writeStr(langLeftX, lly, 'No language data — repos may not have languages detected', { dim: true });
       } else {
         for (const [lang, count] of sorted) {
           if (lly >= y + h - 1) break;
@@ -385,8 +385,12 @@ export function renderDashboard(screen, y, h) {
   ry++;
   if (activityVisible) {
     if (appState.events.length === 0) {
-      screen.writeStr(rightX, ry++, appState.dashboardLoaded
-        ? '(no public events)' : 'Loading...', { dim: true });
+      if (!appState.dashboardLoaded) {
+        loadingIndicator(screen, rightX, ry, 'loading events');
+        ry++;
+      } else {
+        screen.writeStr(rightX, ry++, 'No activity yet — [r] to refresh', { dim: true });
+      }
     } else {
       const maxEvents = Math.min(7, Math.max(1, Math.floor((y + h - bodyY) * 0.30)));
       for (const ev of appState.events.slice(0, maxEvents)) {
@@ -467,7 +471,12 @@ export function renderDashboard(screen, y, h) {
     }
     ry++;
     if (trendingList.length === 0) {
-      screen.writeStr(rightX, ry++, appState.dashboardLoaded ? '(none)' : 'Loading...', { dim: true });
+      if (!appState.dashboardLoaded) {
+        loadingIndicator(screen, rightX, ry, 'loading trending');
+        ry++;
+      } else {
+        screen.writeStr(rightX, ry++, '(none)', { dim: true });
+      }
     } else {
       const maxTrending = Math.min(trendingList.length, Math.max(3, Math.floor((y + h - bodyY) * 0.30)));
       for (let i = 0; i < maxTrending && i < trendingList.length; i++) {

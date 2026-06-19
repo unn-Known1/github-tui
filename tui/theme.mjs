@@ -30,7 +30,7 @@ const B = {
   chromeAccent: { bg: 'darkGray', fg: 'cyan', bold: true },
   // Tab strip
   tabInactive: { fg: 'gray' },
-  tabActive: { fg: 'white', bold: true },
+  tabActive: { bg: 'cyan', fg: 'white', bold: true },
   tabActiveBg: { bg: 'cyan', fg: 'darkGray', bold: true },
   tabBadge: { bg: 'yellow', fg: 'darkGray', bold: true },
   // Chips
@@ -49,7 +49,7 @@ const B = {
   tabBar: { dim: true },
   tabBarActive: { fg: 'white', bold: true, underline: true },
   // Input
-  inputBox: { fg: 'cyan', underline: true },
+  inputBox: { bg: 'darkGray', fg: 'cyan', underline: true },
   inputPrompt: { fg: 'cyan', bold: true },
   // Cards / sections
   cardLabel: { fg: 'gray' },
@@ -69,10 +69,10 @@ const B = {
   rateWarn: { fg: 'yellow' },
   rateCrit: { fg: 'red' },
   // Toasts (used in renderConfirmDialog as well)
-  toastInfo: { fg: 'cyan', bold: true },
-  toastSuccess: { fg: 'green', bold: true },
-  toastError: { fg: 'red', bold: true },
-  toastWarning: { fg: 'yellow', bold: true },
+  toastInfo: { bg: 'darkGray', fg: 'cyan', bold: true },
+  toastSuccess: { bg: 'darkGray', fg: 'green', bold: true },
+  toastError: { bg: 'darkGray', fg: 'red', bold: true },
+  toastWarning: { bg: 'darkGray', fg: 'yellow', bold: true },
   // Section accent
   sectionHeading: { fg: 'cyan', bold: true },
   // Repo / list items

@@ -7,7 +7,7 @@ import { removeToken } from '../config.mjs';
 import { startInput, registerInputHandler } from '../input.mjs';
 import { shortNum, relTime, truncate } from '../utils.mjs';
 import { color } from '../theme.mjs';
-import { emptyState } from '../render.mjs';
+import { emptyState, scrollIndicators } from '../render.mjs';
 import { loadDashboardWidgets } from './dashboard.mjs';
 import { isBookmarked } from '../store.mjs';
 import { isPinned, togglePin, loadPins } from '../store.mjs';
@@ -284,6 +284,8 @@ function renderStarredList(screen, y, h) {
     screen.writeStr(W - 22, row, stars, sel ? color('selection') : color('star'));
   }
 
+  scrollIndicators(screen, headerY + 1, headerY + rowsToShow, appState.starredScroll, list.length);
+
   const footerY = headerY + 1 + rowsToShow + 1;
   if (footerY < y + h) {
     const range = (start + 1) + '-' + Math.min(start + rowsToShow, list.length) + ' of ' + list.length;
@@ -427,6 +429,8 @@ export function renderRepos(screen, y, h) {
     curY += rowH;
     drawn++;
   }
+
+  scrollIndicators(screen, headerY + 2, Math.max(headerY + 2, curY - 1), start, repos.length);
 
   const footerY = curY + 1;
   if (footerY < y + h) {

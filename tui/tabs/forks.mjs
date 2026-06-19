@@ -5,6 +5,7 @@ import { appState, render, startAsync, isStale, showMessage } from '../state.mjs
 import { getRepositoryForks, getCompare } from '../github.mjs';
 import { color } from '../theme.mjs';
 import { truncate } from '../utils.mjs';
+import { loadingIndicator, scrollIndicators } from '../render.mjs';
 
 const FORKS_PER_PAGE = 30;
 const COMPARE_CONCURRENCY = 5;
@@ -148,8 +149,12 @@ export function renderForks(screen, y, maxH) {
     screen.writeStr(aheadCol, headerY, 'Ahead', color('header'));
   }
 
-  if (forks.length === 0 && !appState.loading) {
-    screen.writeStr(4, headerY + 1, 'No forks found', color('dim'));
+  if (forks.length === 0) {
+    if (appState.loading) {
+      loadingIndicator(screen, 4, headerY + 1, 'loading forks');
+    } else {
+      screen.writeStr(4, headerY + 1, 'No forks found', color('dim'));
+    }
     return;
   }
 
@@ -181,6 +186,8 @@ export function renderForks(screen, y, maxH) {
       if (behind) screen.writeStr(aheadCol + ahead.length, row, behind, color('error'));
     }
   }
+
+  scrollIndicators(screen, headerY + 1, headerY + maxRows, appState.forkScroll, forks.length);
 
   const infoY = headerY + 1 + maxRows + 1;
   if (infoY < y + maxH) {
