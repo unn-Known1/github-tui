@@ -15,6 +15,7 @@ import * as onboarding from './tabs/onboarding.mjs';
 import { handleInputKey } from './input.mjs';
 import { copyToClipboard, openUrl, notificationToHtmlUrl } from './utils.mjs';
 import { startInput, registerInputHandler } from './input.mjs';
+import * as bookmarks from './bookmarks.mjs';
 
 import * as dashboard from './tabs/dashboard.mjs';
 import * as repos     from './tabs/repos.mjs';
@@ -24,7 +25,7 @@ import * as inbox     from './tabs/inbox.mjs';
 import * as detail    from './tabs/detail.mjs';
 import * as actions   from './tabs/actions.mjs';
 import * as help      from './tabs/help.mjs';
-import { addBookmark, removeBookmark, isBookmarked, addSavedSearch, removeSavedSearch, loadBookmarks } from './store.mjs';
+import { addBookmark, removeBookmark, isBookmarked, addSavedSearch, removeSavedSearch } from './store.mjs';
 import { starRepo, unstarRepo, isStarred, createIssue, getSubscription, setSubscription, deleteSubscription } from './github.mjs';
 import { getScreen } from './render.mjs';
 import { parseMouseEvent, handleMouseEvent } from './mouse.mjs';
@@ -165,49 +166,7 @@ export function handleKey(key) {
   }
 
   // 1aa. Bookmarks overlay.
-  if (appState.showBookmarks) {
-    if (key === '\x1b' || key === 'q' || key === 'b') { appState.showBookmarks = false; render(); return; }
-    if (key === '\x1b[A' || key === 'k') {
-      appState.bookmarksCursor = Math.max(0, appState.bookmarksCursor - 1);
-      render(); return;
-    }
-    if (key === '\x1b[B' || key === 'j') {
-      const max = appState.bookmarks.length - 1;
-      appState.bookmarksCursor = Math.min(max, appState.bookmarksCursor + 1);
-      render(); return;
-    }
-    if (key === '\r' || key === '\n') {
-      const bm = appState.bookmarks[appState.bookmarksCursor];
-      if (bm && bm.url) {
-        openUrl(bm.url).then(res => {
-          if (res.ok) showMessage('Opened ' + bm.full_name, 'success');
-          else showMessage(res.error || 'Open failed', 'error');
-        });
-      }
-      appState.showBookmarks = false;
-      render();
-      return;
-    }
-    if (key === 'd' || key === 'D') {
-      const bm = appState.bookmarks[appState.bookmarksCursor];
-      if (bm) {
-        removeBookmark(bm.id || bm.full_name);
-        appState.bookmarks = loadBookmarks();
-        appState.bookmarksCursor = Math.min(appState.bookmarksCursor, Math.max(0, appState.bookmarks.length - 1));
-        showMessage('Removed bookmark: ' + bm.full_name, 'info');
-      }
-      render();
-      return;
-    }
-    if (key === 'y') {
-      const bm = appState.bookmarks[appState.bookmarksCursor];
-      if (bm && bm.url && copyToClipboard(bm.url)) showMessage('Copied URL', 'success');
-      else showMessage('Clipboard copy failed', 'error');
-      render();
-      return;
-    }
-    return;
-  }
+  if (bookmarks.handleKey(key)) return;
 
   // 1b. Help overlay: handle special keys, any other key closes.
   if (appState.showHelp) {
@@ -591,7 +550,7 @@ export function registerCoreActions() {
   reg({ id: 'dashboard.refresh', label: 'Refresh dashboard widgets',
         run: () => dashboard.loadDashboardWidgets(true) });
   reg({ id: 'dashboard.new-issue', label: 'Create new issue from TUI',
-        run: startCreateIssue });
+        run: () => import('./issue-create.mjs').then(m => m.startCreateIssue()) });
 
   reg({ id: 'detail.comment', label: 'Comment on current issue/PR',
         run: () => { if (appState.showDetail) detail.openCommentInput(); } });
@@ -604,21 +563,9 @@ export function registerCoreActions() {
 
   // Bookmarks browser
   reg({ id: 'bookmarks.browse', label: 'Browse bookmarks',
-        run: () => {
-          appState.bookmarks = loadBookmarks();
-          appState.showBookmarks = true;
-          appState.bookmarksCursor = 0;
-          appState.bookmarksScroll = 0;
-          render();
-        } });
+        run: () => bookmarks.openBookmarks() });
   reg({ id: 'bookmarks.export', label: 'Export bookmarks to Markdown',
-        run: () => {
-          const bm = appState.bookmarks;
-          if (bm.length === 0) { showMessage('No bookmarks to export', 'warning'); return; }
-          const md = '# Bookmarks\n\n' + bm.map(b => `- [${b.full_name}](${b.url})`).join('\n');
-          if (copyToClipboard(md)) showMessage('Copied bookmarks as Markdown', 'success');
-          else showMessage('Clipboard copy failed', 'error');
-        } });
+        run: () => bookmarks.exportMarkdown() });
 
   reg({ id: 'actions.refresh', label: 'Actions: load workflow runs',
         run: () => { setTab(5); actions.loadActionsRepos(); } });
@@ -647,60 +594,3 @@ export function registerCoreActions() {
 }
 
 import { submitSearch } from './tabs/analyze.mjs';
-
-// ── Create Issue Workflow ─────────────────────────────────────────
-// Temporary state for multi-step issue creation.
-let _issueRepoIndex = 0;
-let _issueTitle = '';
-let _issueBody = '';
-
-registerInputHandler('issue-title', async (value) => {
-  const title = (value || '').trim();
-  if (!title) { showMessage('Issue title cannot be empty', 'error'); return; }
-  _issueTitle = title;
-  startInput('Issue body (optional, Enter to skip): ', 'issue-body');
-});
-
-registerInputHandler('issue-body', async (value) => {
-  const body = (value || '').trim();
-  _issueBody = body;
-  const repos = appState.repos;
-  if (!repos[_issueRepoIndex]) { showMessage('No repo selected', 'error'); return; }
-  const repo = repos[_issueRepoIndex];
-  const [owner, name] = repo.full_name.split('/');
-  try {
-    const result = await createIssue(appState.token, owner, name, _issueTitle, _issueBody);
-    if (result && result.html_url) {
-      showMessage('Created issue: ' + result.title, 'success');
-    } else {
-      showMessage('Issue created', 'success');
-    }
-  } catch (e) {
-    showMessage(e.message || 'Failed to create issue', 'error');
-  }
-  _issueTitle = '';
-  _issueBody = '';
-});
-
-registerInputHandler('issue-pick-repo', (value) => {
-  const idx = parseInt(value, 10);
-  const repos = appState.repos;
-  if (isNaN(idx) || idx < 0 || idx >= repos.length) {
-    showMessage('Invalid repo number', 'error');
-    _issueTitle = '';
-    _issueBody = '';
-    return;
-  }
-  _issueRepoIndex = idx;
-  startInput('Issue title: ', 'issue-title');
-});
-
-function startCreateIssue() {
-  const repos = appState.repos;
-  if (!appState.token) { showMessage('Login first', 'warning'); return; }
-  if (repos.length === 0) { showMessage('No repos loaded', 'warning'); return; }
-  // Show repo picker in status bar.
-  const names = repos.map((r, i) => i + ': ' + r.name).join('  ');
-  showMessage('Available repos: ' + names, 'info', 5000);
-  startInput('Enter repo number (0-' + (repos.length - 1) + '): ', 'issue-pick-repo');
-}

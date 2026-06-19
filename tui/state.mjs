@@ -339,3 +339,42 @@ export function loadCollapsed() {
     }
   } catch {}
 }
+
+// ── Session persistence — save/restore navigation state across restarts ──
+
+const SESSION_PATH = join(homedir(), '.github-tui', 'session.json');
+
+export function saveSession() {
+  try {
+    const session = {
+      tab: tabState.current,
+      recentRepos: appState.recentRepos,
+      analyzeView: appState.analyzeView,
+      searchQuery: appState.searchQuery,
+      searchType: appState.searchType,
+      reposView: appState.reposView,
+    };
+    const dir = join(homedir(), '.github-tui');
+    if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
+    writeFileSync(SESSION_PATH, JSON.stringify(session, null, 2));
+  } catch {}
+}
+
+export function loadSession() {
+  try {
+    if (!existsSync(SESSION_PATH)) return;
+    const raw = readFileSync(SESSION_PATH, 'utf-8');
+    const s = JSON.parse(raw);
+    if (s.tab != null && s.tab >= 0 && s.tab < TABS.length) tabState.current = s.tab;
+    if (s.recentRepos) appState.recentRepos = s.recentRepos;
+    if (s.analyzeView) appState.analyzeView = s.analyzeView;
+    if (s.searchQuery) appState.searchQuery = s.searchQuery;
+    if (s.searchType) appState.searchType = s.searchType;
+    if (s.reposView) appState.reposView = s.reposView;
+  } catch {}
+}
+
+// Auto-save on normal exit.
+process.on('exit', saveSession);
+process.on('SIGINT', () => { saveSession(); });
+process.on('SIGTERM', () => { saveSession(); });

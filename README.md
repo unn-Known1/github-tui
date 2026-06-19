@@ -5,7 +5,7 @@ A fast, zero-dependency terminal user interface for GitHub — five tabs, a comm
 ![status](https://img.shields.io/badge/status-active-success) ![node](https://img.shields.io/badge/node-%E2%89%A518-blue) ![deps](https://img.shields.io/badge/deps-0-green) ![license](https://img.shields.io/badge/license-MIT-blue)
 
 ## GitHub / User
-- Remote: `https://github.com/unn-Known1/Multi-Agent-Book-Architect`
+- Remote: `https://github.com/unn-Known1/github-tui`
 - Author: unn-Known1
 - Email: ptelgm.yt@gmail.com
 

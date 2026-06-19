@@ -2,15 +2,60 @@
 // Supports any HTTP method, optional body, ETag caching, live rate-limit mirror.
 
 import https from 'https';
+import { readFileSync, writeFileSync, existsSync, mkdirSync } from 'fs';
+import { dirname } from 'path';
 
 const GITHUB_API = 'api.github.com';
 const USER_AGENT = 'GitHub-TUI';
+const ETAG_CACHE_FILE = process.env.HOME
+  ? process.env.HOME + '/.github-tui/etag-cache.json'
+  : null;
 
 export const lastRateLimit = { remaining: null, limit: null, reset: null };
 export const lastScopes = { scopes: [], accepted: [] };
 const etagCache = new Map();
 const ETAG_CACHE_MAX = 500;
 const ETAG_TTL = 300_000; // 5 minutes
+
+// ── Disk-backed ETag cache (survives restarts, saves rate-limit budget) ──
+
+function loadEtagCache() {
+  if (!ETAG_CACHE_FILE) return;
+  try {
+    if (!existsSync(ETAG_CACHE_FILE)) return;
+    const raw = readFileSync(ETAG_CACHE_FILE, 'utf-8');
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return;
+    const now = Date.now();
+    for (const [key, etag, body, ts] of parsed) {
+      if (now - ts < ETAG_TTL) {
+        // body is already the parsed JSON object from serialization
+        etagCache.set(key, { etag, body, ts });
+      }
+    }
+  } catch { /* corrupt cache → discard silently */ }
+}
+
+function saveEtagCache() {
+  if (!ETAG_CACHE_FILE) return;
+  try {
+    const entries = [];
+    for (const [key, entry] of etagCache) {
+      entries.push([key, entry.etag, entry.body, entry.ts]);
+    }
+    const dir = dirname(ETAG_CACHE_FILE);
+    if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
+    writeFileSync(ETAG_CACHE_FILE, JSON.stringify(entries));
+  } catch { /* non-fatal */ }
+}
+
+// Load persisted cache on module init.
+loadEtagCache();
+
+// Save cache on normal exit.
+process.on('exit', saveEtagCache);
+process.on('SIGINT', () => { saveEtagCache(); });
+process.on('SIGTERM', () => { saveEtagCache(); });
 
 function buildOptions(path, token, method, body) {
   const headers = {
@@ -29,6 +74,9 @@ function buildOptions(path, token, method, body) {
   return { hostname: GITHUB_API, path, method, headers };
 }
 
+// Minimum remaining API calls before we start being conservative with GETs.
+const LOW_RATE_WARN = 10;
+
 export function request(path, opts) {
   const o = opts || {};
   const token = o.token || null;
@@ -38,6 +86,15 @@ export function request(path, opts) {
   const timeoutMs = o.timeoutMs || 15000;
   const raw = !!o.raw;
   const bodyStr = body == null ? null : JSON.stringify(body);
+
+  // Rate-limit-conservative mode: when budget is low, try cache before hitting the wire.
+  if (method === 'GET' && lastRateLimit.remaining !== null && lastRateLimit.remaining < LOW_RATE_WARN) {
+    const key = `${method}:${path}`;
+    const cached = etagCache.get(key);
+    if (cached && Date.now() - cached.ts < ETAG_TTL) {
+      return Promise.resolve(cached.body);
+    }
+  }
 
   return new Promise((resolve, reject) => {
     let settled = false;
