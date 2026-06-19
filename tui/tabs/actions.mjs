@@ -50,6 +50,10 @@ function stepStatusIcon(step) {
 
 export async function loadActionsRepos() {
   if (!appState.token) return;
+  if (appState.repos.length === 0) {
+    showMessage('Load repos on Dashboard or Repos tab first', 'warning');
+    return;
+  }
   appState.actionsRepos = appState.repos || [];
   appState.actionsRepoSelected = 0;
   appState.actionsRepoScroll = 0;

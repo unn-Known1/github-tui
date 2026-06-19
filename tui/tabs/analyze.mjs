@@ -1821,6 +1821,8 @@ export const keys = {
     else if (appState.analyzeView === 'search' || appState.analyzeView === 'results') {
       appState.searchType = 'code';
       appState.analyzeView = 'search';
+      appState.codeSelectedRepo = 0;
+      appState.codeSearchScroll = 0;
       render();
       startInput('Search code: ', 'code-search');
     }
@@ -1829,6 +1831,8 @@ export const keys = {
     if (appState.analyzeView === 'search' || appState.analyzeView === 'results') {
       appState.searchType = 'users';
       appState.analyzeView = 'search';
+      appState.userSelectedRepo = 0;
+      appState.userSearchScroll = 0;
       render();
       startInput('Search users: ', 'user-search');
     }

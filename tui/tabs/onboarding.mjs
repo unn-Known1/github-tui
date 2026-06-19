@@ -214,14 +214,14 @@ export function renderOnboarding(screen, opts = {}) {
   }
 
   // Hint.
-  const hintY = y0 + boxH - 2;
+  const hintY = y0 + boxH - 3;
   const hint = step.hint || '[Enter] Next   [Esc] Skip';
   screen.writeStr(x0 + 3, hintY, hint.substring(0, boxW - 6), { fg: 'cyan' });
 
   // Progress dots.
   if (!welcomeMode) {
     let dx = x0 + 3;
-    const dotY = y0 + boxH - 1;
+    const dotY = y0 + boxH - 2;
     for (let i = 0; i < STEPS.length; i++) {
       const isCur = i === stepIdx;
       const isDone = i < stepIdx;

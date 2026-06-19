@@ -76,14 +76,14 @@ function sectionHeader(screen, x, y, text, maxW) {
   }
 }
 
-function renderRow(screen, y, W, label, desc, enabled, selected) {
+function renderRow(screen, y, W, label, desc, enabled, selected, labelStyleOverride) {
   if (selected) {
     for (let x = 0; x < W; x++) screen.styleBuf[y][x] = { bg: 'blue', fg: 'white', bold: true };
   }
   const prefix = selected ? '▶ ' : '  ';
-  const labelStyle = selected
+  const labelStyle = labelStyleOverride || (selected
     ? { bg: 'blue', fg: 'white', bold: true }
-    : (enabled ? { fg: 'white' } : { dim: true });
+    : (enabled ? { fg: 'white' } : { dim: true }));
   const descStyle = selected
     ? { bg: 'blue', fg: 'white' }
     : { dim: true };
@@ -105,7 +105,7 @@ export function renderSettings(screen, y, h) {
   let row = y + 3;
 
   // First decide where the system panel goes so we can constrain left column.
-  const sysPanelW = Math.min(46, Math.max(34, Math.floor(W * 0.4)));
+  const sysPanelW = Math.min(56, Math.max(34, Math.floor(W * 0.35)));
   const sysX = Math.max(2, W - sysPanelW - 2);
   const leftMaxW = sysX > 50 ? sysX - 4 : W;
   const sectionH = h - 8;
@@ -182,11 +182,10 @@ export function renderSettings(screen, y, h) {
   ];
   for (const item of dangerItems) {
     if (row >= y + sectionH) break;
-    renderRow(screen, row, leftMaxW, item.label, item.desc, item.enabled, item.sel);
-    const labelStyle = item.sel
+    const dangerStyle = item.sel
       ? { bg: 'red', fg: 'white', bold: true }
       : (item.enabled ? { fg: 'red', bold: true } : { dim: true });
-    screen.writeStr(4, row, item.label, labelStyle);
+    renderRow(screen, row, leftMaxW, item.label, item.desc, item.enabled, item.sel, dangerStyle);
     row++;
   }
 
@@ -256,13 +255,40 @@ export const keys = {
     import('./repos.mjs').then(m => m.loadUserData());
   },
 };
+const AUTH_ITEMS = [0, 1];  // Login, Logout
+const DATA_ITEMS = [2, 3];  // Refresh Dashboard, Refresh User Data
+const APPEARANCE_ITEMS = [4]; // Change Theme
+const DANGER_ITEMS = [5];  // Clear Token
+
+function isCursorEnabled(cursor) {
+  const isLoggedIn = !!appState.token;
+  if (AUTH_ITEMS.includes(cursor)) {
+    if (cursor === 0) return !isLoggedIn;
+    return isLoggedIn;
+  }
+  if (DATA_ITEMS.includes(cursor)) return isLoggedIn;
+  if (APPEARANCE_ITEMS.includes(cursor)) return true;
+  if (DANGER_ITEMS.includes(cursor)) return isLoggedIn;
+  return false;
+}
+
 export function up() {
-  appState.settingsCursor = Math.max(0, appState.settingsCursor - 1); render();
+  do {
+    appState.settingsCursor = Math.max(0, appState.settingsCursor - 1);
+  } while (!isCursorEnabled(appState.settingsCursor) && appState.settingsCursor > 0);
+  if (!isCursorEnabled(appState.settingsCursor) && appState.settingsCursor > 0) {
+    appState.settingsCursor = 0;
+  }
+  render();
 }
 export function down() {
-  appState.settingsCursor = Math.min(
-    appState._maxSettingsCursor != null ? appState._maxSettingsCursor : 6,
-    appState.settingsCursor + 1);
+  const max = appState._maxSettingsCursor != null ? appState._maxSettingsCursor : 5;
+  do {
+    appState.settingsCursor = Math.min(max, appState.settingsCursor + 1);
+  } while (!isCursorEnabled(appState.settingsCursor) && appState.settingsCursor < max);
+  if (!isCursorEnabled(appState.settingsCursor)) {
+    appState.settingsCursor = Math.max(0, appState.settingsCursor - 1);
+  }
   render();
 }
 
@@ -280,16 +306,27 @@ export function enter() {
     case 2:
       if (isLoggedIn) {
         appState.dashboardLoaded = false;
-        loadDashboardWidgets(true);
+        appState.loading = true;
+        render();
+        loadDashboardWidgets(true).finally(() => { appState.loading = false; render(); });
         showMessage('Refreshing dashboard...', 'info');
       }
       break;
     case 3:
-      if (isLoggedIn) { loadUserData(); showMessage('Refreshing user data...', 'info'); }
+      if (isLoggedIn) {
+        appState.loading = true;
+        render();
+        loadUserData().finally(() => { appState.loading = false; render(); });
+        showMessage('Refreshing user data...', 'info');
+      }
       break;
-    case 4:
-      startInput('Theme (' + listThemes().join('/') + '): ', 'theme');
+    case 4: {
+      const themes = listThemes();
+      const curIdx = themes.indexOf(getThemeName());
+      const nextIdx = (curIdx + 1) % themes.length;
+      if (setTheme(themes[nextIdx])) showMessage('Theme: ' + themes[nextIdx], 'success');
       break;
+    }
     case 5:
       if (isLoggedIn) confirm('Wipe token file and log out?', () => {
         handleLogout();

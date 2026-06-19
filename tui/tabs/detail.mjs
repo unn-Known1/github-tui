@@ -242,13 +242,13 @@ export function renderDetail(screen) {
   // Header line: state + title + author + date
   const stateStyle = data.state === 'closed' ? color('error') : color('success');
   screen.writeStr(innerX, by + 1, data.state.toUpperCase(), stateStyle);
-  const hdrText = '  ' + (data.title || '');
-  screen.writeStr(innerX + data.state.length + 2, by + 1,
-    truncate(hdrText, innerW - data.state.length - 20));
   const author = (data.user && data.user.login) || '?';
   const when = data.created_at ? relTime(data.created_at) : '';
-  screen.writeStr(bx + boxW - author.length - when.length - 5, by + 1,
-    author + ' ' + when, color('dim'));
+  const authorBlock = author + ' ' + when;
+  const titleMaxW = innerW - data.state.length - 2 - authorBlock.length - 3;
+  const hdrText = '  ' + truncate(data.title || '', Math.max(10, titleMaxW));
+  screen.writeStr(innerX + data.state.length + 2, by + 1, hdrText);
+  screen.writeStr(bx + boxW - authorBlock.length - 3, by + 1, authorBlock, color('dim'));
 
   // Labels
   if (data.labels && data.labels.length > 0) {
@@ -279,12 +279,20 @@ export function renderDetail(screen) {
     screen.writeStr(tx, tabY, text, sel ? color('chipActive') : color('chipInactive'));
     tx += text.length;
   }
-  // Action bar
+  // Action bar — only show actions that fit.
   const actionY = tabY;
-  const actions = ['c Comment', 'r React'];
-  if (appState.detailType === 'pull_request' && data.mergeable) actions.push('M Merge');
-  if (data.state === 'open') actions.push('x Close');
-  else actions.push('x Reopen');
+  const allActions = ['c Comment', 'r React'];
+  if (appState.detailType === 'pull_request' && data.mergeable) allActions.push('M Merge');
+  if (data.state === 'open') allActions.push('x Close');
+  else allActions.push('x Reopen');
+  // Only render actions that fit before the tab labels end.
+  const actions = [];
+  let actionWidth = 0;
+  for (const a of allActions) {
+    if (actionWidth + a.length + 1 > innerW * 0.45) break;
+    actions.push(a);
+    actionWidth += a.length + 1;
+  }
   let ax = bx + boxW - 2;
   for (let i = actions.length - 1; i >= 0; i--) {
     ax -= actions[i].length + 1;

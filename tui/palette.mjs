@@ -146,17 +146,16 @@ export function renderPalette(screen) {
     }
   }
 
-  // Scroll indicator
+  // Scroll indicator + footer hints on the same bottom row.
   if (list.length > maxVisible) {
     const s = (scrollOff + 1) + '-' + Math.min(scrollOff + maxVisible, list.length) +
       ' of ' + list.length;
     screen.writeStr(x + 2, y + boxH - 2, s, color('dim'));
+    const hint = '↑↓ navigate   ⏎ run   Esc close';
+    screen.writeStr(x + boxW - hint.length - 3, y + boxH - 2, hint, color('dim'));
   } else {
-    screen.writeStr(x + 2, y + boxH - 2, list.length + ' action' +
-      (list.length !== 1 ? 's' : '') + ' found', color('dim'));
+    const hint = list.length + ' action' + (list.length !== 1 ? 's' : '') +
+      ' found   ↑↓ navigate   ⏎ run   Esc close';
+    screen.writeStr(x + 2, y + boxH - 2, hint.substring(0, boxW - 4), color('dim'));
   }
-
-  // Footer hints
-  const hint = '↑↓ navigate   ⏎ run   Esc close';
-  screen.writeStr(x + boxW - hint.length - 3, y + boxH - 2, hint, color('dim'));
 }

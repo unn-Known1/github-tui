@@ -215,7 +215,7 @@ export function renderInbox(screen, y, h) {
 
   if (!appState.token) {
     emptyState(screen, y + 2, h - 2, {
-      icon: '🔒',
+      icon: '*',
       title: 'Login required',
       message: 'Sign in to view your GitHub notifications.',
       hint: '',
@@ -229,7 +229,7 @@ export function renderInbox(screen, y, h) {
       return;
     }
     emptyState(screen, y + 2, h - 2, {
-      icon: '🎉',
+      icon: '*',
       title: 'Inbox zero!',
       message: 'You have no notifications — enjoy the quiet.',
       hint: '[r] Refresh',

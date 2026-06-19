@@ -20,12 +20,19 @@ export function closeBookmarks() {
 
 export function up() {
   appState.bookmarksCursor = Math.max(0, appState.bookmarksCursor - 1);
+  if (appState.bookmarksCursor < appState.bookmarksScroll) {
+    appState.bookmarksScroll = appState.bookmarksCursor;
+  }
   render();
 }
 
 export function down() {
   const max = appState.bookmarks.length - 1;
   appState.bookmarksCursor = Math.min(max, appState.bookmarksCursor + 1);
+  const maxVisible = 12;
+  if (appState.bookmarksCursor >= appState.bookmarksScroll + maxVisible) {
+    appState.bookmarksScroll = appState.bookmarksCursor - maxVisible + 1;
+  }
   render();
 }
 
@@ -37,7 +44,7 @@ export function enter() {
       else showMessage(res.error || 'Open failed', 'error');
     });
   }
-  appState.showBookmarks = false;
+  // Don't close overlay — let user open multiple bookmarks.
   render();
 }
 

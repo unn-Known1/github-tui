@@ -578,9 +578,16 @@ function dispatchAnalyzeClick(sx, sy) {
 // ── Inbox tab ─────────────────────────────────────────────────
 
 function dispatchInboxClick(sy) {
+  // inboxScroll and selectedNotification both index into the filtered list.
+  const filteredLen = appState.notifications.filter(n => {
+    if (appState.inboxFilter === 'unread') return n.unread;
+    if (appState.inboxFilter === 'mentions') return n.reason === 'mention';
+    if (appState.inboxFilter === 'review') return n.reason === 'review_requested';
+    return true;
+  }).length;
   const scroll = appState.inboxScroll;
   const itemIdx = sy - HEADER_HEIGHT - 2 + scroll;
-  if (itemIdx >= 0 && itemIdx < appState.notifications.length) {
+  if (itemIdx >= 0 && itemIdx < filteredLen) {
     appState.inboxScroll = Math.max(0, itemIdx - 5);
     appState.selectedNotification = itemIdx;
     render();
