@@ -442,23 +442,45 @@ function dispatchReposClick(sx, sy) {
   import('./tabs/repos.mjs').then(repos => {
     if (repos.tryDismissChipAt(sx, sy)) { render(); return; }
 
-    const list = appState.reposView === 'starred' ? appState.starred : appState.repos;
-    const scroll = appState.reposView === 'starred' ? appState.starredScroll : appState.repoScroll;
-
-    // Approximate row mapping: for own view, data starts at HEADER_HEIGHT+8
-    // (contentY+title+hline+chips+header+hline); for starred at HEADER_HEIGHT+5.
-    // NOTE: does not account for PINNED section headers or comfortable 2-row items.
-    const rowOff = appState.reposView === 'starred' ? (HEADER_HEIGHT + 5) : (HEADER_HEIGHT + 8);
-    const itemIdx = sy - rowOff + scroll;
-    if (itemIdx >= 0 && itemIdx < list.length) {
-      if (appState.reposView === 'starred') {
+    if (appState.reposView === 'starred') {
+      const list = appState.starred;
+      const scroll = appState.starredScroll;
+      const rowOff = HEADER_HEIGHT + 5;
+      const itemIdx = sy - rowOff + scroll;
+      if (itemIdx >= 0 && itemIdx < list.length) {
         appState.starredScroll = Math.max(0, itemIdx - 5);
         appState.starredSelected = itemIdx;
-      } else {
-        appState.repoScroll = Math.max(0, itemIdx - 5);
-        appState.repoSelected = itemIdx;
+        render();
       }
-      render();
+      return;
+    }
+
+    // Own repos: need to account for PINNED headers and comfortable density.
+    const reposList = repos.floatPinsToTop(repos.applyAllFilters(repos.sortRepos(appState.repos, appState.repoSort)));
+    const scroll = appState.repoScroll;
+    const compact = appState.repoDensity === 'compact';
+    const rowH = compact ? 1 : 2;
+    const rowOff = HEADER_HEIGHT + 8;
+
+    // Determine which items have a "★ PINNED" header before them.
+    const isPinnedArr = new Array(reposList.length).fill(false);
+    const isSectionStart = new Array(reposList.length).fill(false);
+    for (let i = 0; i < reposList.length; i++) {
+      isPinnedArr[i] = repos.isPinnedLocal(reposList[i].full_name);
+      if (isPinnedArr[i] && (i === 0 || !isPinnedArr[i - 1])) isSectionStart[i] = true;
+    }
+
+    // Simulate the render loop to find which item was clicked.
+    let curY = rowOff;
+    for (let i = scroll; i < reposList.length; i++) {
+      if (isSectionStart[i]) curY++;
+      if (sy >= curY && sy < curY + rowH) {
+        appState.repoScroll = Math.max(0, i - 5);
+        appState.repoSelected = i;
+        render();
+        return;
+      }
+      curY += rowH;
     }
   }).catch(() => {});
 }

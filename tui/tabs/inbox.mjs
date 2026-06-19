@@ -26,7 +26,7 @@ export async function loadNotifications() {
   render();
   try {
     const notes = await getNotifications(appState.token, 1, INBOX_PER_PAGE);
-    if (isStale(gen)) return;
+    if (isStale(gen)) { appState.loading = false; return; }
     appState.notifications = Array.isArray(notes) ? notes : [];
     appState.inboxHasMore = notes.length >= INBOX_PER_PAGE;
     appState.inboxScroll = 0;
@@ -47,7 +47,7 @@ export async function loadMoreNotifications() {
   try {
     const page = appState.inboxPage + 1;
     const more = await getNotifications(appState.token, page, INBOX_PER_PAGE);
-    if (isStale(gen)) return;
+    if (isStale(gen)) { appState.loading = false; return; }
     appState.notifications = [...appState.notifications, ...more];
     appState.inboxPage = page;
     appState.inboxHasMore = more.length >= INBOX_PER_PAGE;
@@ -65,7 +65,7 @@ export function pageUp() {
     appState.loading = true;
     render();
     getNotifications(appState.token, page, INBOX_PER_PAGE).then(more => {
-      if (isStale(gen)) return;
+      if (isStale(gen)) { appState.loading = false; return; }
       if (Array.isArray(more)) {
         appState.notifications = more;
         appState.inboxPage = page;
@@ -86,7 +86,7 @@ export function pageDown() {
     appState.loading = true;
     render();
     getNotifications(appState.token, page, INBOX_PER_PAGE).then(more => {
-      if (isStale(gen)) return;
+      if (isStale(gen)) { appState.loading = false; return; }
       if (Array.isArray(more) && more.length > 0) {
         appState.notifications = more;
         appState.inboxPage = page;
@@ -344,7 +344,6 @@ export const keys = {
   'M': markAllRead,
   'u': unsubscribeCurrent,
   'f': cycleFilter,
-  'g': () => { appState.selectedNotification = 0; appState.inboxScroll = 0; render(); },
 };
 
 export function bottom(screen) {

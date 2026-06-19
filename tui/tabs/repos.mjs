@@ -134,12 +134,12 @@ export async function loadUserData() {
   render();
   try {
     appState.user = await getAuthenticatedUser(appState.token);
-    if (isStale(gen)) return;
+    if (isStale(gen)) { appState.loading = false; return; }
     if (appState.user) {
       appState.repos = await getUserRepositories(appState.token, 1, REPOS_PER_PAGE);
       appState.reposPage = 1;
       appState.reposHasMore = appState.repos.length >= REPOS_PER_PAGE;
-      if (isStale(gen)) return;
+      if (isStale(gen)) { appState.loading = false; return; }
       loadAllReposBackground(gen);
       loadDashboardWidgets().catch(() => {});
     }
@@ -167,7 +167,7 @@ async function loadAllReposBackground(gen) {
   while (appState.reposHasMore) {
     try {
       const more = await getUserRepositories(appState.token, page, REPOS_PER_PAGE);
-      if (isStale(gen)) return;
+      if (isStale(gen)) { appState.loading = false; return; }
       appState.repos = [...appState.repos, ...more];
       appState.reposPage = page;
       appState.reposHasMore = more.length >= REPOS_PER_PAGE;
@@ -188,7 +188,7 @@ export async function loadMoreRepos() {
   try {
     const page = appState.reposPage + 1;
     const more = await getUserRepositories(appState.token, page, REPOS_PER_PAGE);
-    if (isStale(gen)) return;
+    if (isStale(gen)) { appState.loading = false; return; }
     appState.repos = [...appState.repos, ...more];
     appState.reposPage = page;
     appState.reposHasMore = more.length >= REPOS_PER_PAGE;
@@ -234,7 +234,7 @@ function badgeChar(r) {
 }
 
 // Use in-memory state to avoid disk roundtrip on every row render.
-function isPinnedLocal(fullName) {
+export function isPinnedLocal(fullName) {
   return appState.repoPins && appState.repoPins.indexOf(fullName) >= 0;
 }
 
@@ -540,7 +540,7 @@ async function loadStarredRepos() {
   render();
   try {
     const starred = await getStarredRepos(appState.token, 1, 100);
-    if (isStale(gen)) return;
+    if (isStale(gen)) { appState.loading = false; return; }
     appState.starred = Array.isArray(starred) ? starred : [];
     appState.starredPage = 1;
     appState.starredHasMore = appState.starred.length >= 100;
@@ -560,7 +560,7 @@ export async function loadMoreStarred() {
   try {
     const page = appState.starredPage + 1;
     const more = await getStarredRepos(appState.token, page, 100);
-    if (isStale(gen)) return;
+    if (isStale(gen)) { appState.loading = false; return; }
     if (Array.isArray(more) && more.length > 0) {
       appState.starred = [...appState.starred, ...more];
       appState.starredPage = page;
@@ -584,7 +584,7 @@ export function pageUp() {
     appState.loading = true;
     render();
     getStarredRepos(appState.token, page, 100).then(more => {
-      if (isStale(gen)) return;
+      if (isStale(gen)) { appState.loading = false; return; }
       if (Array.isArray(more)) {
         appState.starred = more;
         appState.starredPage = page;
@@ -609,7 +609,7 @@ export function pageDown() {
     appState.loading = true;
     render();
     getStarredRepos(appState.token, page, 100).then(more => {
-      if (isStale(gen)) return;
+      if (isStale(gen)) { appState.loading = false; return; }
       if (Array.isArray(more) && more.length > 0) {
         appState.starred = more;
         appState.starredPage = page;
@@ -643,11 +643,6 @@ export const keys = {
   'D': () => { if (appState.reposView === 'own') toggleDensity(); },
   'P': () => { if (appState.reposView === 'own') togglePinCurrent(); },
   'V': toggleReposView,
-  'g': () => {
-    if (appState.reposView === 'own') { appState.repoSelected = 0; appState.repoScroll = 0; }
-    else { appState.starredSelected = 0; appState.starredScroll = 0; }
-    render();
-  },
 };
 
 export function up(screen) {

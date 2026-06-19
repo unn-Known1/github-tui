@@ -65,7 +65,7 @@ export async function loadTree() {
   try {
     const list = await getRepoContents(
       appState.token, owner, name, appState.filesPath, appState.filesRef);
-    if (isStale(gen)) return;
+    if (isStale(gen)) { appState.loading = false; return; }
     const arr = Array.isArray(list) ? list : [list];
     // Sort: directories first, then files; alpha within each group.
     arr.sort((a, b) => {
@@ -126,7 +126,7 @@ export async function viewFile(ent) {
   try {
     const text = await getRepoFile(
       appState.token, owner, name, ent.path, appState.filesRef);
-    if (isStale(gen)) return;
+    if (isStale(gen)) { appState.loading = false; return; }
     appState.fileViewing = ent.path;
     appState.fileText = typeof text === 'string' ? text : String(text);
     appState.fileScroll = 0;
@@ -146,7 +146,7 @@ export async function openBranchPicker() {
     render();
     try {
       const list = await getBranches(appState.token, owner, name, 50);
-      if (isStale(gen)) return;
+      if (isStale(gen)) { appState.loading = false; return; }
       appState.filesBranches = Array.isArray(list) ? list : [];
     } catch (e) {
       if (!isStale(gen)) showMessage('Branches: ' + e.message, 'error');
@@ -216,7 +216,7 @@ export async function saveCurrentFolder() {
   try {
     // BFS to enumerate files.
     while (stack.length) {
-      if (isStale(gen)) return;
+      if (isStale(gen)) { appState.loading = false; return; }
       const cur = stack.shift();
       const list = await getRepoContents(
         appState.token, owner, name, cur, appState.filesRef);
@@ -239,7 +239,7 @@ export async function saveCurrentFolder() {
     let cursor = 0;
     const worker = async () => {
       while (cursor < seenFiles.length) {
-        if (isStale(gen)) return;
+        if (isStale(gen)) { appState.loading = false; return; }
         const e = seenFiles[cursor++];
         try {
           const txt = await getRepoFile(

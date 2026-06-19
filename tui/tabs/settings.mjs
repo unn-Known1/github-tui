@@ -24,7 +24,7 @@ export async function submitLogin(value) {
   render();
   try {
     const user = await getAuthenticatedUser(token);
-    if (isStale(gen)) return;
+    if (isStale(gen)) { appState.loading = false; return; }
     if (user) {
       saveToken(token);
       appState.token = token;
@@ -255,7 +255,6 @@ export const keys = {
     showMessage('Refreshing...', 'info');
     import('./repos.mjs').then(m => m.loadUserData());
   },
-  'g': () => { appState.settingsCursor = 0; render(); },
 };
 export function up() {
   appState.settingsCursor = Math.max(0, appState.settingsCursor - 1); render();

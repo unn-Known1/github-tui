@@ -44,7 +44,7 @@ export async function submitSearch(value) {
   render();
   try {
     const results = await searchRepositories(appState.token, query, 1, SEARCH_PER_PAGE);
-    if (isStale(gen)) return;
+    if (isStale(gen)) { appState.loading = false; return; }
     appState.searchResults = results;
     appState.searchHasMore = results.length >= SEARCH_PER_PAGE;
     if (results.length === 0) showMessage('No repositories found', 'warning');
@@ -73,7 +73,7 @@ export async function submitUserSearch(value) {
   render();
   try {
     const results = await searchUsers(appState.token, query, 1, USER_SEARCH_PER_PAGE);
-    if (isStale(gen)) return;
+    if (isStale(gen)) { appState.loading = false; return; }
     appState.userSearchResults = results;
     appState.userSearchHasMore = results.length >= USER_SEARCH_PER_PAGE;
     if (results.length === 0) showMessage('No users found', 'warning');
@@ -98,7 +98,7 @@ export async function submitCodeSearch(value) {
   render();
   try {
     const results = await searchCode(appState.token, query, 1, CODE_SEARCH_PER_PAGE);
-    if (isStale(gen)) return;
+    if (isStale(gen)) { appState.loading = false; return; }
     appState.codeSearchResults = results;
     appState.codeSearchHasMore = results.length >= CODE_SEARCH_PER_PAGE;
     if (results.length === 0) showMessage('No code results found', 'warning');
@@ -119,7 +119,7 @@ async function openUserProfile(login) {
   render();
   try {
     const user = await getUser(appState.token, login);
-    if (isStale(gen)) return;
+    if (isStale(gen)) { appState.loading = false; return; }
     if (user && user.html_url) {
       showMessage('@' + login + ': ' + (user.name || '') + ' — ' + user.public_repos + ' repos, ' + user.followers + ' followers', 'info', 5000);
       openUrl(user.html_url).then(res => {
@@ -162,7 +162,7 @@ export async function loadMoreSearchResults() {
       if (!appState.searchHasMore) { appState.loading = false; render(); return; }
       more = await searchRepositories(appState.token, appState.searchQuery, page, SEARCH_PER_PAGE);
     }
-    if (isStale(gen)) return;
+    if (isStale(gen)) { appState.loading = false; return; }
     if (type === 'users') {
       appState.userSearchResults = [...appState.userSearchResults, ...more];
       appState.userSearchPage = page;
@@ -196,14 +196,14 @@ export function cycleIssueStateFilter() {
   const gen = startAsync();
   if (appState.detailsPane === 'issues') {
     getRepositoryIssues(appState.token, owner, name, 1, 100, appState.issueStateFilter).then(issues => {
-      if (isStale(gen)) return;
+      if (isStale(gen)) { appState.loading = false; return; }
       appState.repoIssues = Array.isArray(issues) ? issues.filter(i => !i.pull_request) : [];
       appState.detailsScroll = 0;
       render();
     }).catch(e => { if (!isStale(gen)) showMessage(e.message || 'Failed to reload issues', 'error'); });
   } else {
     getRepositoryPullRequests(appState.token, owner, name, 1, 100, appState.issueStateFilter).then(prs => {
-      if (isStale(gen)) return;
+      if (isStale(gen)) { appState.loading = false; return; }
       appState.repoPullRequests = Array.isArray(prs) ? prs : [];
       appState.detailsScroll = 0;
       render();
@@ -218,7 +218,7 @@ export function pageUp() {
     appState.loading = true;
     render();
     searchRepositories(appState.token, appState.searchQuery, page, SEARCH_PER_PAGE).then(more => {
-      if (isStale(gen)) return;
+      if (isStale(gen)) { appState.loading = false; return; }
       if (Array.isArray(more)) {
         appState.searchResults = more;
         appState.searchPage = page;
@@ -241,7 +241,7 @@ export function pageDown() {
     appState.loading = true;
     render();
     searchRepositories(appState.token, appState.searchQuery, page, SEARCH_PER_PAGE).then(more => {
-      if (isStale(gen)) return;
+      if (isStale(gen)) { appState.loading = false; return; }
       if (Array.isArray(more) && more.length > 0) {
         appState.searchResults = more;
         appState.searchPage = page;
@@ -281,7 +281,7 @@ export async function loadRepoDetails(owner, name) {
   render();
   try {
     const details = await getRepositoryDetails(appState.token, owner, name);
-    if (isStale(gen)) return;
+    if (isStale(gen)) { appState.loading = false; return; }
     appState.repoDetails = details;
     appState.analyzeView = 'details';
     // Track in recent repos.
@@ -297,7 +297,7 @@ export async function loadRepoDetails(owner, name) {
       safe(getRepositoryIssues(appState.token, owner, name, 1, 100, issueState)),
       safe(getRepositoryPullRequests(appState.token, owner, name, 1, 100, issueState)),
     ]);
-    if (isStale(gen)) return;
+    if (isStale(gen)) { appState.loading = false; return; }
     appState.repoLanguages = langs || null;
     appState.repoContributors = Array.isArray(contribs) ? contribs : [];
     appState.repoReleases = Array.isArray(releases) ? releases : [];
@@ -320,7 +320,7 @@ export async function viewReadme() {
   try {
     const [owner, name] = repo.full_name.split('/');
     const md = await getReadme(appState.token, owner, name);
-    if (isStale(gen)) return;
+    if (isStale(gen)) { appState.loading = false; return; }
     appState.detailsPane = 'readme';
     appState.detailsScroll = 0;
     appState._readmeText = md || '(empty README)';
@@ -343,7 +343,7 @@ export async function loadReleaseAssets() {
     const allAssets = [];
     for (const rel of appState.repoReleases.slice(0, 3)) {
       const assets = await getReleaseAssets(appState.token, owner, name, rel.id);
-      if (isStale(gen)) return;
+      if (isStale(gen)) { appState.loading = false; return; }
       if (Array.isArray(assets)) {
         for (const a of assets) {
           allAssets.push({ ...a, releaseTag: rel.tag_name, releaseName: rel.name });
@@ -401,7 +401,7 @@ export async function loadTraffic() {
       safe(getRepoTrafficPopularPaths(appState.token, owner, name)),
       safe(getRepoTrafficPopularReferrers(appState.token, owner, name)),
     ]);
-    if (isStale(gen)) return;
+    if (isStale(gen)) { appState.loading = false; return; }
     appState.repoTraffic = views;
     appState.repoTrafficClones = clones;
     appState.repoTrafficPopularPaths = Array.isArray(paths) ? paths : [];
@@ -498,7 +498,7 @@ export async function loadMilestones() {
   try {
     const [owner, name] = repo.full_name.split('/');
     const milestones = await getRepoMilestones(appState.token, owner, name);
-    if (isStale(gen)) return;
+    if (isStale(gen)) { appState.loading = false; return; }
     appState.repoMilestones = Array.isArray(milestones) ? milestones : [];
   } catch (e) {
     if (!isStale(gen)) showMessage('Failed to load milestones: ' + e.message, 'error');
@@ -545,7 +545,7 @@ export async function loadLabels() {
   try {
     const [owner, name] = repo.full_name.split('/');
     const labels = await getRepoLabels(appState.token, owner, name);
-    if (isStale(gen)) return;
+    if (isStale(gen)) { appState.loading = false; return; }
     appState.repoLabels = Array.isArray(labels) ? labels : [];
   } catch (e) {
     if (!isStale(gen)) showMessage('Failed to load labels: ' + e.message, 'error');
@@ -610,7 +610,7 @@ export async function loadChecks() {
       getRepoCheckRuns(appState.token, owner, name, repo.default_branch),
       getRepoCheckSuites(appState.token, owner, name, repo.default_branch),
     ]);
-    if (isStale(gen)) return;
+    if (isStale(gen)) { appState.loading = false; return; }
     appState.repoCheckRuns = (runs && runs.check_runs) ? runs.check_runs : [];
     appState.repoCheckSuites = (suites && suites.check_suites) ? suites.check_suites : [];
   } catch (e) {
@@ -717,7 +717,7 @@ export async function loadSecurity() {
   try {
     const [owner, name] = repo.full_name.split('/');
     const alerts = await getRepoDependabotAlerts(appState.token, owner, name);
-    if (isStale(gen)) return;
+    if (isStale(gen)) { appState.loading = false; return; }
     appState.repoDependabotAlerts = Array.isArray(alerts) ? alerts : [];
   } catch (e) {
     if (!isStale(gen)) showMessage('Failed to load security alerts: ' + e.message, 'error');
@@ -1218,6 +1218,21 @@ export function handleBack() {
   }
 }
 
+export function jumpTop() {
+  if (isFilesPane()) files.jumpTop();
+  else if (appState.analyzeView === 'results') {
+    appState.selectedRepo = 0;
+    appState.searchScroll = 0;
+    render();
+  } else if (appState.analyzeView === 'forks') {
+    appState.selectedFork = 0;
+    appState.forkScroll = 0;
+    render();
+  } else {
+    appState.detailsScroll = 0;
+    render();
+  }
+}
 export const keys = {
   'i': () => {
     if (appState.analyzeView === 'details') {
@@ -1297,21 +1312,7 @@ export const keys = {
   'G': () => { if (isFilesPane()) files.keys.G(); },
   'B': () => { if (isFilesPane()) files.keys.B(); },
   'Y': () => { if (isFilesPane()) files.keys.Y(); },
-  'g': () => {
-    if (isFilesPane()) files.jumpTop();
-    else if (appState.analyzeView === 'results') {
-      appState.selectedRepo = 0;
-      appState.searchScroll = 0;
-      render();
-    } else if (appState.analyzeView === 'forks') {
-      appState.selectedFork = 0;
-      appState.forkScroll = 0;
-      render();
-    } else {
-      appState.detailsScroll = 0;
-      render();
-    }
-  },
+  'g': () => { jumpTop(); },
   'n': () => { if (appState.analyzeView === 'forks') toggleForkSort('name'); },
   'T': () => {
     if (appState.analyzeView === 'details') {

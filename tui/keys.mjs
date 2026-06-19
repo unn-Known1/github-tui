@@ -321,7 +321,7 @@ export function handleKey(key) {
 function handleSpace() {
   const t = tabState.current;
   if (t === 0) dashboard.pageDown();
-  else if (t === 1) repos.pageDown();
+  else if (t === 1) repos.space();
   else if (t === 2) analyze.pageDown();
   else if (t === 4) inbox.pageDown();
 }
@@ -353,28 +353,21 @@ function handleTop() {
     }
     render();
   } else if (t === 2) {
-    if (appState.analyzeView === 'results') {
-      appState.selectedRepo = 0;
-      appState.searchScroll = 0;
-    } else if (appState.analyzeView === 'forks') {
-      appState.selectedFork = 0;
-      appState.forkScroll = 0;
-    } else {
-      appState.detailsScroll = 0;
-    }
+    analyze.jumpTop();
+  } else if (t === 4) {
+    appState.selectedNotification = 0;
+    appState.inboxScroll = 0;
+    render();
+  } else if (t === 3) {
+    appState.actionsSelected = 0;
+    appState.actionsScroll = 0;
     render();
   } else if (t === 4) {
     appState.selectedNotification = 0;
     appState.inboxScroll = 0;
     render();
   } else if (t === 5) {
-    if (appState.actionsView === 'repos') {
-      appState.actionsRepoSelected = 0;
-      appState.actionsRepoScroll = 0;
-    } else {
-      appState.actionsSelected = 0;
-      appState.actionsScroll = 0;
-    }
+    appState.settingsCursor = 0;
     render();
   }
 }
@@ -396,11 +389,13 @@ function handleBottom() {
       appState.detailsScroll = 9999;
     }
     render();
+  } else if (t === 3) {
+    actions.bottom(screen);
+    render();
   } else if (t === 4) {
     inbox.bottom(screen);
   } else if (t === 5) {
-    actions.bottom(screen);
-    render();
+    // Settings has no scrollable list
   }
 }
 
@@ -427,6 +422,7 @@ function getCurrentSection() {
   if (t === 0) return dashboard.getCurrentSection ? dashboard.getCurrentSection() : null;
   if (t === 1) return repos.getCurrentSection ? repos.getCurrentSection() : null;
   if (t === 2) return analyze.getCurrentSection ? analyze.getCurrentSection() : null;
+  if (t === 3) return actions.getCurrentSection ? actions.getCurrentSection() : null;
   if (t === 4) return inbox.getCurrentSection ? inbox.getCurrentSection() : null;
   return null;
 }
@@ -436,6 +432,7 @@ function getTabSections() {
   if (t === 0) return dashboard.getSections ? dashboard.getSections() : [];
   if (t === 1) return repos.getSections ? repos.getSections() : [];
   if (t === 2) return analyze.getSections ? analyze.getSections() : [];
+  if (t === 3) return actions.getSections ? actions.getSections() : [];
   if (t === 4) return inbox.getSections ? inbox.getSections() : [];
   return [];
 }
@@ -486,6 +483,7 @@ function handleBack() {
       import('./tabs/detail.mjs').then(m => m.closeDetail()).catch(() => {});
       return;
     }
+    return;
   }
   setTab(0);
 }

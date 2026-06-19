@@ -68,7 +68,7 @@ async function loadDetail() {
     } else {
       data = await getIssue(appState.token, owner, repo, number);
     }
-    if (isStale(gen)) return;
+    if (isStale(gen)) { appState.loading = false; return; }
     appState.detailData = data;
 
     const safe = (p) => p.catch(() => null);
@@ -77,7 +77,7 @@ async function loadDetail() {
       type === 'pull_request' ? safe(getPullRequestReviews(appState.token, owner, repo, number)) : Promise.resolve([]),
       type === 'pull_request' ? safe(getPullRequestFiles(appState.token, owner, repo, number)) : Promise.resolve([]),
     ]);
-    if (isStale(gen)) return;
+    if (isStale(gen)) { appState.loading = false; return; }
     appState.detailComments = Array.isArray(comments) ? comments : [];
     appState.detailReviews = Array.isArray(reviews) ? reviews : [];
     appState.detailFiles = Array.isArray(files) ? files : [];

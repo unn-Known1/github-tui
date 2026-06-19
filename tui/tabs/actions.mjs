@@ -51,7 +51,7 @@ export async function loadWorkflowRuns() {
   render();
   try {
     const result = await getWorkflowRuns(appState.token, owner, name, RUNS_PER_PAGE);
-    if (isStale(gen)) return;
+    if (isStale(gen)) { appState.loading = false; return; }
     const runs = result && result.workflow_runs ? result.workflow_runs : [];
     appState.actionsRuns = runs;
     appState.actionsView = 'runs';

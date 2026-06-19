@@ -47,13 +47,13 @@ async function runCompares(owner, name, defaultBranch, range, gen) {
     while (true) {
       const i = cursor++;
       if (i >= range.to) return;
-      if (isStale(gen)) return;
+      if (isStale(gen)) { appState.loading = false; return; }
       const forkOwner = appState.forks[i] && appState.forks[i].owner && appState.forks[i].owner.login;
       if (!forkOwner) { completed++; continue; }
       try {
         const compare = await getCompare(
           appState.token, owner, name, defaultBranch, forkOwner + ':' + defaultBranch);
-        if (isStale(gen)) return;
+        if (isStale(gen)) { appState.loading = false; return; }
         appState.forks[i]._aheadBehind = compare
           ? { ahead: compare.ahead_by || 0, behind: compare.behind_by || 0 }
           : { ahead: 0, behind: 0 };
@@ -81,7 +81,7 @@ export async function loadForks() {
   try {
     const [owner, name] = repo.full_name.split('/');
     const forks = await getRepositoryForks(appState.token, owner, name, 1, FORKS_PER_PAGE);
-    if (isStale(gen)) return;
+    if (isStale(gen)) { appState.loading = false; return; }
     appState.forks = forks;
     appState.forksHasMore = forks.length >= FORKS_PER_PAGE;
     await runCompares(owner, name, repo.default_branch || 'main',
@@ -104,7 +104,7 @@ export async function loadMoreForks() {
     const [owner, name] = repo.full_name.split('/');
     const page = appState.forksPage + 1;
     const more = await getRepositoryForks(appState.token, owner, name, page, FORKS_PER_PAGE);
-    if (isStale(gen)) return;
+    if (isStale(gen)) { appState.loading = false; return; }
     const offset = appState.forks.length;
     appState.forks = [...appState.forks, ...more];
     appState.forksPage = page;

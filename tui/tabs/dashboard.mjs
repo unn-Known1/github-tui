@@ -29,7 +29,7 @@ export async function loadDashboardWidgets(force = false) {
       safe(getUserPullRequests(appState.token, 1, 10)),
       safe(getUserFollowers(appState.token, 1, 10)),
     ]);
-    if (isStale(gen)) return;
+    if (isStale(gen)) { appState.loading = false; return; }
     appState.events = Array.isArray(events) ? events : [];
     appState.trending = Array.isArray(trending) ? trending : [];
     appState.trendingPage = 1;
@@ -595,7 +595,7 @@ export function pageUp() {
     appState.loading = true;
     render();
     searchRepositories(appState.token, q, page, 10).then(more => {
-      if (isStale(gen)) return;
+      if (isStale(gen)) { appState.loading = false; return; }
       if (Array.isArray(more)) {
         appState.trending = more;
         appState.trendingPage = page;
@@ -618,7 +618,7 @@ export function pageDown() {
     appState.loading = true;
     render();
     searchRepositories(appState.token, q, page, 10).then(more => {
-      if (isStale(gen)) return;
+      if (isStale(gen)) { appState.loading = false; return; }
       if (Array.isArray(more) && more.length > 0) {
         appState.trending = more;
         appState.trendingPage = page;
@@ -677,7 +677,7 @@ function reloadTrending() {
   appState.loading = true;
   render();
   getTrendingRepos(appState.token, days, 100).then(more => {
-    if (isStale(gen)) return;
+    if (isStale(gen)) { appState.loading = false; return; }
     appState.trending = Array.isArray(more) ? more : [];
     appState.trendingPage = 1;
     appState.trendingScroll = 0;
