@@ -112,6 +112,17 @@ export const appState = {
   userFollowers: [],
   userFollowing: [],
   repoDependabotAlerts: [],
+  securitySubPane: 'dependabot',  // 'dependabot' | 'secret' | 'codescan' | 'advisories' | 'branch' | 'deps'
+  securityFilter: 'all',          // severity filter: 'all' | 'critical' | 'high' | 'medium' | 'low'
+  securityStateFilter: 'open',    // state filter: 'open' | 'dismissed' | 'fixed' | 'all'
+  securityAlertCursor: 0,
+  securityAlertScroll: 0,
+  securityAlertDetail: null,      // full alert detail when viewing a single alert
+  secretScanningAlerts: [],
+  codeScanningAlerts: [],
+  securityAdvisories: [],
+  branchProtection: null,
+  dependencyManifests: [],
   _readmeText: null,
 
   // ── Forks sub-view ──

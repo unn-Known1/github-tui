@@ -427,6 +427,36 @@ export const getUserFollowing = (token, page, perPage) =>
 // ─── Security (Dependabot) ────────────────────────────────────────
 export const getRepoDependabotAlerts = (token, owner, repo, state) =>
   request('/repos/' + owner + '/' + repo + '/dependabot/alerts' + (state ? '?state=' + state : ''), { token });
+export const getDependabotAlert = (token, owner, repo, alertId) =>
+  request('/repos/' + owner + '/' + repo + '/dependabot/alerts/' + alertId, { token });
+export const dismissDependabotAlert = (token, owner, repo, alertId, dismissedReason, comment) =>
+  request('/repos/' + owner + '/' + repo + '/dependabot/alerts/' + alertId, {
+    token, method: 'PATCH', body: { dismissed_reason: dismissedReason, dismissed_comment: comment || '' },
+  });
+
+// ─── Security (Secret Scanning) ───────────────────────────────────
+export const getSecretScanningAlerts = (token, owner, repo, state) =>
+  request('/repos/' + owner + '/' + repo + '/secret-scanning/alerts' + (state ? '?state=' + state : ''), { token });
+
+// ─── Security (Code Scanning) ─────────────────────────────────────
+export const getCodeScanningAlerts = (token, owner, repo, state, perPage) =>
+  request('/repos/' + owner + '/' + repo + '/code-scanning/alerts' +
+    (state ? '?state=' + state : '') +
+    (perPage ? (state ? '&' : '?') + 'per_page=' + perPage : ''), { token });
+
+// ─── Security Advisories ──────────────────────────────────────────
+export const getSecurityAdvisories = (token, owner, repo) =>
+  request('/repos/' + owner + '/' + repo + '/security-advisories', { token });
+
+// ─── Branch Protection ────────────────────────────────────────────
+export const getBranchProtection = (token, owner, repo, branch) =>
+  request('/repos/' + owner + '/' + repo + '/branches/' + encodeURIComponent(branch) + '/protection', { token });
+
+// ─── Dependency Graph ─────────────────────────────────────────────
+export const getDependencyGraphManifests = (token, owner, repo) =>
+  request('/repos/' + owner + '/' + repo + '/dependency-graph/manifests', {
+    token, accept: 'application/vnd.github.hawthorn-preview+json',
+  });
 
 // ─── User search ──────────────────────────────────────────────────
 export async function searchUsers(token, query, page, perPage) {

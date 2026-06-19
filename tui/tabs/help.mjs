@@ -90,6 +90,15 @@ const CATEGORIES = [
     { key: 'r',         desc: 'Refresh notifications' },
     { key: 'Enter / o', desc: 'Open detail popup (issues/PRs) or browser' },
   ]},
+  { id: 'security',   name: 'SECURITY',          shortcuts: [
+    { key: '1-6',       desc: 'Switch sub-pane: Dependabot / Secret / CodeScan / Advisories / Branch / Deps' },
+    { key: 's',         desc: 'Cycle severity filter (all → critical → high → medium → low)' },
+    { key: 'f',         desc: 'Cycle state filter (open → dismissed → fixed → all)' },
+    { key: 'Enter',     desc: 'Open alert/advisory in browser' },
+    { key: 'x',         desc: 'Dismiss Dependabot alert' },
+    { key: '↑↓ / j k',  desc: 'Navigate alerts' },
+    { key: 'g / G',     desc: 'Jump to top / bottom' },
+  ]},
   { id: 'detail',     name: 'ISSUE / PR DETAIL', shortcuts: [
     { key: 'Enter on issue/PR', desc: 'Open detail popup' },
     { key: 'Esc / h',   desc: 'Close popup' },
