@@ -30,7 +30,7 @@ import { starRepo, unstarRepo, isStarred, createIssue, getSubscription, setSubsc
 import { getScreen } from './render.mjs';
 import { parseMouseEvent, handleMouseEvent } from './mouse.mjs';
 
-const tabModules = [dashboard, repos, analyze, settings, inbox, actions];
+const tabModules = [dashboard, repos, analyze, actions, inbox, settings];
 
 // ──────────────────────────────────────────────────────────────────
 // Context helpers — figure out what the user is pointing at.
@@ -287,7 +287,7 @@ export function handleKey(key) {
   if (key === 'W' && currentRepoForAction()) { toggleWatch(); return; }
 
   // 5b. Actions tab per-tab keys.
-  if (tabState.current === 5 && appState.actionsView === 'runs') {
+  if (tabState.current === 3 && appState.actionsView === 'runs') {
     if (key === 'r' || key === 'R') { actions.rerunSelected(); return; }
     if (key === 'x' || key === 'X') { actions.cancelSelected(); return; }
   }
@@ -545,7 +545,7 @@ export function registerCoreActions() {
   reg({ id: 'inbox.cycle',       label: 'Inbox: cycle filter',                run: inbox.cycleFilter });
 
   reg({ id: 'settings.theme',  label: 'Change theme...',
-        run: () => { setTab(3); appState.settingsCursor = 4; render(); settings.enter(); } });
+        run: () => { setTab(5); appState.settingsCursor = 4; render(); settings.enter(); } });
   reg({ id: 'settings.logout', label: 'Log out', run: () => confirm('Log out of GitHub?', settings.handleLogout, 'Log Out') });
   reg({ id: 'dashboard.refresh', label: 'Refresh dashboard widgets',
         run: () => dashboard.loadDashboardWidgets(true) });
@@ -568,7 +568,7 @@ export function registerCoreActions() {
         run: () => bookmarks.exportMarkdown() });
 
   reg({ id: 'actions.refresh', label: 'Actions: load workflow runs',
-        run: () => { setTab(5); actions.loadActionsRepos(); } });
+        run: () => { setTab(3); actions.loadActionsRepos(); } });
 
   // Saved searches
   reg({ id: 'search.save', label: 'Save current search query...',

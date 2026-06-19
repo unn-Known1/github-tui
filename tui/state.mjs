@@ -24,9 +24,9 @@ export const TABS = [
   { key: '1', label: 'Dashboard' },
   { key: '2', label: 'Repos' },
   { key: '3', label: 'Analyze' },
-  { key: '4', label: 'Settings' },
+  { key: '4', label: 'Actions' },
   { key: '5', label: 'Inbox' },
-  { key: '6', label: 'Actions' },
+  { key: '6', label: 'Settings' },
 ];
 export const tabState = { current: 0 };
 

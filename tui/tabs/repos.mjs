@@ -151,7 +151,7 @@ export async function loadUserData() {
         appState.token = null;
         appState.user = null;
         appState.repos = [];
-        setTab(3);
+        setTab(5);
         showMessage('Stored token rejected — please log in again', 'error');
       } else {
         showMessage('Failed to load user data: ' + (msg || 'unknown'), 'error');

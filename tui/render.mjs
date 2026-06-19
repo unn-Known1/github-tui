@@ -373,7 +373,7 @@ function statusLine() {
   switch (tabState.current) {
     case 0: {
       const cardNav = appState.dashboardCardsFocus ? '   [Enter] Open' : '';
-      return ' [1-5] Tabs' + sep + '[r] Refresh' + sep + '[?] Help' + sep + '[Ctrl-P] Palette' + cardNav;
+      return ' [1-6] Tabs' + sep + '[r] Refresh' + sep + '[?] Help' + sep + '[Ctrl-P] Palette' + cardNav;
     }
     case 1: {
       if (appState.reposView === 'starred') {
@@ -389,14 +389,14 @@ function statusLine() {
       if (v === 'forks')   return ' [↑↓jk] Nav' + sep + '[Space] More' + sep + '[p/s/n] Sort' + sep + '[Esc] Back';
       return '';
     }
-    case 3: return ' [↑↓] Nav' + sep + '[Enter] Select' + sep + '[Ctrl-P] Palette' + sep + '[?] Help';
-    case 4: return ' [↑↓jk] Nav' + sep + '[Enter] Open' + sep + '[m] Read' + sep + '[M] All' + sep + '[f] Filter' + sep + '[u] Unsubscribe';
-    case 5: {
+    case 3: {
       if (appState.actionsView === 'runs') {
         return ' [Enter] Open in browser' + sep + '[r] Re-run' + sep + '[x] Cancel' + sep + '[Esc] Back' + sep + '[?] Help';
       }
       return ' [↑↓jk] Nav' + sep + '[Enter] View runs' + sep + '[?] Help';
     }
+    case 4: return ' [↑↓jk] Nav' + sep + '[Enter] Open' + sep + '[m] Read' + sep + '[M] All' + sep + '[f] Filter' + sep + '[u] Unsubscribe';
+    case 5: return ' [↑↓] Nav' + sep + '[Enter] Select' + sep + '[Ctrl-P] Palette' + sep + '[?] Help';
   }
   return '';
 }
@@ -440,9 +440,9 @@ function doRender() {
     case 0: renderDashboard(screen, contentY, contentH); break;
     case 1: renderRepos(screen, contentY, contentH); break;
     case 2: renderAnalyze(screen, contentY, contentH); break;
-    case 3: renderSettings(screen, contentY, contentH); break;
+    case 3: renderActions(screen, contentY, contentH); break;
     case 4: renderInbox(screen, contentY, contentH); break;
-    case 5: renderActions(screen, contentY, contentH); break;
+    case 5: renderSettings(screen, contentY, contentH); break;
   }
 
   // ── Footer ──
