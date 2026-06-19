@@ -1,593 +1,534 @@
-# GitHub TUI — Vision & Roadmap
+# GitHub TUI — Vision V2: The Developer Intelligence Platform
 
-> *A living brainstorm of every realistic use case, persona, and feature that could make this app indispensable for every kind of GitHub user — from solo hackers to enterprise platform teams.*
+> *The terminal isn't catching up to the web — it's leapfrogging it. Every feature exploits what terminals do best: compose, script, persist, and stay out of the way. The web is for browsing. The terminal is for doing.*
 
-**Current version:** v0.5.6 (complete feature set: dashboard, repos, analyze with 10 panes, inbox, settings, mouse support, collapsible sections, 8 themes).
-
-**Next milestone:** v0.6 — "Cache & Offline" (disk-backed ETag cache, offline mode, background prefetch).
+**Current version:** v0.5.6 | **Target:** v3.0+
 
 ---
 
-## 📌 Table of Contents
+## 🧭 Guiding Philosophy
 
-1. #-status-snapshot
-2. #-guiding-principles
-3. #-user-personas
-4. #-use-cases-by-persona
-5. #-feature-backlog-by-category
-6. #-killer-features-the-must-have-moves
-7. #-workflow-recipes
-8. #-differentiators-vs-gh-lazygit-octobox
-9. #-phased-roadmap
-10. #-quality-dx--distribution
-11. #-stretch--moonshot-ideas
-
----
-
-## 📊 Status Snapshot
-
-| Capability | State | Notes |
-|---|---|---|
-| Modular architecture (`tui/` split) | ✅ shipped v0.3 | 23 modules; tab modules export `render` + `keys` + dispatchers |
-| Dashboard with widgets | ✅ shipped v0.4 | Greeting, stat cards, activity feed, trending, languages bar, heatmap, sparkline, followers |
-| Repos browser (sort + filter + paginate) | ✅ shipped v0.3 | `/` filter, `c` clear, aggregate header stats, density toggle, pins |
-| Analyze: search → details → forks | ✅ shipped v0.2 | 2-column details with languages/contributors/releases |
-| Issues & PRs sub-panes | ✅ shipped v0.2 | Toggle via `i` / `P` / `O` on details |
-| Issue / PR detail popup | ✅ shipped v0.5 | Full detail view with rendered body, labels, comments, reviews, file diffs |
-| Comment / react / close-reopen / merge | ✅ shipped v0.5 | POST endpoints + confirmation modals |
-| PR diff viewer | ✅ shipped v0.5 | Unified diff with syntax-colored additions/deletions |
-| Review Comments | ✅ shipped v0.5.6 | Reviews tab in PR detail with state icons |
-| README viewer pane | ✅ shipped v0.3 | `R` opens it; naive Markdown styling |
-| Forks ahead/behind compares (parallel) | ✅ shipped v0.2 | 5-worker concurrent pool |
-| Traffic pane | ✅ shipped v0.5.6 | Views, clones, popular paths, popular referrers |
-| Milestones pane | ✅ shipped v0.5.6 | Title, state, due date, open/closed issues |
-| Labels pane | ✅ shipped v0.5.6 | Color dots, name, description |
-| Checks/CI pane | ✅ shipped v0.5.6 | Check runs with pass/fail/pending summary |
-| Security pane | ✅ shipped v0.5.6 | Dependabot alerts with severity icons |
-| Inbox: list + open in browser | ✅ shipped v0.2 | Color-coded types, by-repo summary, relative time |
-| Inbox: mark-as-read / all / unsubscribe | ✅ shipped v0.3 | Keys `m`/`M`/`u` |
-| Inbox: filter cycle | ✅ shipped v0.3 | `f` cycles all → unread → mentions → review |
-| Inbox: pagination | ✅ shipped v0.5 | `Space` loads more notifications |
-| File explorer | ✅ shipped v0.3 | Tree browsing, save/clone/zipball, branch picker |
-| Settings panel with system info | ✅ shipped v0.2 | Version, paths, Node, platform, terminal |
-| Token scope inspector | ✅ shipped v0.3 | `lastScopes` from `x-oauth-scopes` |
-| Secure local auth (chmod 600 + masked + 401 auto-clear) | ✅ shipped v0.2 | |
-| Live API rate-limit indicator | ✅ shipped v0.5.6 | Visual `█░` bar in header + explicit endpoint |
-| ETag-aware caching | ✅ shipped v0.3 | In-memory; auto `If-None-Match` |
-| Command palette (Ctrl-P / `:`) | ✅ shipped v0.3 | ~30 registered actions, fuzzy match |
-| Themes (8 themes) | ✅ shipped v0.5.6 | default/highContrast/dracula/solarized/nord/monokai/gruvbox/light |
-| Bookmarks store | ✅ shipped v0.3 | `b` toggles; `B` browse overlay; `~/.github-tui/bookmarks.json` |
-| Star / unstar from anywhere | ✅ shipped v0.3 | `*` |
-| OSC-52 clipboard copy | ✅ shipped v0.3 | `y` |
-| Help overlay (`?`) | ✅ shipped v0.5 | Updated for all keys including detail popup |
-| Mouse support | ✅ shipped v0.5.6 | Click tabs/panes/items, scroll wheel, hover effects |
-| Collapsible sections | ✅ shipped v0.5.6 | `z`/`Z`/`X` keys, disk persistence |
-| Saved searches | ✅ shipped v0.5.6 | `Ctrl-P` → "Save current search"; run/delete via palette |
-| Repo preferences persistence | ✅ shipped v0.5.6 | Sort, filter, density saved to `~/.github-tui/repo-prefs.json` |
-| Disk-backed cache (beyond ETag) | 🔲 planned v0.6 | Survives restarts; offline mode |
-| Workflows / Actions CI tab | ✅ shipped v0.5.6 | `4` → Actions; repos → runs; re-run/cancel; collapsible sections |
-| Code search across orgs | 🔲 planned v0.8 | `searchCode` ready |
-| OAuth device-flow + OS keychain | 🔲 planned v0.9 | |
-| User-editable keybindings | 🔲 planned | File path reserved: `~/.github-tui/keys.json` |
-| AI summarise (BYO-key) | 🔲 planned v1.x | |
-
-## 🎯 Guiding Principles
-
-Every feature we add should pass at least one of these tests:
-
-| Principle | Smell test |
+| Principle | Manifesto |
 |---|---|
-| **Keyboard-first** | Can a power user do it without ever touching the mouse? |
-| **Zero-dependency core** | Does it stay installable with just `node app.mjs`? Optional extras are fine if isolated. |
-| **Fast feedback** | Does it render in <100ms even with 1000 repos? |
-| **Honest data** | We never invent data. Empty states are explicit. Errors are visible. |
-| **Discoverable** | Every key is in `?` help and in the command palette. Every action has a hint in the status bar. |
-| **Composable** | TUI mode is one face; the same core powers a non-interactive CLI and pipe-friendly output. |
-| **Safe by default** | No destructive actions without confirmation. Tokens never leak to stdout, logs, or screenshots. |
-| **Modular** | Each tab is one file. Adding a tab is: new file → register in state + render + keys. Palette picks up new actions automatically. |
+| **Terminal-first** | The terminal is the **highest-bandwidth, lowest-latency, most scriptable** development surface. We don't replicate the browser — we transcend it. |
+| **Zero-dependency core** | Core stays zero-dep. Plugins may have deps; sandboxed in worker threads. Installable with `node app.mjs`. |
+| **Privacy by default** | All intelligence is local-first. No telemetry, no cloud, no opt-out required. BYO-key for AI. |
+| **Composable, not siloed** | Pipe TUI data to/from `jq`, `fzf`, `xargs`. The TUI is a node in the pipeline, not a destination. |
+| **Opt-in complexity** | Every feature is discoverable but ignorable. Power users go deep; casual users stay surface-level. |
+| **Graceful degradation** | Offline? Cached. No API key? No AI. No tmux? Standalone. Every feature degrades, never breaks. |
+| **Community-powered** | Plugin-first after v2.0. Features graduate from community → core when >30% adopt them. |
 
 ---
 
-## 👤 User Personas
+## 🏗️ Architecture: The Three Pillars
 
-### P1 — The Solo Hacker (Ada)
-Maintains 30 small repos, side-projects galore, occasional issues from strangers. Wants a single place to triage stars, see what's exploding, and quickly open the right URL.
-
-### P2 — The Open Source Maintainer (Linus)
-One or two flagship repos with hundreds of forks and issues. Drowns in notifications. Wants powerful triage, fork analysis, contributor recognition.
-
-### P3 — The Engineering Manager (Priya)
-Doesn't write code daily but tracks 5 teams across 50 repos. Wants dashboards, throughput metrics, who-needs-review nudges, weekly digests.
-
-### P4 — The Senior IC at a Big Company (Marcus)
-100+ private repos in an org. Needs fast code search, PR review queue, mention triage, and "what changed since I was OOO" recap.
-
-### P5 — The DevRel / Tech Writer (Sam)
-Monitors trending repos, tracks specific topics (e.g. WebGPU), needs nice screenshots and Markdown exports.
-
-### P6 — The Security / Platform Engineer (Reza)
-Watches Dependabot, vulnerability alerts, CI failures across many repos. Needs aggregated views.
-
-### P7 — The Student / Learner (Mei)
-Explores popular repos by language, reads READMEs, follows tutorials. Wants discoverability, bookmarks, learning paths.
-
-### P8 — The Recruiter / Talent Sourcer (Jordan)
-Profiles candidates by their repos, contribution graphs, language mix, activity recency. Needs export-friendly summaries.
-
-### P9 — The CI/CD Operator (Casey)
-Focuses on Actions: which workflows are failing, queue depth, runner stats. Needs a live dashboard.
-
-### P10 — The Offline / Low-Bandwidth User (Tomás)
-Works in trains, planes, cafés. Needs aggressive caching and a clear offline indicator.
-
-## 🛠️ Use Cases by Persona
-
-### P1 — Solo Hacker
-- ✅ See a unified feed: "someone starred my repo," "new issue," "PR comment." (Dashboard activity feed + Inbox)
-- ✅ Quickly open the repo I just got an email about. (`o` from Inbox)
-- 🔲 Track weekly growth of stars across all my repos (sparkline).
-- ✅ Bookmark interesting trending repos to read later. (`b`)
-- 🔲 Spot which side-project hasn't been touched in 6 months. (sort exists; needs "stale" filter)
-
-### P2 — OSS Maintainer
-- 🔲 Triage queue: issues needing reply (no maintainer comment yet), stale PRs.
-- ✅ Fork comparison: who has actually advanced beyond `main`? (Forks view with ahead/behind)
-- 🔲 "Good first issue" curation — find/label/promote.
-- 🟡 Identify top contributors over the last 30/90/365 days. (top contributors shown for whole-repo lifetime)
-- 🔲 Detect mention-only issues vs. real bug reports.
-- 🔲 Bulk-label, bulk-close, bulk-react to issues.
-- 🔲 Auto-suggest reviewers from CODEOWNERS.
-
-### P3 — Engineering Manager
-- 🔲 Weekly throughput dashboard: PRs opened/merged per team, cycle time.
-- 🔲 WIP / cycle-time chart per repo.
-- 🔲 "Who's blocked" view — PRs waiting on review > 48h.
-- 🟡 Release radar — what shipped this week across all watched repos. (Trending widget partly covers this for public)
-- 🔲 Burndown of open issues by label / milestone.
-- 🔲 Stuck-PR alerts: no activity in N days.
-
-### P4 — Senior IC at Big Co.
-- 🔲 PR review queue with priority sort (mentions > requested-review > team).
-- 🔲 "What changed while I was on PTO": diff of merges since date X.
-- 🟡 Code search across the org. (API ready in `github.mjs`; needs UI surface)
-- ✅ Mention inbox separate from regular notifications. (filter `f`)
-- 🔲 Quick CODEOWNERS lookup: who owns this path?
-- 🟡 Saved searches ("all open PRs labeled `infra` in org X"). (store ready; needs UI)
-
-### P5 — DevRel / Writer
-- ✅ Topic explorer: trending in last 7d. (Dashboard widget)
-- 🔲 Topic explorer: 30d / 90d / by language.
-- 🔲 Markdown export of a curated list of repos.
-- 🔲 Screenshot mode (clean, no token info on screen).
-- 🔲 Compare repos side-by-side (stars, contributors, release cadence).
-- 🔲 Watch for new releases of N specific repos.
-- 🔲 Trending authors (most-starred new repos by user).
-
-### P6 — Security / Platform
-- 🔲 Dependabot alerts aggregated across repos.
-- 🔲 Vulnerability digest with severity sort.
-- 🟡 Workflow failure aggregator: every red ✗ across an org. (API ready; UI pending)
-- 🔲 Secret scanning hits (where API permits).
-- 🔲 Branch protection auditor: which default branches lack required reviews?
-
-### P7 — Student / Learner
-- ✅ Recommended repos by stars. (Trending; needs language facet)
-- ✅ README viewer with Markdown rendering in-TUI. (`R` pane)
-- 🟡 Bookmark / "read later" list. (store ready; needs dedicated tab)
-- 🔲 Walkthrough: open the README, then drill into examples folder.
-- 🔲 Language learning path (e.g. "top 20 Rust beginner repos").
-- 🔲 Follow a curated topic and get weekly updates.
-
-### P8 — Recruiter / Talent
-- 🔲 User profile dive: language mix pie, commit frequency sparkline, top repos.
-- 🔲 Public org affiliations.
-- 🔲 Export profile snapshot to Markdown / PDF.
-- 🔲 Compare two users side-by-side.
-- 🔲 (Strict opt-in only — no scraping behaviors.)
-
-### P9 — CI/CD Operator
-- 🟡 Live Actions monitor: queued / in-progress / failed across N repos. (API ready)
-- 🟡 Re-run failed workflows from the TUI. (API ready)
-- 🔲 View workflow logs (paginated).
-- 🔲 Runner utilization heatmap (if available via API).
-- 🟡 Cancel runaway runs. (API ready)
-
-### P10 — Offline User
-- 🟡 Aggressive cache with manual "refresh" button. (ETag layer ships; disk cache pending)
-- 🔲 "Last synced" timestamp visible on every tab.
-- 🔲 Local search across cached data.
-- 🔲 Queue: "open in browser when online."
-
-Legend: ✅ shipped · 🟡 partial (API or store ready, UI pending) · 🔲 not started
-
-## 🧩 Feature Backlog by Category
-
-### A. Discovery & Search
-- 🟡 Cross-repo code search (`/search/code`) — *API ready, needs UI*
-- 🔲 Repo search filters: language, stars range, license, last update
-- 🟡 User search — *API ready (`searchUsers`)*
-- ✅ Topic explorer with trending sort *(7d default; needs 30d/90d toggles)*
-- 🟡 Saved searches — *store ready; needs palette + tab UI*
-- ✅ Fuzzy local filter on every list (FZF-style for command palette today)
-- ✅ Command palette (`Ctrl-P` / `:`)
-
-### B. Notifications & Inbox
-- ✅ Mark-as-read (single)
-- ✅ Mark-all-as-read
-- ✅ Unsubscribe from a thread
-- ✅ Filter by reason cycle (all / unread / mentions / review)
-- 🔲 Mark-as-done (archive)
-- 🔲 Filter by repo / by date
-- 🔲 Group by repo / by reason / by date (visible groups; the by-repo summary is already there)
-- 🔲 Mute repos
-- 🔲 Desktop-notification bridge (optional, OS-specific helper)
-- 🔲 Inbox-zero motivation: streak counter, daily quota
-
-### C. PR / Issue Workflow  *(major focus for v0.4)*
-- 🔲 Open PR/Issue detail popup with full body (Markdown rendered)
-- 🔲 Comment from the TUI
-- 🔲 React (👍 / ❤️ / 🚀 / etc)
-- 🔲 Approve / Request changes / Comment review
-- 🔲 Merge / squash / rebase (with confirmation)
-- 🔲 Re-request review
-- 🔲 Assign labels / milestone / assignee
-- 🔲 Close / reopen
-- 🔲 Convert issue ↔ discussion
-- 🔲 Create issue / PR from a template
-- 🔲 Inline diff viewer with file tree
-
-### D. Code & Files
-- 🟡 Browse repo file tree — *`getRepoContents` ready*
-- 🟡 View file contents — *`getRepoFile` returns raw; needs viewer pane + tiny lexer*
-- 🔲 View blame
-- 🔲 View commit history per file
-- 🔲 Compare two branches / two tags
-- ✅ Markdown preview (rendered in-TUI) — *naive styling on README pane*
-- ✅ README viewer on any repo detail page
-
-### E. Analytics & Dashboards
-- 🔲 Sparkline of stars over time (daily delta)
-- 🔲 Contribution heatmap (the classic green grid) for any user
-- ✅ Language pie / bar across personal repos
-- 🔲 Open-vs-closed issue trend
-- 🔲 PR cycle-time histogram
-- 🟡 Top contributors over a chosen window (we show lifetime today)
-- 🔲 Release cadence (releases per month)
-- 🔲 "Time spent reviewing" estimator
-
-### F. Actions & CI
-- 🟡 List runs per workflow — *API ready (`getWorkflowRuns`)*
-- 🔲 Filter by status (queued / in_progress / completed / failed)
-- 🟡 Re-run / cancel runs — *API ready*
-- 🔲 Tail logs in a pager view
-- 🔲 Workflow file viewer
-- 🔲 Dispatch `workflow_dispatch` with inputs
-
-### G. Releases & Tags
-- ✅ Latest release notes shown on details — *needs full body viewer*
-- 🔲 Subscribe to release of specific repos
-- 🔲 Compare two releases (changelog diff)
-- 🔲 Draft a release from the TUI
-
-### H. Stars, Watches, Bookmarks
-- ✅ Star / unstar (`s`)
-- 🔲 Watch / unwatch with custom subscription level
-- ✅ Local bookmarks (`b`) — separate from GitHub stars
-- 🔲 Folders / tags for bookmarks
-- 🔲 Export bookmarks to Markdown
-- 🔲 Dedicated Bookmarks tab (currently store-only)
-
-### I. Profiles & Social
-- 🔲 User profile view with their repos, orgs, recent activity
-- 🔲 Follow / unfollow
-- 🔲 Followers / following lists
-- 🔲 Gists CRUD (list / view / create / edit / delete)
-- 🔲 SSH key list (read-only)
-
-### J. Orgs & Teams
-- 🔲 Org switcher in the title bar
-- 🔲 Org member list with role
-- 🔲 Team browser
-- 🔲 Org-wide PR review queue
-- 🔲 CODEOWNERS resolver for any path
-
-### K. Security
-- 🔲 Dependabot alerts (per repo and aggregated)
-- 🔲 Security advisories
-- ✅ Token scope inspector (visible in Settings)
-- 🔲 Read-only "safe mode" toggle
-- 🔲 OS keychain integration (macOS Keychain, libsecret, Windows Credential Manager)
-- 🔲 OAuth device-flow login (no PAT needed)
-
-### L. Productivity & UX
-- ✅ Command palette `:` / `Ctrl-P`
-- 🔲 Vim-style command mode (`:repos`, `:open foo/bar`)
-- 🔲 Multi-tab workspaces
-- 🔲 Pinned items (always at top of a list)
-- 🔲 Customisable keybindings via `~/.github-tui/keys.json` (file path reserved)
-- ✅ Themes (default / highContrast / dracula / solarized)
-- 🔲 More themes (monokai, nord, gruvbox, …)
-- 🔲 Localization / i18n (English first, then DE / FR / JA / HI / ZH)
-- 🔲 Mouse support (optional toggle)
-- 🔲 Screenshot mode — hides token / private repos for clean public demos
-- 🔲 Export current view to Markdown / JSON / CSV
-
-### M. Performance & Offline
-- ✅ ETag cache (in-memory)
-- 🔲 Disk cache layer (persist ETag cache across runs)
-- ✅ Conditional requests for every GET (automatic via ETag)
-- 🔲 Offline mode with last-synced banner
-- 🔲 Background prefetch of starred repos
-- 🔲 Cache eviction policy (LRU, configurable max MB)
-
-### N. Integrations
-- ✅ Cross-platform browser open (`o`) via `child_process.spawn`
-- ✅ OSC-52 clipboard copy (`y`)
-- 🔲 `git` integration: clone selected repo, check it out, open in `$EDITOR`
-- 🔲 Editor integration: `e` on a file opens it in `$EDITOR` (after clone)
-- 🔲 Webhook listener mode (advanced, optional)
-- 🔲 Slack / Discord webhook outbound
-- 🔲 iCal export of milestones / release dates
-- 🔲 GraphQL fallback for advanced queries
-- 🔲 GitHub Enterprise Server support (configurable hostname)
-
-### O. AI / Smart Helpers (opt-in, BYO-key)
-- 🔲 Summarise a long PR description
-- 🔲 Summarise a noisy issue thread
-- 🔲 Suggest labels from issue text
-- 🔲 Draft a reply / review comment
-- 🔲 "Explain this diff"
-- 🔲 Group similar issues
-- 🔲 Daily standup auto-generator from your activity feed
-
-### P. Accessibility
-- ✅ High-contrast theme
-- 🔲 Screen-reader-friendly mode (linearized layout, no fancy box-drawing)
-- 🔲 Configurable font-cell width assumption
-- 🔲 Reduced-motion mode (no spinners, just static `[loading]`)
-
-Legend: ✅ shipped · 🟡 partial / wired but no UI · 🔲 not started
-
-## 💎 Killer Features (the "must-have" moves)
-
-Progress check on the 10 we originally listed:
-
-1. ✅ **Command Palette (`Ctrl-P`)** — every action discoverable.
-2. 🔲 **PR Review Workflow in-TUI** — comment, approve, merge. *(v0.4 focus)*
-3. ✅ **Inbox actions** — mark read / mark all / unsubscribe / filter cycle.
-4. 🟡 **Disk cache with ETags** — ETag layer ships in v0.3; disk persistence planned v0.6.
-5. ✅ **README + Markdown renderer** — `R` pane on details.
-6. 🟡 **Saved searches** — store ready; needs UI surface.
-7. 🔲 **OS-keychain token storage** — *v0.9*.
-8. 🔲 **Workflow runs dashboard** — *v0.7; API already wired*.
-9. 🔲 **AI summarise (BYO-key)** — *v1.x; opt-in so no dep bloat*.
-10. ✅ **Themes + keybinding customisation** — themes shipped; keybinding customisation planned v0.5.
-
-**Score so far: 4 fully shipped, 3 partial, 3 ahead.**
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                    GitHub TUI V2 Architecture                    │
+├──────────────────┬──────────────────┬──────────────────────────┤
+│   INTELLIGENCE   │   COLLABORATION  │      PLATFORM            │
+│                  │                  │                          │
+│  • AI Analysis   │  • Team Presence │  • Multi-Platform        │
+│  • Predictions   │  • Shared Reviews│  • Plugin System         │
+│  • Auto-Triage   │  • Review Metrics│  • IDE Bridge            │
+│  • NL Interface  │  • Notifications │  • Tmux/Zellij Native    │
+│  • DORA Metrics  │  • Standup Gen   │  • Data Portability      │
+└──────────────────┴──────────────────┴──────────────────────────┘
+```
 
 ---
 
-## 🧑‍🍳 Workflow Recipes
+## 📊 What's Built (v0.1 → v0.5.6)
 
-Real sequences a user runs through, end-to-end. Status reflects today.
-
-### R1 — "Morning Triage" ✅ *fully supported*
-1. Launch → Dashboard auto-loads. Glance at 🔔 badge.
-2. `5` → Inbox. `f` to filter `unread`. `M` to mark stale ones read.
-3. `m` to clear individual threads; `u` to mute noisy ones; `o` to open the important one in browser.
-4. `1` → Dashboard. Verify unread count dropped.
-5. `q` quit.
-
-### R2 — "Find Something to Work On" 🟡 *mostly supported*
-1. `3` → Analyze. `Ctrl-P` → "Search public repositories". Enter.
-2. Browse list, `o` to open in browser, `b` to bookmark for later.
-3. On a chosen repo, `i` → Issues pane.
-4. *Pending:* `Enter` on an issue → in-TUI detail. Comment from here. *(v0.4)*
-
-### R3 — "Maintainer Fork Hunt" ✅ *fully supported*
-1. `3` → search my repo → `Enter`.
-2. `Enter` again → Forks. Sort by `p` (last push).
-3. See which forks have actual commits ahead of main.
-4. `o` to open the most promising fork. `b` to bookmark.
-5. `Space` if there are more than 30 forks.
-
-### R4 — "Standup Generator" 🔲 *v1.x*
-1. `Ctrl-P` → "Generate standup".
-2. App pulls my events from the last 24h, dedups, summarises.
-3. Output rendered in a pop-up, copy with `y` (OSC-52). *(`y` already works for URLs)*
-
-### R5 — "CI Cockpit" ✅ *shipped v0.5.6*
-1. `4` → Actions tab.
-2. Browse repos → view workflow runs → see status.
-3. `r` re-run failed. `x` cancel.
-
-### R6 — "OOO Recap" 🔲 *v0.5*
-1. `Ctrl-P` → "Since I was last here".
-2. App shows: merges I missed, mentions waiting, new issues on my repos.
-
-### R7 — "Bookmark Sprint" ✅ *partially shipped*
-1. Trending → `b` to bookmark repos. ✅
-2. `B` → Browse bookmarks overlay. `d` delete, `y` copy URL. ✅
-3. `Ctrl-P` → "Export bookmarks to Markdown". ✅
-
-### R8 — "Stuck PR Audit" 🔲 *v0.4*
-1. `Ctrl-P` → "Stuck PRs > 7d".
-2. List of PRs with no activity. `n` to nudge (auto-comment with template).
-
-### R9 — "Security Sweep" 🔲 *v0.9*
-1. `Ctrl-P` → "Dependabot alerts".
-2. Aggregated, sorted by severity.
-3. `Enter` → details and remediation PR if available.
-
-### R10 — "Read a Repo Like a Book" 🟡 *partial*
-1. Search → Enter on a repo. ✅
-2. `R` → README rendered. ✅
-3. *Pending:* `f` → file tree. Navigate. `v` view file with syntax highlight. *(v0.8)*
+| Feature | Status |
+|---|---|
+| **Dashboard** — greeting, stats, activity feed, trending, languages, heatmap, sparkline, followers | ✅ |
+| **Repos browser** — sort, filter, paginate, density toggle, pins, aggregate stats | ✅ |
+| **Analyze tab** — search → details → forks with ahead/behind comparison | ✅ |
+| **Issue/PR detail popup** — rendered body, labels, comments, reviews, file diffs | ✅ |
+| **Actions from TUI** — comment, react, close/reopen, merge (with confirmation) | ✅ |
+| **PR diff viewer** — unified diff with syntax coloring | ✅ |
+| **Inbox** — list, mark read, mark all, unsubscribe, filter cycle, pagination | ✅ |
+| **Repo explorer** — tree browsing, file view, save/clone/zipball, branch picker | ✅ |
+| **Actions/CI tab** — repos → runs → expandable jobs/steps, re-run, cancel | ✅ |
+| **Bookmarks** — `b` toggle, `B` browse overlay, export to Markdown | ✅ |
+| **Command palette** — `Ctrl-P` / `:`, fuzzy match, ~30 actions | ✅ |
+| **Themes** — 8 themes: default, highContrast, dracula, solarized, nord, monokai, gruvbox, light | ✅ |
+| **Mouse support** — click tabs/panes/items, scroll wheel, hover effects | ✅ |
+| **Collapsible sections** — `z`/`Z`/`X` keys, disk persistence | ✅ |
+| **Saved searches** — `Ctrl-P` → "Save current search" | ✅ |
+| **Repo preferences** — sort, filter, density persisted to disk | ✅ |
+| **ETag caching** — in-memory with auto `If-None-Match` | ✅ |
+| **Clipboard** — OSC-52 copy (`y`) works over SSH/tmux | ✅ |
+| **Rate limit indicator** — visual `█░` bar in header | ✅ |
+| **Security pane** — Dependabot alerts with severity icons | ✅ |
+| **Traffic/Milestones/Labels/Checks panes** | ✅ |
+| **Modular architecture** — 23 modules, one file per tab | ✅ |
+| **Zero dependencies** — just `node app.mjs` | ✅ |
 
 ---
 
-## 🆚 Differentiators vs. `gh`, lazygit, octobox
-
-| Need | `gh` CLI | lazygit | octobox | **GitHub TUI (this)** |
-|---|---|---|---|---|
-| Interactive, navigable UI | ❌ | ✅ (git-focused) | ✅ (notifications only) | ✅ |
-| Multi-tab dashboards | ❌ | ❌ | ❌ | ✅ |
-| Trending / discovery | ❌ | ❌ | ❌ | ✅ |
-| README rendered in terminal | ❌ | ❌ | ❌ | ✅ (v0.3) |
-| Command palette | partial | ❌ | ❌ | ✅ (v0.3) |
-| Themes (multi) | ❌ | ✅ | ❌ | ✅ (v0.3) |
-| ETag caching (cheap reloads) | ❌ | n/a | n/a | ✅ (v0.3) |
-| Inbox triage in-TUI | ❌ | ❌ | ✅ (web) | ✅ (v0.3) |
-| Forks ahead/behind in one view | ❌ | ❌ | ❌ | ✅ |
-| OSC-52 clipboard | ❌ | partial | n/a | ✅ (v0.3) |
-| Zero install (just `node app.mjs`) | needs install | needs install | web app | ✅ |
-| Persistent disk cache + offline | ❌ | ❌ | ❌ | 🎯 v0.6 |
-| BYO-key AI summarise | ❌ | ❌ | ❌ | 🎯 v1.x |
-| GH Enterprise Server | ✅ | n/a | partial | 🎯 v0.9 |
-
-**Positioning statement:** *The fastest way to live in GitHub without a browser tab — discovery, triage, review, and CI in one terminal, with everything one fuzzy search away.*
-
-## 🗓️ Phased Roadmap
-
-### v0.3 — "Modular foundations + power-user inbox" ✅ SHIPPED
-- Modular refactor: 22 focused modules under `tui/` with one file per tab.
-- Command palette (`Ctrl-P` / `:`) with fuzzy match and self-registering actions.
-- Themes: `default`, `highContrast`, `dracula`, `solarized`, `nord`, `monokai`, `gruvbox` — persisted to disk.
-- Inbox triage: `m` mark read, `M` mark all, `u` unsubscribe, `f` filter cycle, `Space` load more.
-- README viewer pane (`R`) with naive Markdown styling.
-- OSC-52 clipboard copy (`y`) — works over SSH and tmux.
-- Bookmarks store (`b`) — `~/.github-tui/bookmarks.json` with chmod 600.
-- Star / unstar (`*`) on currently-pointed-at repo.
-- ETag-aware caching — automatic `If-None-Match` for free 304s.
-- Token-scope inspector in Settings system panel.
-- File explorer with tree browsing, save/clone/zipball, branch picker.
-- Dashboard enhancements: contribution heatmap, star history sparkline, recent issues/PRs.
-- New API endpoints ready for next milestones: workflows, code/user/issue search.
-
-### v0.4 / v0.5 — "Review from terminal + Customisation" ✅ SHIPPED
-- In-TUI Issue/PR detail popup with rendered body, labels, comments, file diffs.
-- Comment / react (emoji picker) / close-reopen / merge actions (with confirmation modal).
-- PR diff viewer (file list + unified diff with syntax coloring).
-- Inbox notifications open detail popup for issues/PRs.
-- 7 themes (added nord, monokai, gruvbox).
-- Help overlay updated for all new keybindings.
-
-### v0.5.6 — "Repo Analytics + Input Systems" ✅ SHIPPED
-- **Rate limit indicator** — visual `█░` bar in header + explicit `/rate_limit` endpoint.
-- **Traffic pane** — views, clones, popular paths, popular referrers.
-- **Milestones pane** — title, state, due date, open/closed issues.
-- **Labels pane** — color dots, name, description.
-- **Checks/CI pane** — check runs with pass/fail/pending summary.
-- **Security pane** — Dependabot alerts with severity icons.
-- **Review Comments** — Reviews tab in PR detail view with state icons.
-- **Mouse support** — click tabs/panes/items, scroll wheel, hover effects.
-- **Collapsible sections** — `z`/`Z`/`X` keys, disk persistence.
-- **Followers section** — recent followers in Dashboard profile.
-- **8 themes** — added light theme.
+## 🗓️ Roadmap V2
 
 ### v0.6 — "Cache & Offline" *(next)*
-- Disk-backed ETag cache (survives restarts).
-- Offline banner; "last-synced" timestamps per tab.
-- Background prefetch of starred repos.
-- Hard rate-limit-budget mode.
-- LRU eviction with configurable max MB.
+
+| Feature | Why |
+|---|---|
+| **Disk-backed ETag cache** | Survive restarts; instant reload of previously-viewed data |
+| **Offline mode** | Work in trains/planes with last-synced banner |
+| **Background prefetch** | Pre-fetch starred repos while idle |
+| **LRU eviction** | Configurable max MB to prevent disk bloat |
+| **"Last synced" timestamps** | Every tab shows when data was last refreshed |
+
+---
 
 ### v0.7 — "CI Cockpit"
-- Actions tab: runs, statuses, re-run, cancel. (API already wired.)
-- Workflow log tail with paging.
-- Workflow dispatch UI (`workflow_dispatch` with inputs).
-- Failed-workflow aggregator across watched repos.
+
+| Feature | Why |
+|---|---|
+| **Workflow log tail** | View logs in a pager view without leaving TUI |
+| **Workflow dispatch UI** | Trigger `workflow_dispatch` with inputs from the TUI |
+| **Failed-workflow aggregator** | See every red ✗ across watched repos |
+| **Runner utilization** | Runner stats if available via API |
+
+---
 
 ### v0.8 — "Discovery & Read Mode"
-- Topic explorer with language facet + 7d/30d/90d toggles.
-- Syntax-highlighted file view (tiny lexer for the top 10 languages).
-- Compare branches/tags.
-- Code search using `searchCode`.
+
+| Feature | Why |
+|---|---|
+| **Syntax-highlighted file viewer** | Read code in-TUI with highlighting for top 10 languages |
+| **Topic explorer toggles** | 7d / 30d / 90d / by language facets |
+| **Branch/tag comparison** | Compare two refs side-by-side |
+| **Code search** | `searchCode` across orgs |
+| **Blame view** | See who wrote what line |
+| **File history** | Commit history per file |
+
+---
 
 ### v0.9 — "Security & Enterprise"
-- Token-scope auditor with warnings for over-privileged tokens.
-- GitHub Enterprise Server configurable host.
-- OS keychain integration (mac/linux/windows).
-- OAuth device-flow login (no PAT required).
+
+| Feature | Why |
+|---|---|
+| **OAuth device-flow login** | No PAT required; just authorize in browser |
+| **OS keychain integration** | macOS Keychain, libsecret, Windows Credential Manager |
+| **GitHub Enterprise Server** | Configurable hostname for corporate users |
+| **Token scope auditor** | Warnings for over-privileged tokens |
+| **Dependabot aggregator** | Alerts across multiple repos |
+
+---
 
 ### v1.0 — "Polish & Launch"
-- Accessibility pass (screen-reader-friendly mode).
-- Comprehensive `--help` and standalone CLI subcommands.
-- Static binary via `pkg` (optional install path).
-- Homebrew / Scoop / AUR / Nix packaging.
-- Demo gif on README, marketing site stub.
 
-### v1.x+ — "Smart Helpers"
-- BYO-key AI summarise / draft.
-- Standup generator (recipe R4).
-- Smart triage hints (suggest labels, flag duplicates).
+| Feature | Why |
+|---|---|
+| **Screen-reader mode** | Linearized layout for accessibility |
+| **CLI subcommands** | `github-tui repos`, `github-tui inbox`, pipe-friendly output |
+| **Homebrew / Scoop / AUR / Nix** | Easy install on every platform |
+| **Static binary** | Optional `pkg` build for zero-install |
+| **Demo GIF** | Terminal recording for README |
 
 ---
 
-## 🧪 Quality, DX & Distribution
+### v1.x — "First Intelligence" 🧠
 
-### Testing
-- Snapshot tests for tab renderers — feed in a fixed `appState` clone, assert exact char buffer.
-- API client tests with a hand-rolled fake `https` server.
-- Property tests for sort / filter / fuzzy-score / scroll math.
-- Visual regression: take a printable screen dump, diff vs. golden file.
-- The modular layout makes most of `tui/*.mjs` testable without an actual terminal.
+> *The TUI starts thinking. Every feature is opt-in, local-first, cache-first.*
 
-### Telemetry (opt-in, anonymised)
-- Most-used commands (helps prune dead keys).
-- Average session length.
-- Error rates by API call.
-- Strictly opt-in via a Settings toggle; plaintext disclosure of what's sent.
+#### Intelligent PR Analysis
 
-### Logging
-- `~/.github-tui/log` rotating debug log (off by default).
-- `--verbose` flag.
-- Redact tokens automatically before logging.
+| Feature | Vision | Version |
+|---|---|---|
+| **PR Semantic Summary** | LLM-powered summary: what changed, why it matters, risk assessment. BYO-key, results cached locally. | v1.1 |
+| **Dependency Impact Analyzer** | Trace how a PR affects downstream packages, consumers, and CI pipelines. Visualize the blast radius. | v1.2 |
+| **Security Vulnerability Scanner** | Scan diffs for known CVE patterns, insecure defaults, credential exposure. Inline annotations. | v1.1 |
+| **Performance Regression Detector** | Flag diffs that touch hot paths, add allocations, or change algorithmic complexity. | v1.3 |
+| **PR Size Advisor** | Suggest splitting oversized PRs. Show optimal chunking based on file ownership graph. | v1.1 |
 
-### Distribution
-- npm: `npx github-tui` zero-install.
-- Homebrew: `brew install gaurang/tap/github-tui`.
-- Scoop / Chocolatey for Windows.
-- AUR for Arch.
-- Nix flake.
-- Static binaries on GitHub Releases (via `pkg` or `nexe`).
+#### Issue Intelligence
 
-### Docs
-- Animated terminal demo (GIF via `vhs` or `asciinema`).
-- Per-feature short docs in `docs/`.
-- A keybinding cheatsheet printable PDF.
-- The `?` overlay links to `docs/` URLs.
+| Feature | Vision | Version |
+|---|---|---|
+| **Smart Auto-Triage** | Rule-based + ML-assisted issue classification at ingestion. Rules in `.github/triage.yml`, executed locally. | v1.1 |
+| **Duplicate Detection** | Fuzzy match against existing issues. Show similarity scores. One-click merge. | v1.2 |
+| **Effort Estimator** | Predict story points based on issue complexity, file touch patterns, historical velocity. | v1.3 |
+| **Priority Scorer** | Auto-prioritize based on: user impact, code churn, dependency count, age. | v1.1 |
+| **Trend Detector** | Alert when a bug type is increasing. "Login failures up 3x this week." | v1.2 |
 
----
+#### Code Insights
 
-## 🚀 Stretch / Moonshot Ideas
+| Feature | Vision | Version |
+|---|---|---|
+| **Complexity Trends** | Track cyclomatic complexity per module over time. ASCII sparklines in repo view. | v1.2 |
+| **Technical Debt Score** | Composite metric: TODO count, test coverage gaps, dependency staleness, documentation gaps. | v1.3 |
+| **Knowledge Map** | Who knows what? Visualize expertise by file/module from commit history and review patterns. | v1.2 |
+| **Bus Factor Analysis** | Flag modules where 1 person holds >80% of knowledge. Encourage knowledge sharing. | v1.3 |
+| **Documentation Coverage** | Track README presence, JSDoc/TSDoc density, inline comment ratio per module. | v1.2 |
 
-- **Multi-account switching** (`Ctrl-A` to swap between work / personal tokens).
-- **Pair-mode** — two terminals connected, shared cursor for code review.
-- **Time-travel snapshot** — `git bisect`-style for issue threads ("what did the discussion look like Tuesday?").
-- **Embeddable** — expose the TUI as a tmux/zellij/wezterm pane plugin.
-- **Voice mode** (opt-in, BYO STT) — "open my repos" → switches tabs.
-- **Personal analytics dashboard** — generate a yearly "GitHub Wrapped" PDF.
-- **Bring-your-own-data** import — Linear, Jira, GitLab adapters.
-- **Repo health score** — composite metric (CI green %, PR cycle time, doc coverage).
-- **Pluggable widgets** — drop a JS file into `~/.github-tui/widgets/` and it appears on the Dashboard. *(Easier now that tab modules already expose a `render(screen, y, h)` contract.)*
-- **Story mode** — "Walk me through this repo" — README, examples, recent commits, top contributors, in sequence.
+#### Developer Experience
+
+| Feature | Vision | Version |
+|---|---|---|
+| **Focus Mode** | Hide everything except current task: assigned issues, PRs reviewing, active repo CI. | v1.1 |
+| **Review Queue Prioritizer** | Reorder reviews by urgency, context-switch cost, expertise match. Not just FIFO. | v1.1 |
+| **Smart Notification Batching** | Deduplicate: 3 comments on one issue = 1 notification. Batch by repo. Suppress noise in focus mode. | v1.1 |
+| **Keyboard-Native Workflows** | `r c` = review-comment, `r a` = approve, `r m` = approve+merge. Compound actions, one keypress. | v1.0 |
+| **Time-Boxed Work Sessions** | Pomodoro mode: lock to one issue/PR, track time, log completion, suggest commit message. | v1.2 |
+| **Personalized Dashboard** | Learns your behavior: surfaces repos you use, hides tabs you ignore. Privacy-first, all local. | v1.3 |
 
 ---
 
-## 📦 v0.3 Release Notes
+### v2.x — "Velocity & Intelligence" 📈
 
-The single biggest leap since v0.2. Headlines:
+> *The TUI accumulates historical context. Metrics emerge. Predictions become possible.*
 
-- **App is no longer a 1978-line file.** It is one ~60-line entrypoint + 14 focused modules. Every future feature lands in a small file with a clear job.
-- **Command palette + themes.** Two killer-feature UX moves shipped at once.
-- **Inbox triage.** The most-requested feature for any GitHub client.
-- **README pane.** Read a repo without leaving the terminal.
-- **Star, bookmark, copy URL from anywhere.** Three different verbs, three single keys.
-- **ETag cache.** Repeated views cost zero rate-limit budget.
+#### DORA Metrics & Velocity
+
+| Feature | Vision | Version |
+|---|---|---|
+| **DORA Metrics Dashboard** | Lead time, cycle time, deploy frequency, change failure rate — computed from GitHub data. ASCII bar charts. | v2.0 |
+| **PR Throughput Trends** | PRs merged/week, avg PR size, time-to-review, commit-to-merge. Sparklines with trend arrows. | v2.0 |
+| **Burndown/Burnup Charts** | Milestone progress with predictive completion dates. ASCII art. Scope creep detection. | v2.0 |
+| **Review Metrics Dashboard** | Reviewer responsiveness, turnaround, approval rate, comments/review. Team leaderboard (opt-in). | v2.1 |
+| **Cross-Repo Context Bridge** | Link related issues/PRs across repos. Dependency graph visualization. | v2.1 |
+
+#### Release Management
+
+| Feature | Vision | Version |
+|---|---|---|
+| **Automated Changelog** | Generate from merged PRs grouped by type. Conventional commit parsing. Preview & edit. | v2.0 |
+| **Release Draft Assistant** | Interactive: version bump → changelog → tag → GitHub Release → notify issues. Single `r release`. | v2.1 |
+| **Changelog-to-Release Pipeline** | Full pipeline: edit changelog, create tag, upload assets, close milestone, notify stakeholders. | v2.2 |
+| **Branch Protection Visualizer** | ASCII flow diagram: "To merge: ✓ CI → ✓ 2 approvals → ✓ Up-to-date." Shows gates met/unmet. | v2.1 |
+
+#### Code Review Intelligence
+
+| Feature | Vision | Version |
+|---|---|---|
+| **Review Checklists** | Per-file-type checklists during review. API changes → "Check: input validation, rate limiting, errors." | v2.0 |
+| **Reviewer Assignment Optimizer** | Match reviewers by expertise, workload, code ownership. Confidence scores. | v2.1 |
+| **Review Quality Metrics** | Track: nits caught, regressions found, approval accuracy. Improve over time. | v2.2 |
+| **Auto-Review Suggestions** | LLM-assisted: "This PR modifies auth middleware — consider checking: token expiry, rate limiting." | v2.1 |
+
+#### AI & Natural Language
+
+| Feature | Vision | Version |
+|---|---|---|
+| **Natural Language Interface** | Ask: "What changed since last release?", "Who reviewed my PR?", "Show failing tests." Get answers with links. | v2.0 |
+| **AI Code Review Assistant** | BYO-key LLM review: security, performance, style, documentation. Results cached, streamed to TUI. | v2.0 |
+| **Conversational Triage** | Chat with your issue tracker: "Find similar bugs to #456", "What's blocking this milestone?" | v2.1 |
+| **AI Cost Dashboard** | Track token usage, cost per query, cache hit rate. Stay within budget. | v2.1 |
+
+#### Collaboration & Team
+
+| Feature | Vision | Version |
+|---|---|---|
+| **Team Velocity Dashboard** | Team-level DORA metrics, sprint velocity trends, capacity forecasting. | v2.0 |
+| **Workload Distribution** | Visualize: who has too many issues? Who's idle? Balance the load. | v2.1 |
+| **Standup Generator** | Auto-generate standup from last 24h: commits, PRs reviewed, issues closed, blockers. | v2.0 |
+| **Review Turnaround Tracker** | "PRs sit 3 days waiting for review" — identify bottlenecks in the review process. | v2.1 |
+| **Mentor Matching** | New contributors matched with experienced reviewers based on code area, language, learning goals. | v2.2 |
+| **Activity Digest** | Weekly digest: "You merged 5 PRs, reviewed 3, closed 12 issues. Team velocity: +15%." | v2.1 |
+
+#### Multi-Platform
+
+| Feature | Vision | Version |
+|---|---|---|
+| **Platform Abstraction Layer** | Unified data model: repos, issues, PRs, CI across GitHub/GitLab/Bitbucket/Gitea. | v2.0 |
+| **GitLab Driver** | Full GitLab CE/EE: merge requests, pipelines, issues, boards. OAuth2 device flow. | v2.1 |
+| **Gitea/Forgejo Driver** | Self-hosted Gitea/Forgejo support. Auto-discover via config. | v2.2 |
+| **Unified Inbox** | Single pane aggregating notifications from all platforms. Filter by platform, type, repo. | v2.2 |
+
+#### Plugin System & Extensibility
+
+| Feature | Vision | Version |
+|---|---|---|
+| **Plugin Runtime** | Sandboxed worker threads. Load `.mjs` from `~/.github-tui/plugins/`. Lifecycle hooks. | v2.0 |
+| **Plugin SDK** | TypeScript declarations: `onLoad(ctx)`, `renderTab(pane)`, `onKey(ch)`. Autocomplete in VS Code. | v2.0 |
+| **Plugin Marketplace** | Central registry: ratings, downloads, verified badges. `Ctrl-P` → "Install plugin." | v2.1 |
+| **Hot-Reload** | `Ctrl-P` → "Reload plugins." No restart. `--watch` mode for development. | v2.0 |
+| **Custom Themes as Plugins** | Themes become plugins. Community marketplace. 8 themes → 80+ via community. | v2.0 |
+
+#### Data Portability
+
+| Feature | Vision | Version |
+|---|---|---|
+| **Config Export/Import** | `github-tui config export` → `github-tui.json`. Import on new machine. | v1.1 |
+| **Team Settings Sync** | Share team config via dotfiles repo. `github-tui config sync --repo org/team-tui-config`. | v2.0 |
+| **Backup & Restore** | `github-tui backup` → `.tar.gz` of config + cache + session. Restore on laptop swap. | v1.2 |
+| **`gh` CLI Import** | Import bookmarks, aliases from `~/.config/gh/`. Zero-friction onboarding. | v1.1 |
+| **State Sync via Git** | Optional: `~/.github-tui/` in dotfiles repo. Auto-pull on launch, auto-push on exit. | v2.0 |
+
+#### Terminal Integration
+
+| Feature | Vision | Version |
+|---|---|---|
+| **tmux Plugin** | Hotkey binding. Auto-open inbox on notifications via tmux hooks. | v2.0 |
+| **Zellij Plugin** | Native WASM plugin. Floating pane. Zellij layout integration. | v2.1 |
+| **WezTerm Integration** | Lua scripting deep integration. One-keybind split pane. IPC for notifications. | v2.1 |
+| **Session Persistence** | Save/restore TUI state across tmux session recreation. | v2.0 |
+| **Multi-Pane Layouts** | Pre-built: `github-tui-triage`, `github-tui-review`, `github-tui-ci`. | v2.1 |
+
+#### IDE Bridge
+
+| Feature | Vision | Version |
+|---|---|---|
+| **VS Code Extension** | TUI in integrated terminal. Bidirectional: open file from TUI, open PR from editor. | v2.0 |
+| **Neovim Plugin** | Lua plugin. `:GitHubTUI pr <number>` opens PR diff. Floating window. | v2.1 |
+| **DAP Bridge** | Debug Adapter Protocol. Show breakpoints, call stacks in TUI pane. Trigger from failed CI. | v2.3 |
+
+---
+
+### v3.x — "Autonomous & Enterprise" 🚀
+
+> *The TUI acts on your behalf. It triages, automates, and protects. The terminal becomes the command center.*
+
+#### Automation & Self-Driving
+
+| Feature | Vision | Version |
+|---|---|---|
+| **In-TUI Workflow Rules** | YAML-defined if-this-then-that rules. "If issue stale 14 days → auto-close." Local execution, full audit. | v3.0 |
+| **Stale Issue Lifecycle** | 30d → label `stale`, 45d → warning, 60d → close. Configurable, logged, overridable. | v3.0 |
+| **Smart Assignee Suggestions** | git blame + CODEOWNERS + workload + activity. Confidence scores. "92% match: @alice." | v3.0 |
+| **Alert Correlation Engine** | Group related alerts across repos by time, dependencies, topology. One incident card, not five. | v3.0 |
+
+#### Incident Response
+
+| Feature | Vision | Version |
+|---|---|---|
+| **Incident Timeline** | Correlate deploys, CI failures, issues into unified timeline. Root-cause suggestions. | v3.0 |
+| **Post-Mortem Generator** | Auto-fill post-mortem from timeline: impact, affected services, action items. Commit to `postmortems/`. | v3.0 |
+| **Status Page Integration** | Show internal status page in TUI. Acknowledge incidents from terminal. | v3.1 |
+
+#### Advanced AI
+
+| Feature | Vision | Version |
+|---|---|---|
+| **Predictive Analytics** | "When will this PR merge?", "Which repos are at risk?", "Who's disengaging?" | v3.0 |
+| **Autonomous Code Review** | AI proposes fixes, not just finds issues. One-click apply suggestions. | v3.1 |
+| **Learning Mode** | New contributor onboarding: codebase walkthrough generator, architecture docs from code. | v3.0 |
+| **Time-Travel Bisect** | `git bisect`-style for issue threads. Find when a bug was introduced in the conversation. | v3.1 |
+
+#### Enterprise
+
+| Feature | Vision | Version |
+|---|---|---|
+| **Azure DevOps Driver** | Azure Repos + Pipelines. Work items, PRs, build definitions. | v3.0 |
+| **SSO Integration** | SAML/OIDC auth for enterprise environments. | v3.1 |
+| **Audit Logging** | Track all TUI actions for compliance. Exportable logs. | v3.0 |
+| **White-Label Engine** | License the TUI engine for branded internal dashboards. | v3.2 |
+
+#### Advanced Collaboration
+
+| Feature | Vision | Version |
+|---|---|---|
+| **Shared Session / Pair Mode** | Two terminals share TUI session via WebSocket. Remote pair programming. | v3.0 |
+| **Real-Time Presence** | Show who's viewing what. Live cursors in PR review. | v3.1 |
+| **Cross-Platform Federation** | Notifications from GitHub + GitLab + Gitea in one stream. | v3.0 |
+| **Incident War Room** | Multi-user session for incident response. Shared timeline, action items, comms. | v3.2 |
+
+#### Sustainability
+
+| Feature | Vision | Version |
+|---|---|---|
+| **Open Core Model** | Core (GitHub) is MIT. Drivers (GitLab, Azure), premium themes, AI are commercial. | v2.0 |
+| **Sponsorware Themes** | Premium themes for GitHub Sponsors at $5+/month. Accessibility-certified. | v2.0 |
+| **Enterprise License** | Per-seat for Azure driver, SSO, audit logging, priority support, SLA. | v3.0 |
+| **Community Foundation** | GitHub Sponsors + Open Collective. Transparent finances. Governance board. | v2.0 |
+
+---
+
+## 🆚 vs. Alternatives V2
+
+| Need | `gh` CLI | lazygit | octobox | **GitHub TUI** |
+|---|---|---|---|---|
+| Interactive UI | ❌ | ✅ (git only) | ✅ (notifications) | ✅ |
+| Multi-tab dashboards | ❌ | ❌ | ❌ | ✅ |
+| Trending / discovery | ❌ | ❌ | ❌ | ✅ |
+| README in terminal | ❌ | ❌ | ❌ | ✅ |
+| Command palette | partial | ❌ | ❌ | ✅ |
+| Themes | ❌ | ✅ | ❌ | ✅ |
+| ETag caching | ❌ | n/a | n/a | ✅ |
+| Inbox triage | ❌ | ❌ | ✅ (web) | ✅ |
+| Forks ahead/behind | ❌ | ❌ | ❌ | ✅ |
+| Clipboard (SSH-safe) | ❌ | partial | n/a | ✅ |
+| Zero install | needs install | needs install | web app | ✅ |
+| Offline + disk cache | ❌ | ❌ | ❌ | ✅ |
+| AI summarise | ❌ | ❌ | ❌ | ✅ |
+| Enterprise Server | ✅ | n/a | partial | ✅ |
+| **DORA metrics** | ❌ | ❌ | ❌ | 🎯 v2.0 |
+| **Plugin system** | ❌ | ❌ | ❌ | 🎯 v2.0 |
+| **Multi-platform** | ❌ | ❌ | ❌ | 🎯 v2.0 |
+| **Natural language** | ❌ | ❌ | ❌ | 🎯 v2.0 |
+| **Team analytics** | ❌ | ❌ | ❌ | 🎯 v2.1 |
+| **Incident response** | ❌ | ❌ | ❌ | 🎯 v3.0 |
+| **IDE bridge** | partial | n/a | ❌ | 🎯 v2.0 |
+| **Pair programming** | ❌ | ❌ | ❌ | 🎯 v3.0 |
+| **Workflow automation** | partial | ❌ | ❌ | 🎯 v3.0 |
+
+---
+
+## 🎯 Workflow Recipes V2
+
+### R1 — "Morning Triage" ✅
+1. Launch → Dashboard. Glance at 🔔 badge.
+2. `5` → Inbox. `f` filter unread. `M` mark all read.
+3. `m` clear individual; `u` mute; `o` open in browser.
+4. `1` → Dashboard. Verify count dropped.
+
+### R2 — "Maintainer Fork Hunt" ✅
+1. `3` → search my repo → `Enter`.
+2. `Enter` → Forks. `p` sort by last push.
+3. See which forks are ahead of main.
+4. `o` open best fork. `b` bookmark.
+
+### R3 — "CI Cockpit" ✅
+1. `4` → Actions tab.
+2. Browse repos → view runs → expand jobs.
+3. `r` re-run failed. `x` cancel.
+
+### R4 — "OOO Recap" 🔲 v0.6
+1. `Ctrl-P` → "Since I was last here".
+2. Shows: merges missed, mentions waiting, new issues.
+
+### R5 — "Security Sweep" 🔲 v0.9
+1. `Ctrl-P` → "Dependabot alerts".
+2. Aggregated, sorted by severity.
+
+### R6 — "Read a Repo Like a Book" 🟡
+1. Search → Enter on repo. ✅
+2. `R` → README rendered. ✅
+3. *Pending:* `f` → file tree → `v` view file. *(v0.8)*
+
+### R7 — "Velocity Check" 🎯 v2.0
+1. `Ctrl-P` → "DORA metrics".
+2. See: lead time (2.3d), cycle time (1.8d), deploy freq (12/week), failure rate (8%).
+3. Compare to last month. Trend arrows show improvement.
+4. Drill down: which repos are dragging?
+
+### R8 — "AI-Assisted Review" 🎯 v2.0
+1. Open PR → `a` for AI review.
+2. LLM scans diff: security issues, performance hints, style suggestions.
+3. Results appear as inline annotations.
+4. `Enter` to apply suggestion. `Esc` to dismiss.
+
+### R9 — "Release Flow" 🎯 v2.1
+1. `r release` → Release assistant opens.
+2. "v2.3.0 was last release. 47 PRs since. Suggested: v2.4.0 (minor)."
+3. Changelog auto-generated from merged PRs.
+4. Edit → Tag → Push → GitHub Release created. Issues notified.
+
+### R10 — "Incident Response" 🎯 v3.0
+1. Alert fires → TUI correlates: deploy at 14:32, CI fail at 14:35, issue at 14:38.
+2. Timeline view: PR #891 merged → CI failed → issue #892 created.
+3. Root cause suggested: PR #891 (auth module change).
+4. `w` → War room: invite team, shared timeline, action items.
+5. `p` → Post-mortem generated from timeline.
+
+### R11 — "Cross-Platform Triage" 🎯 v2.2
+1. Unified inbox: GitHub + GitLab + Gitea notifications.
+2. Filter by platform, type, repo.
+3. Mark read across all platforms.
+4. One command resolves across ecosystems.
+
+### R12 — "Plugin-Powered Dashboard" 🎯 v2.0
+1. `Ctrl-P` → "Install plugin" → `jira-sync`.
+2. Plugin loads: adds Jira panel to dashboard.
+3. Shows Jira issues alongside GitHub issues.
+4. Cross-reference: link GitHub PR to Jira ticket.
+
+---
+
+## 💡 Killer Features — Progress V2
+
+| Feature | Status |
+|---|---|
+| Command Palette (`Ctrl-P`) | ✅ shipped |
+| PR Review Workflow in-TUI | ✅ shipped |
+| Inbox actions | ✅ shipped |
+| Disk cache with ETags | 🟡 in-memory only (v0.6 disk) |
+| README + Markdown renderer | ✅ shipped |
+| Saved searches | ✅ shipped |
+| OS-keychain token storage | 🔲 v0.9 |
+| Workflow runs dashboard | ✅ shipped |
+| AI summarise (BYO-key) | 🎯 v1.1 |
+| Themes + keybinding customisation | ✅ shipped |
+| **DORA metrics** | 🎯 v2.0 |
+| **Plugin system** | 🎯 v2.0 |
+| **Multi-platform** | 🎯 v2.0 |
+| **Natural language interface** | 🎯 v2.0 |
+| **Team analytics** | 🎯 v2.1 |
+| **IDE bridge** | 🎯 v2.0 |
+| **Incident response** | 🎯 v3.0 |
+| **Pair programming** | 🎯 v3.0 |
+| **Workflow automation** | 🎯 v3.0 |
+
+---
+
+## 🔮 Stretch Ideas
+
+- **Multi-account switching** — `Ctrl-A` to swap work/personal tokens *(v1.1)*
+- **Pair-mode** — two terminals, shared cursor for code review *(v3.0)*
+- **Time-travel** — `git bisect`-style for issue threads *(v3.1)*
+- **Embeddable** — tmux/zellij/wezterm pane plugin *(v2.0)*
+- **Voice mode** — "open my repos" → switches tabs *(v3.1)*
+- **GitHub Wrapped** — yearly activity PDF *(v3.0)*
+- **Bring-your-own-data** — Linear, Jira, GitLab adapters *(v2.0)*
+- **Repo health score** — composite metric (CI green %, cycle time, docs) *(v2.1)*
+- **Pluggable widgets** — drop a JS file into `~/.github-tui/widgets/` *(v2.0)*
+- **Multi-user collaboration** — shared sessions, real-time cursors *(v3.0)*
+- **Incident war room** — multi-user incident response with shared timeline *(v3.2)*
+- **White-label engine** — license for branded internal dashboards *(v3.2)*
+- **Autonomous fixes** — AI proposes PR fixes, not just finds issues *(v3.1)*
+- **Knowledge graph** — org-wide expertise visualization *(v3.0)*
+- **Predictive capacity** — "At current velocity, milestone slips 5 days" *(v3.0)*
+
+---
+
+## 🏛️ Version Roadmap Summary
+
+| Phase | Version | Theme | Key Features |
+|-------|---------|-------|--------------|
+| Foundation | v0.6-v0.9 | Polish | Disk cache, offline, CI cockpit, security, OAuth |
+| Launch | v1.0-v1.x | First Intelligence | Accessibility, CLI, AI triage, PR summaries, focus mode, notifications |
+| Velocity | v2.0-v2.2 | Platform & Plugins | DORA metrics, plugin system, multi-platform, IDE bridge, team analytics |
+| Enterprise | v2.3 | Dev Tools Deep | Bitbucket, LSP, Docker, advanced linting |
+| Autonomous | v3.0+ | Self-Driving | Workflow rules, incident response, pair mode, enterprise SSO, white-label |
+
+---
+
+## 🧬 Architectural Principles
+
+| Principle | Rule |
+|---|---|
+| **Plugin-first** | Every feature after v2.0 ships as plugin first. Graduate to core if >30% adoption. |
+| **Driver isolation** | Platform drivers are independent modules — crash one, others survive. |
+| **Zero core deps** | Core stays zero-dep. Plugins may have deps; sandboxed in worker threads. |
+| **Cache-first** | Every AI/ML feature caches results locally. Repeated queries are free. |
+| **Opt-in intelligence** | No feature runs without user consent. BYO-key, local execution, no telemetry. |
+| **Terminal-native** | Use terminal primitives: ANSI, OSC-52, tmux hooks, stdin/stdout pipes. |
+| **Config as code** | All config is JSON/TOML. Version-controllable. Diffable. Team-shareable. |
+
+---
+
+## 🎨 The Terminal Advantage
+
+Why the terminal beats the browser for developer tooling:
+
+| Advantage | Terminal | Browser |
+|---|---|---|
+| **Composability** | Pipe to `jq`, `fzf`, `xargs`, any CLI | Siloed, copy-paste |
+| **Offline** | Full cache, works on planes | Needs connection |
+| **Scriptability** | Automate with shell scripts | No API |
+| **Multi-session** | tmux/zellij, share sessions | One tab = one view |
+| **Keyboard-first** | Zero hand movement | Mouse required |
+| **Low latency** | <10ms render | Network round-trips |
+| **Persistent state** | SQLite, disk cache | Tab reload = state lost |
+| **Privacy** | Local-first, no telemetry | Cloud-dependent |
 
 ---
 
 *This vision is intentionally maximalist. The point isn't to ship everything — it's to make every "what about…" question land in one of these buckets so we can sequence the next move with confidence.*
+
+*The terminal isn't a relic. It's the future of developer tooling. And GitHub TUI is leading the charge.*
 
 *License: MIT.*
