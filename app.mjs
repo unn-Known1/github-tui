@@ -21,6 +21,32 @@ const __dirname = dirname(__filename);
 const pkg = JSON.parse(readFileSync(join(__dirname, 'package.json'), 'utf8'));
 
 let rateLimitInterval = null;
+let autoRefreshInterval = null;
+
+function startAutoRefresh() {
+  if (autoRefreshInterval) clearInterval(autoRefreshInterval);
+  if (!appState.autoRefreshEnabled) return;
+  autoRefreshInterval = setInterval(async () => {
+    if (!appState.token || appState.loading) return;
+    const { tabState } = await import('./tui/state.mjs');
+    const t = tabState.current;
+    try {
+      if (t === 0) {
+        const { loadDashboardWidgets } = await import('./tui/tabs/dashboard.mjs');
+        await loadDashboardWidgets(true);
+      } else if (t === 4) {
+        const { loadNotifications } = await import('./tui/tabs/inbox.mjs');
+        await loadNotifications();
+      } else if (t === 3) {
+        const actions = await import('./tui/tabs/actions.mjs');
+        if (appState.actionsView === 'runs') await actions.loadWorkflowRuns();
+      }
+    } catch {}
+  }, appState.autoRefreshIntervalMs);
+}
+
+// Export for settings to restart after interval change.
+globalThis._startAutoRefresh = startAutoRefresh;
 
 async function refreshRateLimit() {
   if (!appState.token) return;
@@ -126,8 +152,22 @@ async function main() {
   if (appState.token) {
     await loadUserData();
     refreshRateLimit();
+
+    // Detect local git repo context for smart filtering.
+    try {
+      const { detectLocalRepo } = await import('./tui/git-context.mjs');
+      const local = detectLocalRepo();
+      if (local) {
+        appState.localRepo = local;
+        appState.localRepoFilter = true;
+      }
+    } catch {}
+
     // Refresh rate limit every 60 seconds.
     rateLimitInterval = setInterval(refreshRateLimit, 60000);
+
+    // Auto-refresh: silently refetch data at a configurable interval.
+    startAutoRefresh();
   } else {
     // First-time users get a friendly welcome overlay.
     const onboarding = await import('./tui/tabs/onboarding.mjs');

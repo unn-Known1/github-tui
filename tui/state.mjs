@@ -158,6 +158,23 @@ export const appState = {
   dashboardStarHistory: [],      // daily star counts for sparkline
   dashboardSelectedCard: 0,      // 0..4 stat-card focus for keyboard nav
   dashboardCardsFocus: false,    // true when keyboard focus is on a stat card
+  dashboardFocusZone: 'trending', // 'trending' | 'issues' | 'prs' — which list has keyboard focus
+  dashboardIssueSelected: 0,
+  dashboardIssueScroll: 0,
+  dashboardPRSelected: 0,
+  dashboardPRScroll: 0,
+
+  // ── Auto-refresh ──
+  autoRefreshEnabled: false,
+  autoRefreshIntervalMs: 300000,  // 5 minutes default
+
+  // ── Local repo context ──
+  localRepo: null,           // { owner, repo } | null — detected from cwd git remote
+  localRepoFilter: false,    // when true, dashboard/inbox filter to this repo
+
+  // ── Custom sections ──
+  customSections: [],        // [{ title, type, query, items: [], selected: 0, scroll: 0 }]
+  customSectionsLoaded: false,
 
   // ── Actions / CI ──
   actionsView: 'repos',     // 'repos' | 'runs'

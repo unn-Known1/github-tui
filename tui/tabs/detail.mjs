@@ -283,6 +283,7 @@ export function renderDetail(screen) {
   const actionY = tabY;
   const allActions = ['c Comment', 'r React'];
   if (appState.detailType === 'pull_request' && data.mergeable) allActions.push('M Merge');
+  if (appState.detailType === 'pull_request') allActions.push('C Checkout');
   if (data.state === 'open') allActions.push('x Close');
   else allActions.push('x Reopen');
   // Only render actions that fit before the tab labels end.
@@ -326,8 +327,9 @@ export function renderDetail(screen) {
   }
 
   // Scroll indicator
-  screen.writeStr(bx + 2, by + boxH - 1,
-    '[↑↓] scroll  [Esc] close  [c] comment  [r] react', color('dim'));
+  const hintParts = ['[↑↓] scroll', '[Esc] close', '[c] comment', '[r] react'];
+  if (appState.detailType === 'pull_request') hintParts.push('[C] checkout');
+  screen.writeStr(bx + 2, by + boxH - 1, hintParts.join('  '), color('dim'));
 }
 
 function renderBody(screen, data, x, y, w, h, scroll) {
@@ -519,6 +521,22 @@ export const keys = {
   'r': toggleReactionPicker,
   'M': () => { if (appState.detailType === 'pull_request') mergePR(); },
   'x': closeOrReopen,
+  'C': async () => {
+    if (appState.detailType !== 'pull_request' || !appState.detailData) return;
+    const pr = appState.detailData;
+    const branch = pr.head && pr.head.ref;
+    if (!branch) { showMessage('No branch info available', 'warning'); return; }
+    confirm('Checkout branch "' + branch + '"?', async () => {
+      try {
+        const { execSync } = await import('child_process');
+        execSync('git fetch origin ' + branch + ' && git checkout ' + branch,
+          { stdio: 'pipe', timeout: 30000 });
+        showMessage('Checked out ' + branch, 'success');
+      } catch (e) {
+        showMessage('Checkout failed: ' + (e.message || 'unknown'), 'error');
+      }
+    });
+  },
   'y': () => {
     if (!appState.detailData) return;
     const url = appState.detailData.html_url;

@@ -18,6 +18,8 @@ export const SAVED_SEARCHES_FILE = join(CONFIG_DIR, 'saved-searches.json');
 export const THEME_FILE = join(CONFIG_DIR, 'theme');
 export const CACHE_DIR = join(CONFIG_DIR, 'cache');
 export const ETAG_CACHE_FILE = join(CONFIG_DIR, 'etag-cache.json');
+export const SECTIONS_FILE = join(CONFIG_DIR, 'sections.json');
+export const KEYBINDINGS_FILE = join(CONFIG_DIR, 'keybindings.json');
 
 export function loadToken() {
   try {

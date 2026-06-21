@@ -1,0 +1,93 @@
+// Custom user keybindings — loaded from ~/.github-tui/keybindings.json.
+// Each binding maps a key to a shell command with placeholder substitution.
+//
+// Expected format:
+// [
+//   { "key": "E", "command": "code .", "label": "Open in VS Code", "context": "repo" },
+//   { "key": "T", "command": "gh pr view {number} --web", "label": "View PR in browser", "context": "detail" }
+// ]
+//
+// Supported placeholders: {owner}, {repo}, {number}, {branch}
+
+import { KEYBINDINGS_FILE, readJson } from './config.mjs';
+import { appState, showMessage, render } from './state.mjs';
+
+let _bindings = null;
+
+function loadBindings() {
+  if (_bindings === null) {
+    _bindings = readJson(KEYBINDINGS_FILE, []);
+    if (!Array.isArray(_bindings)) _bindings = [];
+  }
+  return _bindings;
+}
+
+function resolvePlaceholders(cmd) {
+  let resolved = cmd;
+
+  // From detail view
+  if (appState.detailData) {
+    const d = appState.detailData;
+    resolved = resolved.replace(/\{number\}/g, String(d.number || ''));
+    resolved = resolved.replace(/\{branch\}/g, (d.head && d.head.ref) || '');
+  }
+
+  // From repo context
+  if (appState.repoDetails) {
+    const r = appState.repoDetails;
+    const [owner, repo] = (r.full_name || '').split('/');
+    resolved = resolved.replace(/\{owner\}/g, owner || '');
+    resolved = resolved.replace(/\{repo\}/g, repo || '');
+  } else if (appState.localRepo) {
+    resolved = resolved.replace(/\{owner\}/g, appState.localRepo.owner || '');
+    resolved = resolved.replace(/\{repo\}/g, appState.localRepo.repo || '');
+  }
+
+  // Clean up any remaining unreplaced placeholders
+  resolved = resolved.replace(/\{[a-zA-Z]+\}/g, '');
+
+  return resolved;
+}
+
+function contextMatches(binding) {
+  const ctx = binding.context || 'any';
+  if (ctx === 'any') return true;
+  if (ctx === 'detail') return !!appState.showDetail;
+  if (ctx === 'repo') return !!appState.repoDetails || !!appState.localRepo;
+  if (ctx === 'dashboard') {
+    return !appState.showDetail;
+  }
+  return true;
+}
+
+/**
+ * Try to handle a key press via custom keybindings.
+ * Returns true if a binding was matched and executed, false otherwise.
+ */
+export function runCustomKey(key) {
+  const bindings = loadBindings();
+  if (bindings.length === 0) return false;
+
+  const binding = bindings.find(b => b.key === key && contextMatches(b));
+  if (!binding) return false;
+
+  const cmd = resolvePlaceholders(binding.command);
+  showMessage('Running: ' + (binding.label || cmd), 'info');
+
+  try {
+    import('child_process').then(({ exec }) => {
+      exec(cmd, { timeout: 30000 }, (error, stdout, stderr) => {
+        if (error) {
+          showMessage('Command failed: ' + (error.message || 'unknown'), 'error');
+        } else {
+          showMessage('✓ ' + (binding.label || 'Command') + ' complete', 'success');
+        }
+        render();
+      });
+    });
+  } catch (e) {
+    showMessage('Failed to run command: ' + (e.message || 'unknown'), 'error');
+  }
+
+  return true;
+}

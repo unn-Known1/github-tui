@@ -49,6 +49,16 @@ export async function loadDashboardWidgets(force = false) {
     appState.dashboardStaleRepos = staleResult.repos;
     appState.dashboardStarHistory = buildStarHistory(appState.starred);
     appState.dashboardLoaded = true;
+
+    // Load custom user-defined sections (non-blocking — don't fail the dashboard).
+    if (!appState.customSectionsLoaded || force) {
+      try {
+        const { loadCustomSections } = await import('../custom-sections.mjs');
+        appState.customSections = await loadCustomSections(appState.token);
+        appState.customSectionsLoaded = true;
+      } catch {}
+    }
+
     render();
   } catch (e) {
     if (!isStale(gen)) showMessage('Dashboard widgets failed: ' + e.message, 'error');
@@ -176,6 +186,12 @@ export function renderDashboard(screen, y, h) {
   // Greeting row.
   const heading = greeting() + ', ' + (user.name || user.login);
   screen.writeStr(2, y, heading, color('title') || { fg: 'white', bold: true });
+
+  // Local repo context badge.
+  if (appState.localRepo && appState.localRepoFilter) {
+    const ctxBadge = '📂 ' + appState.localRepo.owner + '/' + appState.localRepo.repo;
+    screen.writeStr(2 + heading.length + 2, y, ctxBadge, { fg: 'cyan', dim: true });
+  }
 
   const unread = appState.notifications.filter(n => n.unread).length;
   if (unread > 0) {
@@ -421,18 +437,28 @@ export function renderDashboard(screen, y, h) {
   }
 
   if (ry < y + h - 3 && appState.dashboardRecentIssues.length > 0) {
-    const issuesVisible = sectionHeader(screen, rightX, ry, 'RECENT ISSUES', null, 'dashboard:issues');
+    const issueFocused = appState.dashboardFocusZone === 'issues';
+    const issueHint = issueFocused ? '[Enter] open' : null;
+    const issuesVisible = sectionHeader(screen, rightX, ry, 'RECENT ISSUES', issueHint, 'dashboard:issues');
     ry++;
     if (issuesVisible) {
       const maxIssues = Math.min(4, Math.max(1, Math.floor((y + h - bodyY) * 0.20)));
-      for (const issue of appState.dashboardRecentIssues.slice(0, maxIssues)) {
+      const issueScroll = appState.dashboardIssueScroll;
+      const issueEnd = Math.min(issueScroll + maxIssues, appState.dashboardRecentIssues.length);
+      for (let ii = issueScroll; ii < issueEnd; ii++) {
         if (ry >= y + h - 1) break;
+        const issue = appState.dashboardRecentIssues[ii];
+        const sel = issueFocused && ii === appState.dashboardIssueSelected;
+        if (sel) {
+          for (let x = rightX; x < rightX + rightW; x++) screen.styleBuf[ry][x] = { bg: 'blue', fg: 'white', bold: true };
+        }
         const num = '#' + (issue.number || '?');
         const titleMax = rightW - 14;
         const title = truncate(issue.title || '?', titleMax);
         const stateStyle = issue.state === 'open' ? { fg: 'green' } : { dim: true };
-        screen.writeStr(rightX, ry, num, { fg: 'yellow' });
-        screen.writeStr(rightX + 8, ry, title, stateStyle);
+        screen.writeStr(rightX, ry, sel ? '▶ ' : '  ', sel ? { bg: 'blue', fg: 'white' } : null);
+        screen.writeStr(rightX + 2, ry, num, sel ? { bg: 'blue', fg: 'yellow' } : { fg: 'yellow' });
+        screen.writeStr(rightX + 8, ry, title, sel ? { bg: 'blue', fg: 'white', bold: true } : stateStyle);
         ry++;
       }
       ry++;
@@ -440,19 +466,29 @@ export function renderDashboard(screen, y, h) {
   }
 
   if (ry < y + h - 3 && appState.dashboardRecentPRs.length > 0) {
-    const prsVisible = sectionHeader(screen, rightX, ry, 'RECENT PRs', null, 'dashboard:prs');
+    const prFocused = appState.dashboardFocusZone === 'prs';
+    const prHint = prFocused ? '[Enter] open' : null;
+    const prsVisible = sectionHeader(screen, rightX, ry, 'RECENT PRs', prHint, 'dashboard:prs');
     ry++;
     if (prsVisible) {
       const maxPRs = Math.min(4, Math.max(1, Math.floor((y + h - bodyY) * 0.20)));
-      for (const pr of appState.dashboardRecentPRs.slice(0, maxPRs)) {
+      const prScroll = appState.dashboardPRScroll;
+      const prEnd = Math.min(prScroll + maxPRs, appState.dashboardRecentPRs.length);
+      for (let pi = prScroll; pi < prEnd; pi++) {
         if (ry >= y + h - 1) break;
+        const pr = appState.dashboardRecentPRs[pi];
+        const sel = prFocused && pi === appState.dashboardPRSelected;
+        if (sel) {
+          for (let x = rightX; x < rightX + rightW; x++) screen.styleBuf[ry][x] = { bg: 'blue', fg: 'white', bold: true };
+        }
         const num = '#' + (pr.number || '?');
         const draft = pr.draft ? '[draft] ' : '';
         const titleMax = rightW - 14;
         const title = truncate(draft + (pr.title || '?'), titleMax);
         const stateStyle = pr.state === 'open' ? { fg: 'cyan' } : { dim: true };
-        screen.writeStr(rightX, ry, num, { fg: 'cyan' });
-        screen.writeStr(rightX + 8, ry, title, stateStyle);
+        screen.writeStr(rightX, ry, sel ? '▶ ' : '  ', sel ? { bg: 'blue', fg: 'white' } : null);
+        screen.writeStr(rightX + 2, ry, num, sel ? { bg: 'blue', fg: 'cyan' } : { fg: 'cyan' });
+        screen.writeStr(rightX + 8, ry, title, sel ? { bg: 'blue', fg: 'white', bold: true } : stateStyle);
         ry++;
       }
       ry++;
@@ -472,6 +508,36 @@ export function renderDashboard(screen, y, h) {
           (appState.dashboardStaleCount - appState.dashboardStaleRepos.length) + ' more', { dim: true });
       }
       ry++;
+    }
+  }
+
+  // ── Custom user-defined sections ──
+  if (appState.customSections && appState.customSections.length > 0) {
+    for (let si = 0; si < appState.customSections.length; si++) {
+      const sec = appState.customSections[si];
+      if (ry >= y + h - 3 || sec.items.length === 0) continue;
+      const secKey = 'dashboard:custom-' + si;
+      const secVisible = sectionHeader(screen, rightX, ry, sec.title.toUpperCase(), null, secKey);
+      ry++;
+      if (secVisible) {
+        const maxItems = Math.min(4, sec.items.length);
+        for (let ii = 0; ii < maxItems; ii++) {
+          if (ry >= y + h - 1) break;
+          const item = sec.items[ii];
+          const num = '#' + (item.number || '?');
+          const titleMax = rightW - 14;
+          const title = truncate(item.title || '?', titleMax);
+          const isPR = item.pull_request != null;
+          const numStyle = isPR ? { fg: 'cyan' } : { fg: 'yellow' };
+          const titleStyle = item.state === 'open'
+            ? (isPR ? { fg: 'cyan' } : { fg: 'green' })
+            : { dim: true };
+          screen.writeStr(rightX + 2, ry, num, numStyle);
+          screen.writeStr(rightX + 8, ry, title, titleStyle);
+          ry++;
+        }
+        ry++;
+      }
     }
   }
 
@@ -700,7 +766,128 @@ export const keys = {
   'n': () => {
     import('../issue-create.mjs').then(m => m.startCreateIssue());
   },
+  'l': () => {
+    if (!appState.localRepo) {
+      showMessage('No local git repo detected', 'warning');
+      return;
+    }
+    appState.localRepoFilter = !appState.localRepoFilter;
+    showMessage(appState.localRepoFilter
+      ? 'Filtering to ' + appState.localRepo.owner + '/' + appState.localRepo.repo
+      : 'Local repo filter cleared', 'info');
+    render();
+  },
 };
+
+// ── Zone-based navigation for interactive dashboard lists ──
+
+const ZONES = ['trending', 'issues', 'prs'];
+
+export function cycleDashboardZone() {
+  const i = ZONES.indexOf(appState.dashboardFocusZone);
+  appState.dashboardFocusZone = ZONES[(i + 1) % ZONES.length];
+  appState.dashboardCardsFocus = false;
+  showMessage('Focus: ' + appState.dashboardFocusZone, 'info', 1000);
+  render();
+}
+
+export function dashboardUp() {
+  const zone = appState.dashboardFocusZone;
+  if (zone === 'trending') { trendingUp(); return; }
+  if (zone === 'issues') {
+    if (appState.dashboardRecentIssues.length === 0) return;
+    appState.dashboardIssueSelected = Math.max(0, appState.dashboardIssueSelected - 1);
+    if (appState.dashboardIssueSelected < appState.dashboardIssueScroll) {
+      appState.dashboardIssueScroll = appState.dashboardIssueSelected;
+    }
+    render();
+    return;
+  }
+  if (zone === 'prs') {
+    if (appState.dashboardRecentPRs.length === 0) return;
+    appState.dashboardPRSelected = Math.max(0, appState.dashboardPRSelected - 1);
+    if (appState.dashboardPRSelected < appState.dashboardPRScroll) {
+      appState.dashboardPRScroll = appState.dashboardPRSelected;
+    }
+    render();
+    return;
+  }
+}
+
+export function dashboardDown() {
+  const zone = appState.dashboardFocusZone;
+  if (zone === 'trending') { trendingDown(); return; }
+  if (zone === 'issues') {
+    if (appState.dashboardRecentIssues.length === 0) return;
+    appState.dashboardIssueSelected = Math.min(
+      appState.dashboardRecentIssues.length - 1,
+      appState.dashboardIssueSelected + 1
+    );
+    const screen = getScreen();
+    const H = screen ? screen.height : 24;
+    const maxVisible = Math.min(4, Math.max(1, Math.floor((H - 17) * 0.20)));
+    if (appState.dashboardIssueSelected >= appState.dashboardIssueScroll + maxVisible) {
+      appState.dashboardIssueScroll++;
+    }
+    render();
+    return;
+  }
+  if (zone === 'prs') {
+    if (appState.dashboardRecentPRs.length === 0) return;
+    appState.dashboardPRSelected = Math.min(
+      appState.dashboardRecentPRs.length - 1,
+      appState.dashboardPRSelected + 1
+    );
+    const screen = getScreen();
+    const H = screen ? screen.height : 24;
+    const maxVisible = Math.min(4, Math.max(1, Math.floor((H - 17) * 0.20)));
+    if (appState.dashboardPRSelected >= appState.dashboardPRScroll + maxVisible) {
+      appState.dashboardPRScroll++;
+    }
+    render();
+    return;
+  }
+}
+
+export function openDashboardItem() {
+  const zone = appState.dashboardFocusZone;
+  if (zone === 'trending') { openTrendingRepo(); return; }
+  if (zone === 'issues') {
+    const issue = appState.dashboardRecentIssues[appState.dashboardIssueSelected];
+    if (!issue) return;
+    // Extract owner/repo from issue.repository_url or html_url
+    let owner, repo;
+    if (issue.repository_url) {
+      const parts = issue.repository_url.split('/');
+      owner = parts[parts.length - 2];
+      repo = parts[parts.length - 1];
+    } else if (issue.html_url) {
+      const match = issue.html_url.match(/github\.com\/([^/]+)\/([^/]+)/);
+      if (match) { owner = match[1]; repo = match[2]; }
+    }
+    if (owner && repo) {
+      import('./detail.mjs').then(m => m.openDetail('issue', owner, repo, issue.number));
+    }
+    return;
+  }
+  if (zone === 'prs') {
+    const pr = appState.dashboardRecentPRs[appState.dashboardPRSelected];
+    if (!pr) return;
+    let owner, repo;
+    if (pr.repository_url) {
+      const parts = pr.repository_url.split('/');
+      owner = parts[parts.length - 2];
+      repo = parts[parts.length - 1];
+    } else if (pr.html_url) {
+      const match = pr.html_url.match(/github\.com\/([^/]+)\/([^/]+)/);
+      if (match) { owner = match[1]; repo = match[2]; }
+    }
+    if (owner && repo) {
+      import('./detail.mjs').then(m => m.openDetail('pull_request', owner, repo, pr.number));
+    }
+    return;
+  }
+}
 
 // Card focus navigation (Tab on dashboard).
 export function focusCards() {

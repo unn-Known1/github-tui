@@ -302,7 +302,7 @@ export function handleKey(key) {
         if (appState.dashboardCardsFocus) {
           dashboard.unfocusCards();
         } else {
-          dashboard.focusCards();
+          dashboard.cycleDashboardZone();
         }
       } else {
         setTab((tabState.current + 1) % TABS.length);
@@ -382,6 +382,9 @@ export function handleKey(key) {
     mod.keys[key]();
     return;
   }
+
+  // 8. Custom user keybindings.
+  import('./custom-keys.mjs').then(m => m.runCustomKey(key)).catch(() => {});
 }
 
 function handleSpace() {
@@ -540,7 +543,7 @@ function handleEnter() {
   const t = tabState.current;
   if (t === 0) {
     if (appState.dashboardCardsFocus) { dashboard.openFocusedCard(); return; }
-    dashboard.openTrendingRepo();
+    dashboard.openDashboardItem();
     return;
   }
   if (t === 1) repos.enter();
@@ -552,7 +555,7 @@ function handleEnter() {
 function handleUp() {
   const t = tabState.current;
   const screen = getScreen();
-  if (t === 0) { dashboard.trendingUp(); return; }
+  if (t === 0) { dashboard.dashboardUp(); return; }
   if (t === 1) repos.up(screen);
   else if (t === 2) analyze.up(screen);
   else if (t === 3) actions.up();
@@ -562,7 +565,7 @@ function handleUp() {
 function handleDown() {
   const t = tabState.current;
   const screen = getScreen();
-  if (t === 0) { dashboard.trendingDown(); return; }
+  if (t === 0) { dashboard.dashboardDown(); return; }
   if (t === 1) repos.down(screen);
   else if (t === 2) analyze.down(screen);
   else if (t === 3) actions.down();

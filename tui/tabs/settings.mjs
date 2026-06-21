@@ -130,6 +130,7 @@ export function renderSettings(screen, y, h) {
   const dataItems = [
     { label: 'Refresh Dashboard', desc: 'Re-fetch events, trending',   enabled: isLoggedIn, sel: appState.settingsCursor === 2 },
     { label: 'Refresh User Data', desc: 'Re-fetch profile and repos',  enabled: isLoggedIn, sel: appState.settingsCursor === 3 },
+    { label: 'Auto-Refresh', desc: appState.autoRefreshEnabled ? 'Every ' + Math.round(appState.autoRefreshIntervalMs / 60000) + ' min' : 'Off', enabled: true, sel: appState.settingsCursor === 4 },
   ];
   for (const item of dataItems) {
     if (row >= y + sectionH) break;
@@ -141,7 +142,7 @@ export function renderSettings(screen, y, h) {
   // APPEARANCE
   sectionHeader(screen, 2, row, '🎨 APPEARANCE', leftMaxW);
   row += 2;
-  const themeItem = { label: 'Change Theme', desc: 'Current: ' + getThemeName(), enabled: true, sel: appState.settingsCursor === 4 };
+  const themeItem = { label: 'Change Theme', desc: 'Current: ' + getThemeName(), enabled: true, sel: appState.settingsCursor === 5 };
   if (row < y + sectionH) {
     renderRow(screen, row, leftMaxW, themeItem.label, themeItem.desc, true, themeItem.sel);
     row++;
@@ -178,7 +179,7 @@ export function renderSettings(screen, y, h) {
   sectionHeader(screen, 2, row, '⚠ DANGER ZONE', leftMaxW);
   row += 2;
   const dangerItems = [
-    { label: 'Clear Token File', desc: 'Wipe saved token',  enabled: isLoggedIn, sel: appState.settingsCursor === 5 },
+    { label: 'Clear Token File', desc: 'Wipe saved token',  enabled: isLoggedIn, sel: appState.settingsCursor === 6 },
   ];
   for (const item of dangerItems) {
     if (row >= y + sectionH) break;
@@ -203,7 +204,7 @@ export function renderSettings(screen, y, h) {
     }
   }
 
-  appState._maxSettingsCursor = 5;
+  appState._maxSettingsCursor = 6;
 }
 
 function renderSystemPanel(screen, x, y, w, h, screenW) {
@@ -256,9 +257,9 @@ export const keys = {
   },
 };
 const AUTH_ITEMS = [0, 1];  // Login, Logout
-const DATA_ITEMS = [2, 3];  // Refresh Dashboard, Refresh User Data
-const APPEARANCE_ITEMS = [4]; // Change Theme
-const DANGER_ITEMS = [5];  // Clear Token
+const DATA_ITEMS = [2, 3, 4];  // Refresh Dashboard, Refresh User Data, Auto-Refresh
+const APPEARANCE_ITEMS = [5]; // Change Theme
+const DANGER_ITEMS = [6];  // Clear Token
 
 function isCursorEnabled(cursor) {
   const isLoggedIn = !!appState.token;
@@ -266,7 +267,10 @@ function isCursorEnabled(cursor) {
     if (cursor === 0) return !isLoggedIn;
     return isLoggedIn;
   }
-  if (DATA_ITEMS.includes(cursor)) return isLoggedIn;
+  if (DATA_ITEMS.includes(cursor)) {
+    if (cursor === 4) return true;  // Auto-refresh is always available
+    return isLoggedIn;
+  }
   if (APPEARANCE_ITEMS.includes(cursor)) return true;
   if (DANGER_ITEMS.includes(cursor)) return isLoggedIn;
   return false;
@@ -321,13 +325,36 @@ export function enter() {
       }
       break;
     case 4: {
+      // Auto-refresh: cycle Off → 1 min → 5 min → 15 min → Off
+      const intervals = [0, 60000, 300000, 900000];
+      const labels = ['Off', '1 min', '5 min', '15 min'];
+      if (!appState.autoRefreshEnabled) {
+        appState.autoRefreshEnabled = true;
+        appState.autoRefreshIntervalMs = 60000;
+        showMessage('Auto-refresh: every 1 min', 'success');
+      } else {
+        const curIdx = intervals.indexOf(appState.autoRefreshIntervalMs);
+        const nextIdx = curIdx + 1;
+        if (nextIdx >= intervals.length) {
+          appState.autoRefreshEnabled = false;
+          showMessage('Auto-refresh: Off', 'info');
+        } else {
+          appState.autoRefreshIntervalMs = intervals[nextIdx];
+          showMessage('Auto-refresh: every ' + labels[nextIdx], 'success');
+        }
+      }
+      // Restart the interval
+      if (globalThis._startAutoRefresh) globalThis._startAutoRefresh();
+      break;
+    }
+    case 5: {
       const themes = listThemes();
       const curIdx = themes.indexOf(getThemeName());
       const nextIdx = (curIdx + 1) % themes.length;
       if (setTheme(themes[nextIdx])) showMessage('Theme: ' + themes[nextIdx], 'success');
       break;
     }
-    case 5:
+    case 6:
       if (isLoggedIn) confirm('Wipe token file and log out?', () => {
         handleLogout();
         showMessage('Token file wiped', 'success');
