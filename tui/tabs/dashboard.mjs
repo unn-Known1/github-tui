@@ -37,8 +37,8 @@ export async function loadDashboardWidgets(force = false) {
     appState.trendingSelected = 0;
     appState.trendingHasMore = appState.trending.length >= 100;
     appState.starred = Array.isArray(starred) ? starred.map(s => ({
-      ...s.repo,
-      starred_at: s.created_at,
+      ...(s.repo || s),
+      starred_at: s.starred_at,
     })) : [];
     appState.dashboardRecentIssues = Array.isArray(issues) ? issues : [];
     appState.dashboardRecentPRs = Array.isArray(prs) ? (prs.items || prs) : [];
