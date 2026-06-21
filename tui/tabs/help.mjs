@@ -165,7 +165,7 @@ export function render(screen) {
 
   // Search bar.
   const searchY = y0 + 1;
-  screen.writeStr(x0 + 2, searchY, '🔍', { fg: 'cyan' });
+  screen.writeStr(x0 + 2, searchY, '/', { fg: 'cyan' });
   const queryStr = q || 'Type to filter (Esc to close, ↑↓ to scroll)...';
   screen.writeStr(x0 + 4, searchY, truncate(queryStr, boxW - 8),
     q ? { fg: 'cyan', bold: true } : { dim: true });
@@ -176,35 +176,7 @@ export function render(screen) {
   screen.hline(searchY + 1, '─', { dim: true });
 
   // Build the lines to render. Filter by query.
-  const lines = [];
-  if (!q) {
-    for (const cat of CATEGORIES) {
-      lines.push({ kind: 'header', text: cat.name });
-      for (const s of cat.shortcuts) {
-        lines.push({ kind: 'shortcut', key: s.key, desc: s.desc });
-      }
-    }
-  } else {
-    const matched = allShortcuts().filter(s => matchesQuery(s, q));
-    if (matched.length === 0) {
-      lines.push({ kind: 'empty', text: 'No matching shortcuts' });
-    } else {
-      // Group by category for readability.
-      const grouped = {};
-      for (const s of matched) {
-        if (!grouped[s.category]) grouped[s.category] = [];
-        grouped[s.category].push(s);
-      }
-      for (const cat of CATEGORIES) {
-        if (grouped[cat.name]) {
-          lines.push({ kind: 'header', text: cat.name });
-          for (const s of grouped[cat.name]) {
-            lines.push({ kind: 'shortcut', key: s.key, desc: s.desc });
-          }
-        }
-      }
-    }
-  }
+  const lines = getHelpLines(q);
 
   // Pad to boxH-3 to allow for footer.
   const maxLines = boxH - 4;
@@ -242,14 +214,55 @@ export function render(screen) {
   screen.writeStr(x0 + boxW - hint.length - 2, footY, hint, { dim: true });
 }
 
+export function getHelpLines(q) {
+  const lines = [];
+  const query = (q || '').trim();
+  if (!query) {
+    for (const cat of CATEGORIES) {
+      lines.push({ kind: 'header', text: cat.name });
+      for (const s of cat.shortcuts) {
+        lines.push({ kind: 'shortcut', key: s.key, desc: s.desc });
+      }
+    }
+  } else {
+    const matched = allShortcuts().filter(s => matchesQuery(s, query));
+    if (matched.length === 0) {
+      lines.push({ kind: 'empty', text: 'No matching shortcuts' });
+    } else {
+      // Group by category for readability.
+      const grouped = {};
+      for (const s of matched) {
+        if (!grouped[s.category]) grouped[s.category] = [];
+        grouped[s.category].push(s);
+      }
+      for (const cat of CATEGORIES) {
+        if (grouped[cat.name]) {
+          lines.push({ kind: 'header', text: cat.name });
+          for (const s of grouped[cat.name]) {
+            lines.push({ kind: 'shortcut', key: s.key, desc: s.desc });
+          }
+        }
+      }
+    }
+  }
+  return lines;
+}
+
 // Update the search query (called from keys.mjs).
 export function setHelpQuery(q) {
   appState.helpQuery = q;
   appState.helpCursor = 0;
 }
-export function scrollHelp(delta, totalLines, maxLines) {
+export function scrollHelp(delta) {
+  const q = (appState.helpQuery || '').trim();
+  const lines = getHelpLines(q);
+  const H = process.stdout.rows || 24;
+  const boxH = Math.min(H - 4, 28);
+  const maxLines = boxH - 4;
+  const totalLines = lines.length;
   const cur = appState.helpCursor || 0;
-  appState.helpCursor = Math.max(0, Math.min(totalLines - maxLines, cur + delta));
+  const maxScroll = Math.max(0, totalLines - maxLines);
+  appState.helpCursor = Math.max(0, Math.min(maxScroll, cur + delta));
 }
 
 export const keys = {};

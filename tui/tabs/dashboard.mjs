@@ -141,7 +141,7 @@ export function buildStarHistory(starred) {
 
 function sparkline(data, width) {
   if (!data || data.length === 0) return '';
-  const chars = ['▁', '▂', '▃', '▄', '▅', '▆', '▇', '█'];
+  const chars = [' ', '▂', '▃', '▄', '▅', '▆', '▇', '█'];
   const max = Math.max(...data, 1);
   const sampled = [];
   const step = data.length / width;
@@ -174,7 +174,7 @@ export function renderDashboard(screen, y, h) {
 
   if (!user) {
     emptyState(screen, y, h, {
-      icon: '🔒  NOT SIGNED IN',
+      icon: '! NOT SIGNED IN',
       title: 'Welcome to GitHub TUI',
       message: 'Sign in with a Personal Access Token to see your dashboard.',
       hint: '',
@@ -189,13 +189,13 @@ export function renderDashboard(screen, y, h) {
 
   // Local repo context badge.
   if (appState.localRepo && appState.localRepoFilter) {
-    const ctxBadge = '📂 ' + appState.localRepo.owner + '/' + appState.localRepo.repo;
+    const ctxBadge = '/' + appState.localRepo.owner + '/' + appState.localRepo.repo;
     screen.writeStr(2 + heading.length + 2, y, ctxBadge, { fg: 'cyan', dim: true });
   }
 
   const unread = appState.notifications.filter(n => n.unread).length;
   if (unread > 0) {
-    const badge = '🔔 ' + unread + ' unread';
+    const badge = '• ' + unread + ' unread';
     screen.writeStr(Math.max(2, W - badge.length - 4), y, badge, { fg: 'yellow', bold: true });
   }
   screen.hline(y + 1, '─', { dim: true });
@@ -779,14 +779,13 @@ export const keys = {
   },
 };
 
-// ── Zone-based navigation for interactive dashboard lists ──
-
-const ZONES = ['trending', 'issues', 'prs'];
+const ZONES = ['trending', 'issues', 'prs', 'cards'];
 
 export function cycleDashboardZone() {
   const i = ZONES.indexOf(appState.dashboardFocusZone);
-  appState.dashboardFocusZone = ZONES[(i + 1) % ZONES.length];
-  appState.dashboardCardsFocus = false;
+  const nextZone = ZONES[(i + 1) % ZONES.length];
+  appState.dashboardFocusZone = nextZone;
+  appState.dashboardCardsFocus = (nextZone === 'cards');
   showMessage('Focus: ' + appState.dashboardFocusZone, 'info', 1000);
   render();
 }
@@ -917,5 +916,9 @@ export function getSections() {
 }
 
 export function getCurrentSection() {
+  const zone = appState.dashboardFocusZone;
+  if (zone === 'trending') return 'dashboard:trending';
+  if (zone === 'issues') return 'dashboard:issues';
+  if (zone === 'prs') return 'dashboard:prs';
   return 'dashboard:profile';
 }

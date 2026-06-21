@@ -108,10 +108,10 @@ export function renderSettings(screen, y, h) {
   const sysPanelW = Math.min(56, Math.max(34, Math.floor(W * 0.35)));
   const sysX = Math.max(2, W - sysPanelW - 2);
   const leftMaxW = sysX > 50 ? sysX - 4 : W;
-  const sectionH = h - 8;
+  const sectionH = sysX > 50 ? h - 1 : h - 8;
 
   // AUTHENTICATION
-  sectionHeader(screen, 2, row, '🔑 AUTHENTICATION', leftMaxW);
+  sectionHeader(screen, 2, row, '◆ AUTHENTICATION', leftMaxW);
   row += 2;
   const authItems = [
     { label: 'Login',    desc: isLoggedIn ? 'Already logged in' : 'Sign in with a token', enabled: !isLoggedIn, sel: appState.settingsCursor === 0 },
@@ -125,7 +125,7 @@ export function renderSettings(screen, y, h) {
   row += 2;
 
   // DATA
-  sectionHeader(screen, 2, row, '🔄 DATA', leftMaxW);
+  sectionHeader(screen, 2, row, '◆ DATA', leftMaxW);
   row += 2;
   const dataItems = [
     { label: 'Refresh Dashboard', desc: 'Re-fetch events, trending',   enabled: isLoggedIn, sel: appState.settingsCursor === 2 },
@@ -140,7 +140,7 @@ export function renderSettings(screen, y, h) {
   row += 2;
 
   // APPEARANCE
-  sectionHeader(screen, 2, row, '🎨 APPEARANCE', leftMaxW);
+  sectionHeader(screen, 2, row, '◆ APPEARANCE', leftMaxW);
   row += 2;
   const themeItem = { label: 'Change Theme', desc: 'Current: ' + getThemeName(), enabled: true, sel: appState.settingsCursor === 5 };
   if (row < y + sectionH) {
@@ -176,7 +176,7 @@ export function renderSettings(screen, y, h) {
   row += 2;
 
   // DANGER ZONE
-  sectionHeader(screen, 2, row, '⚠ DANGER ZONE', leftMaxW);
+  sectionHeader(screen, 2, row, '! DANGER ZONE', leftMaxW);
   row += 2;
   const dangerItems = [
     { label: 'Clear Token File', desc: 'Wipe saved token',  enabled: isLoggedIn, sel: appState.settingsCursor === 6 },
@@ -190,18 +190,37 @@ export function renderSettings(screen, y, h) {
     row++;
   }
 
+  // ABOUT
+  row += 2;
+  sectionHeader(screen, 2, row, '◆ ABOUT', leftMaxW);
+  row += 2;
+  if (row < y + sectionH) {
+    screen.writeStr(4, row, 'Created by ', { dim: true });
+    screen.writeStr(15, row, '@unn-Known1', { fg: 'white', bold: true });
+    screen.writeStr(26, row, ' (https://github.com/unn-Known1)', { dim: true });
+    row++;
+  }
+
   // ── System panel (right side or below) ──
   if (sysX > 50) {
     const sysY = y + 3;
     renderSystemPanel(screen, sysX, sysY, sysPanelW, h - 6, W);
   } else {
     // Below: show system info in a compact line.
-    if (row < y + h - 1) {
+    if (row < y + h - 2) {
       row += 2;
-      sectionHeader(screen, 2, row, 'ℹ SYSTEM', leftMaxW);
+      sectionHeader(screen, 2, row, '◆ SYSTEM', leftMaxW);
       row++;
       renderSystemLines(screen, row, W, W);
     }
+  }
+
+  // Maker profile credit at the bottom
+  const creditY = y + h - 1;
+  if (creditY > row) {
+    screen.writeStr(2, creditY, 'Maker: ', { fg: 'cyan', bold: true });
+    screen.writeStr(9, creditY, '@unn-Known1', { fg: 'white', bold: true });
+    screen.writeStr(21, creditY, '(https://github.com/unn-Known1)', { dim: true });
   }
 
   appState._maxSettingsCursor = 6;
@@ -229,6 +248,7 @@ function renderSystemLines(screen, y, W, screenW) {
 function buildSystemLines(screenW) {
   const lines = [
     ['App',         APP_VERSION,                       { fg: 'cyan', bold: true }],
+    ['Maker',       'https://github.com/unn-Known1',   { fg: 'cyan' }],
     ['Config',      CONFIG_DIR.replace(process.env.HOME || '', '~'), null],
     ['Token file',  TOKEN_FILE.replace(process.env.HOME || '', '~'), null],
     ['Node',        process.version,                   null],
@@ -277,23 +297,27 @@ function isCursorEnabled(cursor) {
 }
 
 export function up() {
-  do {
-    appState.settingsCursor = Math.max(0, appState.settingsCursor - 1);
-  } while (!isCursorEnabled(appState.settingsCursor) && appState.settingsCursor > 0);
-  if (!isCursorEnabled(appState.settingsCursor) && appState.settingsCursor > 0) {
-    appState.settingsCursor = 0;
+  let cur = appState.settingsCursor;
+  while (cur > 0) {
+    cur--;
+    if (isCursorEnabled(cur)) {
+      appState.settingsCursor = cur;
+      render();
+      return;
+    }
   }
-  render();
 }
 export function down() {
-  const max = appState._maxSettingsCursor != null ? appState._maxSettingsCursor : 5;
-  do {
-    appState.settingsCursor = Math.min(max, appState.settingsCursor + 1);
-  } while (!isCursorEnabled(appState.settingsCursor) && appState.settingsCursor < max);
-  if (!isCursorEnabled(appState.settingsCursor)) {
-    appState.settingsCursor = Math.max(0, appState.settingsCursor - 1);
+  const max = appState._maxSettingsCursor != null ? appState._maxSettingsCursor : 6;
+  let cur = appState.settingsCursor;
+  while (cur < max) {
+    cur++;
+    if (isCursorEnabled(cur)) {
+      appState.settingsCursor = cur;
+      render();
+      return;
+    }
   }
-  render();
 }
 
 export function enter() {

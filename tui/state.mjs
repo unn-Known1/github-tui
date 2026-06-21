@@ -13,9 +13,33 @@ export function render() { renderFn(); }
 // number. If the user navigates away (or kicks off something newer) the
 // generation increments and the stale operation's results are discarded.
 // ────────────────────────────────────────────────────────────────────────────
-let asyncGeneration = 0;
-export function startAsync() { return ++asyncGeneration; }
-export function isStale(gen) { return gen !== asyncGeneration; }
+const asyncGenerations = { global: 0 };
+
+function getCallerScope() {
+  const err = new Error();
+  const stack = err.stack || '';
+  const lines = stack.split('\n');
+  for (let i = 1; i < lines.length; i++) {
+    const line = lines[i];
+    if (line.includes('state.mjs')) continue;
+    const parts = line.match(/([^/\\(\s]+)\.mjs/);
+    if (parts && parts[1]) {
+      return parts[1];
+    }
+  }
+  return 'global';
+}
+
+export function startAsync() {
+  const scope = getCallerScope();
+  if (!asyncGenerations[scope]) asyncGenerations[scope] = 0;
+  return ++asyncGenerations[scope];
+}
+
+export function isStale(gen) {
+  const scope = getCallerScope();
+  return gen !== (asyncGenerations[scope] || 0);
+}
 
 // ────────────────────────────────────────────────────────────────────────────
 // Current tab index. 0-based. Drives the top tab strip and render dispatch.

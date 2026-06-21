@@ -29,7 +29,9 @@ export function up() {
 export function down() {
   const max = appState.bookmarks.length - 1;
   appState.bookmarksCursor = Math.min(max, appState.bookmarksCursor + 1);
-  const maxVisible = 12;
+  const H = process.stdout.rows || 24;
+  const boxH = Math.min(appState.bookmarks.length + 6, H - 4);
+  const maxVisible = Math.max(1, boxH - 5);
   if (appState.bookmarksCursor >= appState.bookmarksScroll + maxVisible) {
     appState.bookmarksScroll = appState.bookmarksCursor - maxVisible + 1;
   }

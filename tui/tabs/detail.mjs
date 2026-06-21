@@ -410,7 +410,7 @@ function renderReviews(screen, x, y, w, h, scroll) {
     if (lineIdx >= scroll) {
       const author = (r.user && r.user.login) || '?';
       const state = r.state || '?';
-      const stateIcon = state === 'APPROVED' ? '✅' : state === 'CHANGES_REQUESTED' ? '❌' : state === 'COMMENTED' ? '💬' : '❓';
+      const stateIcon = state === 'APPROVED' ? '✓' : state === 'CHANGES_REQUESTED' ? '✗' : state === 'COMMENTED' ? '✎' : '?';
       const header = stateIcon + ' ' + author + ' ' + state;
       screen.writeStr(x, row, truncate(header, w), color('accent'));
       row++;
@@ -526,12 +526,31 @@ export const keys = {
     const pr = appState.detailData;
     const branch = pr.head && pr.head.ref;
     if (!branch) { showMessage('No branch info available', 'warning'); return; }
+
+    const baseRepo = pr.base && pr.base.repo && pr.base.repo.full_name;
+    const localFullName = appState.localRepo ? (appState.localRepo.owner + '/' + appState.localRepo.repo).toLowerCase() : '';
+    if (!appState.localRepo || !baseRepo || baseRepo.toLowerCase() !== localFullName) {
+      showMessage('Not inside the local git repository for this PR', 'error');
+      return;
+    }
+
     confirm('Checkout branch "' + branch + '"?', async () => {
       try {
         const { execSync } = await import('child_process');
-        execSync('git fetch origin ' + branch + ' && git checkout ' + branch,
-          { stdio: 'pipe', timeout: 30000 });
-        showMessage('Checked out ' + branch, 'success');
+        let success = false;
+        try {
+          // 1. Try github-cli first, which is the most robust and sets up correct remotes
+          execSync('gh pr checkout ' + pr.number, { stdio: 'pipe', timeout: 30000 });
+          success = true;
+        } catch {
+          // 2. Fall back to manual fetch from PR head ref and checkout-reset branch
+          execSync('git fetch origin pull/' + pr.number + '/head && git checkout -B ' + branch + ' FETCH_HEAD',
+            { stdio: 'pipe', timeout: 30000 });
+          success = true;
+        }
+        if (success) {
+          showMessage('Checked out ' + branch, 'success');
+        }
       } catch (e) {
         showMessage('Checkout failed: ' + (e.message || 'unknown'), 'error');
       }

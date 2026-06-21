@@ -4,12 +4,10 @@
 import https from 'https';
 import { readFileSync, writeFileSync, existsSync, mkdirSync } from 'fs';
 import { dirname } from 'path';
+import { ETAG_CACHE_FILE } from './config.mjs';
 
 const GITHUB_API = 'api.github.com';
 const USER_AGENT = 'GitHub-TUI';
-const ETAG_CACHE_FILE = process.env.HOME
-  ? process.env.HOME + '/.github-tui/etag-cache.json'
-  : null;
 
 export const lastRateLimit = { remaining: null, limit: null, reset: null };
 export const lastScopes = { scopes: [], accepted: [] };

@@ -56,7 +56,7 @@ export function handleInputKey(key) {
   if (key === '\x1b') { cancelInput(); return true; }
 
   if (key === '\x7f' || key === '\b') {
-    appState.inputBuffer = appState.inputBuffer.slice(0, -1);
+    appState.inputBuffer = Array.from(appState.inputBuffer).slice(0, -1).join('');
     render();
     return true;
   }

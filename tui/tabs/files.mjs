@@ -36,6 +36,18 @@ function repoOwnerName() {
   return r.full_name.split('/');
 }
 
+export function getSelectedEntry() {
+  const entries = appState.filesEntries || [];
+  const hasUp = !!appState.filesPath;
+  if (hasUp) {
+    if (appState.filesSelected === 0) {
+      return { name: '..', type: 'up' };
+    }
+    return entries[appState.filesSelected - 1];
+  }
+  return entries[appState.filesSelected];
+}
+
 export async function openFilesPane() {
   if (!appState.repoDetails) {
     showMessage('Open a repo on Analyze first', 'warning');
@@ -85,9 +97,11 @@ export async function loadTree() {
 }
 
 export async function drillInto() {
-  const ent = appState.filesEntries && appState.filesEntries[appState.filesSelected];
+  const ent = getSelectedEntry();
   if (!ent) return;
-  if (ent.type === 'dir') {
+  if (ent.type === 'up') {
+    await goUp();
+  } else if (ent.type === 'dir') {
     appState.filesPath = ent.path;
     await loadTree();
   } else if (ent.type === 'file') {
@@ -181,7 +195,7 @@ export async function saveCurrentFile() {
     path = appState.fileViewing;
     content = appState.fileText;
   } else {
-    const ent = appState.filesEntries && appState.filesEntries[appState.filesSelected];
+    const ent = getSelectedEntry();
     if (!ent || ent.type !== 'file') {
       showMessage('Select a file to save', 'warning');
       return;
@@ -327,8 +341,13 @@ export async function ghCloneIntoCwd() {
 export function copyRawUrl() {
   const [owner, name] = repoOwnerName();
   if (!owner) return;
-  const path = appState.fileViewing ||
-    ((appState.filesEntries || [])[appState.filesSelected] || {}).path;
+  let path = appState.fileViewing;
+  if (!path) {
+    const ent = getSelectedEntry();
+    if (ent && ent.type === 'file') {
+      path = ent.path;
+    }
+  }
   if (!path) return;
   const url = 'https://raw.githubusercontent.com/' + owner + '/' + name +
     '/' + appState.filesRef + '/' + path;
@@ -386,8 +405,8 @@ export function renderFilesPane(screen, y, maxH) {
 
     let icon, c;
     if (ent.type === 'up')         { icon = '..'; c = color('dim'); }
-    else if (ent.type === 'dir')   { icon = '📁'; c = color('accent'); }
-    else if (ent.type === 'file')  { icon = '📄'; c = null; }
+    else if (ent.type === 'dir')   { icon = '▸ '; c = color('accent'); }
+    else if (ent.type === 'file')  { icon = '• '; c = null; }
     else                            { icon = '? '; c = color('dim'); }
     screen.writeStr(4, row, icon, c);
 

@@ -5,22 +5,40 @@ import { execSync } from 'child_process';
 
 export function detectLocalRepo() {
   try {
-    const url = execSync('git remote get-url origin', {
-      stdio: ['pipe', 'pipe', 'pipe'],
-      timeout: 5000,
-      encoding: 'utf-8',
-    }).trim();
-
-    // Handle SSH format: git@github.com:owner/repo.git
-    let match = url.match(/github\.com[:/]([^/]+)\/([^/.]+)/);
-    if (match) {
-      return { owner: match[1], repo: match[2].replace(/\.git$/, '') };
+    let url;
+    try {
+      url = execSync('git remote get-url origin', {
+        stdio: ['pipe', 'pipe', 'pipe'],
+        timeout: 5000,
+        encoding: 'utf-8',
+      }).trim();
+    } catch {
+      // Fallback: get the first remote name and query its URL
+      const remotes = execSync('git remote', {
+        stdio: ['pipe', 'pipe', 'pipe'],
+        timeout: 5000,
+        encoding: 'utf-8',
+      }).trim().split(/\s+/);
+      if (remotes.length > 0 && remotes[0]) {
+        url = execSync('git remote get-url ' + remotes[0], {
+          stdio: ['pipe', 'pipe', 'pipe'],
+          timeout: 5000,
+          encoding: 'utf-8',
+        }).trim();
+      }
     }
 
-    // Handle HTTPS format: https://github.com/owner/repo.git
-    match = url.match(/github\.com\/([^/]+)\/([^/.]+)/);
+    if (!url) return null;
+
+    // Clean up trailing slash if any
+    const cleanUrl = url.replace(/\/$/, '');
+
+    // Handle both SSH and HTTPS formats: github.com:owner/repo.git or github.com/owner/repo
+    const match = cleanUrl.match(/github\.com[:/]([^/]+)\/(.+)$/);
     if (match) {
-      return { owner: match[1], repo: match[2].replace(/\.git$/, '') };
+      const owner = match[1];
+      const repo = match[2].replace(/\.git$/, '');
+      return { owner, repo };
     }
 
     return null;

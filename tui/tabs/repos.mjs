@@ -313,7 +313,7 @@ export function renderRepos(screen, y, h) {
   const totalIssues = appState.repos.reduce((a, r) => a + (r.open_issues_count || 0), 0);
 
   screen.writeStr(2, y, 'YOUR REPOSITORIES', color('title') || { fg: 'white', bold: true });
-  const statsText = '★ ' + shortNum(totalStars) + '   ⑂ ' + shortNum(totalForks) + '   ⚡ ' + shortNum(totalIssues);
+  const statsText = '★ ' + shortNum(totalStars) + '   Y ' + shortNum(totalForks) + '   ◉ ' + shortNum(totalIssues);
   screen.writeStr(Math.max(2, W - statsText.length - 2), y, statsText, { dim: true });
   screen.hline(y + 1, '─', { dim: true });
 

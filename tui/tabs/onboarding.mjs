@@ -15,13 +15,18 @@ const WELCOME_SEEN_FILE = join(CONFIG_DIR, '.welcome-seen');
 // Steps for the first-time wizard. Each step is rendered in turn.
 const STEPS = [
   {
-    icon: '👋',
+    icon: '●',
     title: 'Welcome to GitHub TUI',
-    body: 'A zero-dependency terminal client for GitHub — read, triage, and act on your repos without leaving the keyboard.',
+    body: [
+      'A zero-dependency terminal client for GitHub — read, triage, and act',
+      'on your repos without leaving the keyboard.',
+      '',
+      'Created by @unn-Known1 (https://github.com/unn-Known1)'
+    ],
     hint: 'Press [Enter] to continue  ·  [Esc] to skip',
   },
   {
-    icon: '🔑',
+    icon: '★',
     title: 'Sign in with a Personal Access Token',
     body: [
       'You\'ll need a GitHub PAT to access your repos and notifications.',
@@ -36,7 +41,7 @@ const STEPS = [
     onEnter: () => startInput('Paste your GitHub PAT: ', 'login', true),
   },
   {
-    icon: '⌨',
+    icon: '■',
     title: 'The keyboard is your friend',
     body: [
       'Six tabs at the top:',
@@ -55,7 +60,21 @@ const STEPS = [
     hint: 'Press [Enter] for tips  ·  [Esc] to finish',
   },
   {
-    icon: '🎨',
+    icon: '◆',
+    title: 'New in v0.5.8',
+    body: [
+      '  • Windows compatibility fixes (CMD / PowerShell safety)',
+      '  • Terminal icon compatibility (replaced double-width emojis)',
+      '  • File Explorer off-by-one selection fixes',
+      '  • Help overlay search scroll clamping',
+      '  • Bookmarks auto-scrolling row limits',
+      '',
+      'Created by @unn-Known1 (https://github.com/unn-Known1)'
+    ],
+    hint: 'Press [Enter] to choose theme  ·  [Esc] to finish',
+  },
+  {
+    icon: '◆',
     title: 'Pick a theme',
     body: 'GitHub TUI ships with several themes. Try one that matches your terminal:',
     showThemes: true,
@@ -120,6 +139,7 @@ export function handleOnboardingKey(key) {
     }
     if (stepIdx >= STEPS.length) {
       appState.showOnboarding = false;
+      appState.showWelcome = false;
       markWelcomeSeen();
     }
     render();

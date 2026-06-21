@@ -14,36 +14,36 @@ const RUNS_PER_PAGE = 30;
 const STATUS_ICONS = {
   success:       { ch: '✓', style: { fg: 'green', bold: true } },
   failure:       { ch: '✗', style: { fg: 'red', bold: true } },
-  cancelled:     { ch: '⊘', style: { fg: 'yellow', bold: true } },
-  skipped:       { ch: '⊘', style: { dim: true } },
+  cancelled:     { ch: 'ø', style: { fg: 'yellow', bold: true } },
+  skipped:       { ch: '-', style: { dim: true } },
   startup_failure: { ch: '✗', style: { fg: 'red', bold: true } },
-  stale:         { ch: '⊘', style: { dim: true } },
+  stale:         { ch: '-', style: { dim: true } },
   timed_out:     { ch: '✗', style: { fg: 'red', bold: true } },
   action_required: { ch: '!', style: { fg: 'yellow', bold: true } },
-  neutral:       { ch: '–', style: { dim: true } },
+  neutral:       { ch: '-', style: { dim: true } },
 };
 
 function getStatusIcon(run) {
   if (run.status === 'in_progress' || run.status === 'queued' || run.status === 'waiting') {
-    return { ch: '◌', style: { fg: 'yellow' } };
+    return { ch: '~', style: { fg: 'yellow' } };
   }
   return STATUS_ICONS[run.conclusion] || { ch: '?', style: { dim: true } };
 }
 
 function jobStatusIcon(job) {
-  if (job.status === 'in_progress') return { ch: '◌', style: { fg: 'yellow' } };
-  if (job.status === 'queued') return { ch: '◻', style: { dim: true } };
+  if (job.status === 'in_progress') return { ch: '~', style: { fg: 'yellow' } };
+  if (job.status === 'queued') return { ch: '•', style: { dim: true } };
   return STATUS_ICONS[job.conclusion] || { ch: '?', style: { dim: true } };
 }
 
 function stepStatusIcon(step) {
-  if (step.status === 'in_progress') return { ch: '◌', style: { fg: 'yellow' } };
-  if (step.status === 'queued') return { ch: '◻', style: { dim: true } };
+  if (step.status === 'in_progress') return { ch: '~', style: { fg: 'yellow' } };
+  if (step.status === 'queued') return { ch: '•', style: { dim: true } };
   if (step.status === 'completed') {
     if (step.conclusion === 'success') return { ch: '✓', style: { fg: 'green' } };
     if (step.conclusion === 'failure') return { ch: '✗', style: { fg: 'red' } };
-    if (step.conclusion === 'skipped') return { ch: '⊘', style: { dim: true } };
-    if (step.conclusion === 'cancelled') return { ch: '⊘', style: { fg: 'yellow' } };
+    if (step.conclusion === 'skipped') return { ch: '-', style: { dim: true } };
+    if (step.conclusion === 'cancelled') return { ch: 'ø', style: { fg: 'yellow' } };
   }
   return { ch: '?', style: { dim: true } };
 }
@@ -413,7 +413,11 @@ export function up() {
     }
     render();
   } else {
-    if (appState.actionsExpandedRun) return; // don't move selection when viewing jobs
+    if (appState.actionsExpandedRun) {
+      appState.actionsScroll = Math.max(0, appState.actionsScroll - 1);
+      render();
+      return;
+    }
     appState.actionsSelected = Math.max(0, appState.actionsSelected - 1);
     if (appState.actionsSelected < appState.actionsScroll) {
       appState.actionsScroll = Math.max(0, appState.actionsScroll - 1);
@@ -433,7 +437,11 @@ export function down() {
     }
     render();
   } else {
-    if (appState.actionsExpandedRun) return; // don't move selection when viewing jobs
+    if (appState.actionsExpandedRun) {
+      appState.actionsScroll = Math.min(appState.actionsRuns.length - 1, appState.actionsScroll + 1);
+      render();
+      return;
+    }
     const runs = appState.actionsRuns;
     const maxVisible = Math.max(1, Math.min(10, (process.stdout.rows || 24) - 16));
     if (runs.length === 0) return;

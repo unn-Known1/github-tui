@@ -222,8 +222,8 @@ export function handleKey(key) {
   // 1b. Help overlay: handle special keys, any other key closes.
   if (appState.showHelp) {
     if (key === '\x1b' || key === 'q') { appState.showHelp = false; render(); return; }
-    if (key === '\x1b[A' || key === 'k') { help.scrollHelp(-3, 200, 18); render(); return; }
-    if (key === '\x1b[B' || key === 'j') { help.scrollHelp(3, 200, 18); render(); return; }
+    if (key === '\x1b[A' || key === 'k') { help.scrollHelp(-3); render(); return; }
+    if (key === '\x1b[B' || key === 'j') { help.scrollHelp(3); render(); return; }
     if (key === 'g') { help.setHelpQuery(''); appState.helpCursor = 0; render(); return; }
     if (key === '\x7f' || key === '\b') {
       const q = appState.helpQuery || '';
@@ -237,8 +237,8 @@ export function handleKey(key) {
       render();
       return;
     }
-    if (key === 'n') { help.scrollHelp(3, 200, 18); render(); return; }
-    if (key === 'p') { help.scrollHelp(-3, 200, 18); render(); return; }
+    if (key === 'n') { help.scrollHelp(3); render(); return; }
+    if (key === 'p') { help.scrollHelp(-3); render(); return; }
     if (key.length === 1 && key.charCodeAt(0) >= 32) {
       help.setHelpQuery((appState.helpQuery || '') + key);
       render();
@@ -299,11 +299,7 @@ export function handleKey(key) {
     case 'q': quit(); return;
     case '\t':
       if (tabState.current === 0) {
-        if (appState.dashboardCardsFocus) {
-          dashboard.unfocusCards();
-        } else {
-          dashboard.cycleDashboardZone();
-        }
+        dashboard.cycleDashboardZone();
       } else {
         setTab((tabState.current + 1) % TABS.length);
       }

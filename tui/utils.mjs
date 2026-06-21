@@ -64,11 +64,20 @@ export async function openUrl(url) {
   try {
     const { spawn } = await import('child_process');
     const platform = process.platform;
-    let cmd, args;
-    if (platform === 'darwin') { cmd = 'open'; args = [url]; }
-    else if (platform === 'win32') { cmd = 'cmd'; args = ['/c', 'start', '""', url]; }
-    else { cmd = 'xdg-open'; args = [url]; }
-    const child = spawn(cmd, args, { detached: true, stdio: 'ignore' });
+    let cmd, args, opts = { detached: true, stdio: 'ignore' };
+    if (platform === 'darwin') {
+      cmd = 'open';
+      args = [url];
+    } else if (platform === 'win32') {
+      const cleanUrl = url.replace(/"/g, '%22');
+      cmd = 'cmd.exe';
+      args = ['/c', `start "" "${cleanUrl}"`];
+      opts.windowsVerbatimArguments = true;
+    } else {
+      cmd = 'xdg-open';
+      args = [url];
+    }
+    const child = spawn(cmd, args, opts);
     child.unref();
     return { ok: true };
   } catch (e) {
@@ -92,16 +101,16 @@ export function eventGlyph(type) {
     case 'PushEvent':              return ['↑', 'green',   'pushed'];
     case 'PullRequestEvent':       return ['⇄', 'cyan',    'PR'];
     case 'IssuesEvent':            return ['◉', 'yellow',  'issue'];
-    case 'IssueCommentEvent':      return ['✎', 'dim',     'commented'];
+    case 'IssueCommentEvent':      return ['•', 'dim',     'commented'];
     case 'PullRequestReviewEvent': return ['★', 'cyan',    'reviewed'];
     case 'WatchEvent':             return ['☆', 'yellow',  'starred'];
-    case 'ForkEvent':              return ['⑂', 'magenta', 'forked'];
+    case 'ForkEvent':              return ['Y', 'magenta', 'forked'];
     case 'CreateEvent':            return ['+', 'green',   'created'];
-    case 'DeleteEvent':            return ['−', 'red',     'deleted'];
+    case 'DeleteEvent':            return ['-', 'red',     'deleted'];
     case 'ReleaseEvent':           return ['▶', 'cyan',    'released'];
     case 'PublicEvent':            return ['◎', 'green',   'public'];
     case 'MemberEvent':            return ['+', 'cyan',    'member'];
-    case 'GollumEvent':            return ['📖', 'dim',     'wiki'];
+    case 'GollumEvent':            return ['◆', 'dim',     'wiki'];
     default:                       return ['•', 'dim', type ? type.replace('Event', '') : '?'];
   }
 }

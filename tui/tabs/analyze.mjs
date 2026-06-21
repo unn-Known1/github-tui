@@ -1408,7 +1408,7 @@ function renderCodeResults(screen, listY, h, W, maxVisible) {
     });
     return;
   }
-  sectionHeader(screen, 2, listY, '◫ CODE', '[' + results.length + ']');
+  sectionHeader(screen, 2, listY, '◆ CODE', '[' + results.length + ']');
   screen.hline(listY + 1, '─', { dim: true });
   const start = appState.codeSearchScroll;
   for (let i = 0; i < maxVisible && start + i < results.length; i++) {
@@ -1517,7 +1517,7 @@ function renderIssuePRList(screen, y, maxH, opts) {
 // Naive Markdown rendering with improved styling.
 function renderReadmePane(screen, y, maxH) {
   const W = screen.width;
-  sectionHeader(screen, 2, y, '📖 README');
+  sectionHeader(screen, 2, y, '◆ README');
   screen.hline(y + 1, '─', { dim: true });
   const text = appState._readmeText || '(no README loaded)';
   const lines = text.split(/\r?\n/);
