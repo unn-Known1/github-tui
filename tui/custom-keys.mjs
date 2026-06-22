@@ -11,6 +11,7 @@
 
 import { KEYBINDINGS_FILE, readJson } from './config.mjs';
 import { appState, showMessage, render } from './state.mjs';
+import { spawn } from 'child_process';
 
 let _bindings = null;
 
@@ -86,18 +87,18 @@ export function runCustomKey(key) {
   showMessage('Running: ' + (binding.label || cmd), 'info');
 
   try {
-    import('child_process').then(({ exec }) => {
-      exec(cmd, { timeout: 30000 }, (error, stdout, stderr) => {
-        if (error) {
-          showMessage('Command failed: ' + (error.message || 'unknown'), 'error');
-        } else {
-          showMessage('✓ ' + (binding.label || 'Command') + ' complete', 'success');
-        }
-        render();
-      });
+    const child = spawn(cmd, [], { shell: true, timeout: 30000, stdio: 'ignore' });
+    child.on('error', (e) => showMessage('Command failed: ' + (e.message || 'unknown'), 'error'));
+    child.on('exit', (code) => {
+      showMessage(
+        code === 0 ? '✓ ' + (binding.label || 'Command') + ' complete'
+                   : 'Command exited with code ' + code,
+        code === 0 ? 'success' : 'error'
+      );
+      render();
     });
   } catch (e) {
-    showMessage('Failed to run command: ' + (e.message || 'unknown'), 'error');
+    showMessage('Failed: ' + (e.message || 'unknown'), 'error');
   }
 
   return true;
