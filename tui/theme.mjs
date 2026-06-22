@@ -3,6 +3,7 @@
 // Base theme + per-theme overrides — only the keys that differ are listed.
 
 import { existsSync, readFileSync, writeFileSync } from 'fs';
+import { NO_COLOR } from './config.mjs';
 import { THEME_FILE } from './config.mjs';
 import { appState } from './state.mjs';
 
@@ -335,7 +336,7 @@ const THEMES = {
 };
 
 let active = 'default';
-const NO_COLOR = !!process.env.NO_COLOR;
+// NO_COLOR is imported from config.mjs — single source of truth
 
 export function listThemes() { return Object.keys(THEMES); }
 export function getThemeName() { return active; }

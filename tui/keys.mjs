@@ -297,18 +297,12 @@ export function handleKey(key) {
     }
     case 'q': quit(); return;
     case '\t':
-      if (tabState.current === 0) {
-        dashboard.cycleDashboardZone();
-      } else {
-        setTab((tabState.current + 1) % TABS.length);
-      }
+      // Tab always switches to next tab (consistent across all tabs).
+      setTab((tabState.current + 1) % TABS.length);
       return;
     case '\x1b[Z':
-      if (tabState.current === 0 && appState.dashboardCardsFocus) {
-        dashboard.unfocusCards();
-      } else {
-        setTab((tabState.current - 1 + TABS.length) % TABS.length);
-      }
+      // Shift+Tab always switches to previous tab.
+      setTab((tabState.current - 1 + TABS.length) % TABS.length);
       return;
     case '?': appState.showHelp = true; render(); return;
     case '\x10':
@@ -367,14 +361,23 @@ export function handleKey(key) {
     if (key === 'x' || key === 'X') { actions.cancelSelected(); return; }
   }
 
-  // 6. Dashboard stat-card focus.
+  // 6. Dashboard stat-card focus — ←/→ arrows and H/L move between cards.
   if (tabState.current === 0) {
     if (key === '\x1b[D' || key === 'H') { dashboard.leftCard(); return; }
     if (key === '\x1b[C' || key === 'L') { dashboard.rightCard(); return; }
+    // l (lowercase) also moves right on dashboard for consistency with vi
+    if (key === 'l') { dashboard.rightCard(); return; }
     if (key === '\t' && appState.dashboardCardsFocus) {
       dashboard.unfocusCards();
       return;
     }
+  }
+
+  // l (lowercase vi "right/forward") — acts as Enter on non-dashboard tabs
+  // so vi users can drill into items without switching hands.
+  if (key === 'l' && tabState.current !== 0) {
+    handleEnter();
+    return;
   }
 
   // 7. Per-tab key map.

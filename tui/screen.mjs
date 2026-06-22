@@ -1,6 +1,8 @@
 const ESC = '\x1b';
 const RESET = `${ESC}[0m`;
 
+import { NO_COLOR, FORCE_COLOR as _FORCE_COLOR_CFG } from './config.mjs';
+
 const FG = {
   red: `${ESC}[31m`, green: `${ESC}[32m`, yellow: `${ESC}[33m`,
   blue: `${ESC}[34m`, magenta: `${ESC}[35m`, cyan: `${ESC}[36m`,
@@ -333,8 +335,8 @@ export class Screen {
 const TERM = process.env.TERM || '';
 const COLORTERM = process.env.COLORTERM || '';
 const FORCE_COLOR = (() => {
-  if (process.env.FORCE_COLOR === '0' || process.env.NO_COLOR) return false;
-  if (process.env.FORCE_COLOR) return true;
+  if (NO_COLOR) return false;
+  if (_FORCE_COLOR_CFG) return true;
   return undefined; // auto-detect
 })();
 

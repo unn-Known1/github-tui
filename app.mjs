@@ -26,12 +26,18 @@ let autoRefreshInterval = null;
 
 // ── Structured debug logger — writes to ~/.github-tui/debug.log ──
 const DEBUG = !!process.env.DEBUG || !!process.env.GITHUB_TUI_DEBUG;
+const _debugLogPath = join(homedir(), '.github-tui', 'debug.log');
 function debug(...args) {
   if (!DEBUG) return;
-  try {
-    const logPath = join(homedir(), '.github-tui', 'debug.log');
-    appendFileSync(logPath, `[${new Date().toISOString()}] ${args.join(' ')}\n`);
-  } catch {}
+  // Use async append to avoid blocking the event loop in debug mode.
+  const line = `[${new Date().toISOString()}] ${args.join(' ')}\n`;
+  appendFileSync(_debugLogPath, line); // kept sync for crash handlers (safe — debug only)
+}
+// Non-blocking debug for hot paths — fire-and-forget writeStream.
+function debugAsync(...args) {
+  if (!DEBUG) return;
+  const line = `[${new Date().toISOString()}] ${args.join(' ')}\n`;
+  import('fs').then(({ appendFile }) => appendFile(_debugLogPath, line, () => {})).catch(() => {});
 }
 
 // ── Terminal environment detection ──
@@ -59,7 +65,7 @@ function startAutoRefresh() {
         const actions = await import('./tui/tabs/actions.mjs');
         if (appState.actionsView === 'runs') await actions.loadWorkflowRuns();
       }
-    } catch (e) { debug('auto-refresh error:', e.message); }
+    } catch (e) { debugAsync('auto-refresh error:', e.message); }
   }, appState.autoRefreshIntervalMs);
 }
 
@@ -78,7 +84,7 @@ async function refreshRateLimit() {
       lastRateLimit.reset = core.reset;
       render();
     }
-  } catch (e) { debug('rate-limit refresh error:', e.message); }
+  } catch (e) { debugAsync('rate-limit refresh error:', e.message); }
 }
 
 async function main() {
@@ -135,6 +141,15 @@ async function main() {
   process.stdin.resume();
   process.stdin.setEncoding('utf8');
   process.stdin.on('data', handleKey);
+  // Graceful shutdown on stdin close (SSH drop, tmux detach).
+  process.stdin.on('error', (err) => {
+    debug('stdin error:', err.message);
+    shutdown();
+  });
+  process.stdin.on('end', () => {
+    debug('stdin closed');
+    shutdown();
+  });
 
   // Resize listener — debounced to avoid render thrashing.
   let resizeTimer = null;

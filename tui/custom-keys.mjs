@@ -22,29 +22,40 @@ function loadBindings() {
   return _bindings;
 }
 
+/**
+ * Shell-escape a single placeholder value for POSIX sh.
+ * Wraps the value in single quotes and escapes embedded single quotes.
+ * This prevents a malicious repo name like "foo; rm -rf ~" from being
+ * executed as a shell command.
+ */
+function shellEscape(value) {
+  if (!value) return "''";
+  return "'" + String(value).replace(/'/g, "'\\''") + "'";
+}
+
 function resolvePlaceholders(cmd) {
   let resolved = cmd;
 
   // From detail view
   if (appState.detailData) {
     const d = appState.detailData;
-    resolved = resolved.replace(/\{number\}/g, String(d.number || ''));
-    resolved = resolved.replace(/\{branch\}/g, (d.head && d.head.ref) || '');
+    resolved = resolved.replace(/\{number\}/g, shellEscape(String(d.number || '')));
+    resolved = resolved.replace(/\{branch\}/g, shellEscape((d.head && d.head.ref) || ''));
   }
 
   // From repo context
   if (appState.repoDetails) {
     const r = appState.repoDetails;
     const [owner, repo] = (r.full_name || '').split('/');
-    resolved = resolved.replace(/\{owner\}/g, owner || '');
-    resolved = resolved.replace(/\{repo\}/g, repo || '');
+    resolved = resolved.replace(/\{owner\}/g, shellEscape(owner || ''));
+    resolved = resolved.replace(/\{repo\}/g, shellEscape(repo || ''));
   } else if (appState.localRepo) {
-    resolved = resolved.replace(/\{owner\}/g, appState.localRepo.owner || '');
-    resolved = resolved.replace(/\{repo\}/g, appState.localRepo.repo || '');
+    resolved = resolved.replace(/\{owner\}/g, shellEscape(appState.localRepo.owner || ''));
+    resolved = resolved.replace(/\{repo\}/g, shellEscape(appState.localRepo.repo || ''));
   }
 
   // Clean up any remaining unreplaced placeholders
-  resolved = resolved.replace(/\{[a-zA-Z]+\}/g, '');
+  resolved = resolved.replace(/\{[a-zA-Z]+\}/g, "''");
 
   return resolved;
 }

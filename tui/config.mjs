@@ -17,6 +17,11 @@ import {
   saveTokenSecure, loadTokenSecure, removeTokenSecure, detectBackend,
 } from './keychain.mjs';
 
+// Shared terminal capability flags — evaluated once at startup.
+// Both theme.mjs and screen.mjs import from here to stay in sync.
+export const NO_COLOR   = !!process.env.NO_COLOR;
+export const FORCE_COLOR = process.env.FORCE_COLOR !== '0' && !!process.env.FORCE_COLOR;
+
 export const APP_VERSION = '0.6.0';
 
 export const CONFIG_DIR = join(homedir(), '.github-tui');

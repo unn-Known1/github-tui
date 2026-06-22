@@ -100,6 +100,7 @@ export function handleInputKey(key) {
   if (key === '\x17') {
     const buf = Array.from(appState.inputBuffer);
     const cur = appState.inputCursor || buf.length;
+    if (cur === 0) { render(); return true; }
     let i = cur - 1;
     while (i > 0 && buf[i - 1] === ' ') i--;
     while (i > 0 && buf[i - 1] !== ' ') i--;
@@ -122,6 +123,30 @@ export function handleInputKey(key) {
   if (key === '\x1b[C') {
     const cur = appState.inputCursor || 0;
     appState.inputCursor = Math.min(appState.inputBuffer.length, cur + 1);
+    render();
+    return true;
+  }
+
+  // Ctrl-Left (word back) — \x1b[1;5D or \x1bb (Alt-b).
+  if (key === '\x1b[1;5D' || key === '\x1b[5D' || key === '\x1bb') {
+    const buf = Array.from(appState.inputBuffer);
+    let cur = appState.inputCursor != null ? appState.inputCursor : buf.length;
+    // Skip trailing spaces, then skip word chars
+    while (cur > 0 && buf[cur - 1] === ' ') cur--;
+    while (cur > 0 && buf[cur - 1] !== ' ') cur--;
+    appState.inputCursor = cur;
+    render();
+    return true;
+  }
+
+  // Ctrl-Right (word forward) — \x1b[1;5C or \x1bf (Alt-f).
+  if (key === '\x1b[1;5C' || key === '\x1b[5C' || key === '\x1bf') {
+    const buf = Array.from(appState.inputBuffer);
+    let cur = appState.inputCursor != null ? appState.inputCursor : buf.length;
+    // Skip current word chars, then skip spaces
+    while (cur < buf.length && buf[cur] !== ' ') cur++;
+    while (cur < buf.length && buf[cur] === ' ') cur++;
+    appState.inputCursor = cur;
     render();
     return true;
   }

@@ -2,12 +2,22 @@
 // Supports any HTTP method, optional body, ETag caching, live rate-limit mirror.
 
 import https from 'https';
-import { readFileSync, writeFileSync, existsSync, mkdirSync } from 'fs';
+import { readFileSync, writeFileSync, existsSync, mkdirSync, chmodSync } from 'fs';
 import { dirname } from 'path';
 import { ETAG_CACHE_FILE, LAST_SYNCED_FILE } from './config.mjs';
 
 const GITHUB_API = 'api.github.com';
 const USER_AGENT = 'GitHub-TUI';
+
+// Structured API error — carries HTTP status and endpoint for better diagnostics.
+export class GitHubApiError extends Error {
+  constructor(message, status, endpoint) {
+    super(message);
+    this.name = 'GitHubApiError';
+    this.status = status || 0;
+    this.endpoint = endpoint || '';
+  }
+}
 
 export const lastRateLimit = { remaining: null, limit: null, reset: null };
 export const lastScopes = { scopes: [], accepted: [] };
@@ -62,6 +72,7 @@ function saveEtagCache() {
     const dir = dirname(ETAG_CACHE_FILE);
     if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
     writeFileSync(ETAG_CACHE_FILE, JSON.stringify(entries));
+    try { chmodSync(ETAG_CACHE_FILE, 0o600); } catch {}
     _cacheDirty = false;
   } catch { /* non-fatal */ }
 }
@@ -272,7 +283,10 @@ export function request(path, opts) {
         }
         if (res.statusCode === 403 && rr === '0') {
           const resetDate = new Date(parseInt(rs, 10) * 1000);
-          return reject(new Error('Rate limited. Try again at ' + resetDate.toLocaleTimeString()));
+          return reject(new GitHubApiError(
+            'Rate limited. Try again at ' + resetDate.toLocaleTimeString(),
+            403, path
+          ));
         }
         if (res.statusCode >= 200 && res.statusCode < 300) {
           let payload;
@@ -280,7 +294,7 @@ export function request(path, opts) {
           else if (res.statusCode === 204 || !data) payload = null;
           else {
             try { payload = JSON.parse(data); }
-            catch (e) { return reject(new Error('Invalid JSON response')); }
+            catch (e) { return reject(new GitHubApiError('Invalid JSON response', res.statusCode, path)); }
           }
           if (method === 'GET' && res.headers.etag) {
             const now = Date.now();
@@ -291,12 +305,15 @@ export function request(path, opts) {
           if (method === 'GET') recordSync(path);
           return resolve(payload);
         }
-        let msg = 'GitHub API error: ' + res.statusCode;
+        let msg = 'GitHub API error ' + res.statusCode;
         try {
           const errBody = JSON.parse(data);
-          if (errBody.message) msg += ' - ' + errBody.message;
+          if (errBody.message) msg += ': ' + errBody.message;
+          if (errBody.errors && errBody.errors.length) {
+            msg += ' (' + errBody.errors.map(e => e.message || e.code).join(', ') + ')';
+          }
         } catch (e) {}
-        reject(new Error(msg));
+        reject(new GitHubApiError(msg, res.statusCode, path));
       });
     });
 
