@@ -154,34 +154,56 @@ export function renderSettings(screen, y, h) {
     rowBounds.push({ cursor: 5, y: row });
     row++;
   }
-  // Show all available themes as a small chip row with accent-colored indicators.
+  // Show all available themes as reflowing chip rows — wraps to fit any width.
   if (row < y + sectionH - 1) {
     row++;
-    screen.writeStr(2, row, 'Available:', { dim: true });
-    let cx = 14;
     const themeChips = [];
     const accentColors = {
       default: 'cyan', highContrast: 'white', dracula: 'magenta',
       solarized: 'blue', nord: 'cyan', monokai: 'green',
       gruvbox: 'yellow', light: 'blue', ayu: 'yellow', catppuccin: 'magenta',
     };
-    for (const t of listThemes()) {
+
+    const LABEL_X   = 2;   // left margin
+    const CHIP_X    = 2;   // chips also start at left margin
+    const SWATCH_W  = 2;   // '█' + space
+    const GAP       = 2;   // space between chips
+    const maxRight  = leftMaxW - 2;
+
+    // Label on first row
+    screen.writeStr(LABEL_X, row, 'Themes:', { dim: true });
+
+    const themes = listThemes();
+    let cx = LABEL_X + 'Themes: '.length;  // start after label on first row
+
+    for (const t of themes) {
       const isCurrent = t === getThemeName();
       const accent = accentColors[t] || 'cyan';
-      const label = ' ' + t + ' ';
-      const style = isCurrent
-        ? { bg: 'cyan', fg: 'darkGray', bold: true }
-        : { dim: true };
-      if (cx + label.length + 4 < leftMaxW - 2) {
-        screen.writeStr(cx, row, '█', { fg: accent });
-        screen.writeStr(cx + 2, row, label, style);
-        themeChips.push({ theme: t, x1: cx, x2: cx + 2 + label.length, y: row });
-        cx += label.length + 4;
+      // Use theme's own accent color for the active chip background
+      const accentStyle = isCurrent ? { bg: accent, fg: 'darkGray', bold: true } : { dim: true };
+      const chipText = ' ' + t + ' ';
+      const chipW = SWATCH_W + chipText.length;  // swatch + label
+
+      // Wrap to next row if it won't fit — but only if we still have vertical room
+      if (cx + chipW > maxRight) {
+        row++;
+        if (row >= y + sectionH - 1) break;  // no more vertical room
+        cx = CHIP_X;
       }
+
+      // Draw swatch block
+      screen.writeStr(cx, row, '█', { fg: accent });
+      // Draw chip label
+      screen.writeStr(cx + SWATCH_W, row, chipText, accentStyle);
+
+      themeChips.push({ theme: t, x1: cx, x2: cx + chipW, y: row });
+      cx += chipW + GAP;
     }
+
     appState._themeChips = themeChips;
+    row++;  // advance past last chip row
   }
-  row += 2;
+  row++;  // blank line before next section
 
   // DANGER ZONE
   sectionHeader(screen, 2, row, '! DANGER ZONE', leftMaxW);
