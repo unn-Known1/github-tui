@@ -326,9 +326,14 @@ function renderFooter(W, H) {
   screen.fillRow(statusY, ' ', statusStyle);
 
   if (appState.inputMode === 'input') {
+    const buf = appState.inputBuffer;
+    const cursor = appState.inputCursor || buf.length;
     const shown = appState.inputMask
-      ? '•'.repeat(appState.inputBuffer.length) : appState.inputBuffer;
-    const line = appState.inputPrompt + shown + '█';
+      ? '•'.repeat(buf.length) : buf;
+    // Insert cursor character at the correct position.
+    const before = shown.slice(0, cursor);
+    const after = shown.slice(cursor);
+    const line = appState.inputPrompt + before + '█' + after;
     screen.writeStr(1, statusY, line.substring(0, W - 2), color('inputBox'));
     return;
   }
@@ -419,7 +424,7 @@ function doRender() {
   if (!screen) return;
   const W = screen.width;
   const H = screen.height;
-  screen.clear();
+  // Buffer is already clear from the previous render's swap — no clear() needed.
   appState._sectionHeaders = {};
 
   // ── Minimum terminal size check ──

@@ -335,6 +335,7 @@ const THEMES = {
 };
 
 let active = 'default';
+const NO_COLOR = !!process.env.NO_COLOR;
 
 export function listThemes() { return Object.keys(THEMES); }
 export function getThemeName() { return active; }
@@ -358,5 +359,6 @@ export function loadTheme() {
 }
 
 export function color(role) {
+  if (NO_COLOR) return null;
   return THEMES[active][role] ?? null;
 }

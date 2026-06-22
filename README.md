@@ -28,9 +28,12 @@ A fast, zero-dependency terminal user interface for GitHub — six tabs, a comma
 - 🖥️ **Diff-based renderer** — only changed cells are redrawn; resizes adaptively.
 - 📝 **Issue/PR detail popup** — `Enter` on an issue or PR opens a full detail view with rendered body, labels, comments tab, **reviews tab**, and PR files tab. Comment (`c`), react (`r`), close/reopen (`x`), merge PR (`M`) — all from the TUI.
 - 🔀 **PR diff viewer** — Files tab in the detail popup shows changed files with `+/-` stats. Select a file to view its unified diff with syntax-colored additions/deletions.
-- 🖱️ **Mouse support** — click tabs, pane tabs, list items; scroll wheel navigation; hover effects with row highlighting.
+- 🖱️ **Mouse support** — click tabs, pane tabs, list items; scroll wheel navigation; hover effects with row highlighting on all list views.
 - 📂 **Collapsible sections** — `z` toggle, `Z` collapse all, `X` expand all. State persisted to disk (`~/.github-tui/collapsed.json`).
 - 📈 **Rate limit visual bar** — real-time `█░` indicator in the header showing API quota usage.
+- 🎯 **Context-aware help** — `?` shows current tab's shortcuts first.
+- ✏️ **Input cursor movement** — arrow keys, Home/End, Ctrl-A/E/U/W in all text inputs.
+- 🛡️ **Graceful shutdown** — atomic signal handling, raw mode restored, debug logging on crash.
 
 ## 🚀 Run
 
@@ -63,6 +66,12 @@ node app.mjs
 npm update -g github-tui
 ```
 
+### Run tests
+
+```bash
+npm test
+```
+
 First launch lands you on the Dashboard. Press `6` for Settings, then `Enter` on **Login**, and paste your GitHub Personal Access Token (the input is masked).
 
 ## 🔑 Creating a GitHub Personal Access Token
@@ -84,7 +93,7 @@ Your current token scopes are shown in the Settings → System panel so you can 
 | `Ctrl-P` or `:` | Open the command palette (fuzzy search every action) |
 | `↑` `↓` or `j` `k` | Navigate lists |
 | `Enter` | Select / drill in |
-| `Esc` / `h` | Back |
+| `Esc` / `h` | Back (on Dashboard: quit confirmation) |
 | `Space` | Load more (pagination) |
 | `G` | Jump to bottom (Repos / Files) |
 | `o` | Open the current item in your browser |
@@ -196,26 +205,31 @@ Your current token scopes are shown in the Settings → System panel so you can 
 
 ## 🗂️ Project Layout
 
-The app is split into 23 focused modules. Adding a new tab is: create one file, register it in `state.mjs`, import it in `render.mjs` and `keys.mjs`. The command palette picks up new actions automatically when you call `palette.register({ id, label, run })`.
+The app is split into 24 focused modules. Adding a new tab is: create one file, register it in `state.mjs`, import it in `render.mjs` and `keys.mjs`. The command palette picks up new actions automatically when you call `palette.register({ id, label, run })`.
 
 ```
 .
 ├── app.mjs                          # ~70-line entrypoint — lifecycle only
 ├── README.md
 ├── VISION.md                        # Roadmap + persona-driven brainstorm
+├── tests/                           # 81 tests (Node built-in test runner, zero deps)
+│   ├── utils.test.mjs
+│   ├── repos-logic.test.mjs
+│   └── theme.test.mjs
 └── tui/
-    ├── screen.mjs                   # Diff-based terminal renderer
+    ├── screen.mjs                   # Diff-based terminal renderer + buffer swap + FORCE_COLOR
     ├── github.mjs                   # HTTPS client + ETag cache + 60+ endpoints + streaming downloader
     ├── config.mjs                   # Constants + token I/O + JSON store helpers
     ├── utils.mjs                    # Pure helpers (time, format, OSC-52, openUrl, safeCwdJoin, runCommand)
     ├── state.mjs                    # Single appState + async-stale guard + message bus + collapsible state
-    ├── input.mjs                    # Modal text input + handler registry
-    ├── theme.mjs                    # 8 themes — persisted to ~/.github-tui/theme
+    ├── input.mjs                    # Modal text input + cursor movement + handler registry
+    ├── theme.mjs                    # 8 themes — persisted to ~/.github-tui/theme + NO_COLOR support
     ├── store.mjs                    # Bookmarks + saved searches + pins (on-disk JSON)
     ├── palette.mjs                  # Command palette (Ctrl-P) with fuzzy match
     ├── render.mjs                   # Top-level render: chrome + dispatch to tabs + hover effects
     ├── keys.mjs                     # Global key router + per-tab dispatchers + collapse handlers
-    ├── mouse.mjs                    # Mouse event parsing + click/scroll/hover handlers
+    ├── mouse.mjs                    # Mouse event parsing + click/scroll/hover handlers (all tabs)
+    ├── repos-logic.mjs              # Pure business logic — testable without global state
     └── tabs/
         ├── dashboard.mjs            # Home screen with widgets + collapsible sections
         ├── repos.mjs                # Your repositories (selection, badges, filters, pins, density)
@@ -225,7 +239,7 @@ The app is split into 23 focused modules. Adding a new tab is: create one file, 
         ├── forks.mjs                # Forks sub-view with concurrent ahead/behind
         ├── settings.mjs             # Settings + System info panel
         ├── inbox.mjs                # Notifications with triage actions
-        └── help.mjs                 # Help overlay (?)
+        └── help.mjs                 # Help overlay (?) — context-aware
 ```
 
 Every tab module exports `render(screen, y, h)`, an optional `keys` map for tab-local hotkeys, and optional `up`/`down`/`enter`/`space` dispatchers.
@@ -276,18 +290,21 @@ Every tab module exports `render(screen, y, h)`, an optional `keys` map for tab-
 
 ## 🧠 Design Notes
 
-- **Zero npm dependencies.** Only Node's built-in `https`, `fs`, `os`, `path`, `child_process`.
+- **Zero npm dependencies.** Only Node's built-in `https`, `fs`, `os`, `path`, `child_process`. Tests use Node's built-in test runner.
 - **Single source of truth.** `tui/state.mjs` holds one `appState` object. ESM live bindings mean every module sees updates instantly without a pub/sub layer.
+- **Pure business logic.** `repos-logic.mjs` contains testable functions decoupled from global state — `sortRepos`, `applyAllFilters`, `floatPinsToTop` accept parameters, not globals.
 - **Stale-async guard.** Every long-running fetch grabs a generation number from `startAsync()`. If the user navigates away, `isStale(gen)` returns true and results are discarded. No "snap-back" to old state.
-- **Bounded concurrency.** Fork ahead/behind compares run with a 5-worker pool. Folder-save uses a 4-worker pool. Dashboard widgets (events + trending + starred) and repo details enrichment (languages + contributors + releases + issues + PRs) fetch in parallel with per-call fault tolerance.
+- **Bounded concurrency.** Fork ahead/behind compares run with a 5-worker pool. Folder-save uses a 4-worker pool. Dashboard widgets and repo details enrichment fetch in parallel with per-call fault tolerance.
 - **ETag cache.** Every GET response with an `ETag` header is cached; subsequent identical GETs send `If-None-Match` and a 304 returns the cached body for free (no rate-limit cost).
 - **Streaming downloads.** Zipballs never buffer in memory — they pipe straight to disk via Node's `https`.
 - **CWD safety.** Every disk write goes through `safeCwdJoin` which refuses any path that would escape `process.cwd()`. Clones refuse to overwrite an existing directory.
-- **Diff-based renderer.** `tui/screen.mjs` keeps `prevChar`/`prevStyle` shadow buffers and only emits cursor moves + characters that actually changed.
+- **Diff-based renderer.** `tui/screen.mjs` uses buffer swapping (zero allocation after warm-up) and only emits cursor moves + characters that actually changed.
+- **Cross-platform rendering.** Box-drawing characters fall back to ASCII on Windows. `FORCE_COLOR`/`NO_COLOR` env vars respected.
 - **Theme-aware rendering.** Tab renderers call `theme.color('star')` instead of hardcoding `'yellow'`, so new themes drop in without touching any tab.
 - **Command palette.** Actions register themselves; the palette is just a fuzzy filter over the registry. New features can expose actions without touching any UI code.
-- **Mouse support.** Full mouse tracking with click, scroll wheel, and hover effects. Tabs, pane tabs, and list items are all clickable.
+- **Mouse support.** Full mouse tracking with click, scroll wheel, and hover effects on all list views.
 - **Collapsible sections.** All sections across Dashboard, Repos, Analyze, and Inbox can be collapsed/expanded. State persisted to disk.
+- **Graceful shutdown.** Single atomic handler restores raw mode, disables mouse, clears screen — no double-calls, no broken terminals.
 
 ## ⚠️ Limitations
 
@@ -311,11 +328,15 @@ Every tab module exports `render(screen, y, h)`, an optional `keys` map for tab-
 **Shipped in v0.5:** Issue/PR detail popup with rendered body, labels, comments, and file diffs. Comment from TUI, emoji reactions, close/reopen, merge PRs with confirmation. PR diff viewer with unified diff and syntax coloring. Inbox notifications open detail popup for issues/PRs.
 
 **Shipped in v0.5.8 (this release):**
-- **Windows cmd/PowerShell & terminal icon compatibility** — replaced emojis and non-standard characters with safe standard Unicode blocks/symbols.
-- **In-terminal File Explorer selection offsets fix** — resolved synthetic parent folder `..` index shifts.
-- **Help overlay search scroll clamped** — prevented negative cursor offsets on short query matches.
-- **Bookmarks scroll height dynamic terminal rows scaling**.
-- **Onboarding Tour wizard welcome overlay dismissal correction**.
+- **Graceful shutdown** — atomic signal handling, raw mode restore, unhandled rejection/crash handlers, debug logging.
+- **Terminal lifecycle** — debounced resize, buffer-swap renderer (zero allocation), NO_COLOR/FORCE_COLOR support, terminal multiplexer detection.
+- **Input cursor movement** — arrow keys, Home/End, Ctrl-A/E/U/W in all text inputs.
+- **Context-aware help** — `?` shows current tab's shortcuts first.
+- **Mouse hover on all lists** — Repos, Inbox, Actions tabs now highlight on hover.
+- **Esc on Dashboard** — shows quit confirmation dialog.
+- **Pure business logic** — `repos-logic.mjs` extracted for testability.
+- **81 tests** — Node built-in test runner, zero dependencies.
+- **Windows compatibility** — ASCII box-drawing fallback, platform-aware cursor handling.
 
 **Shipped in v0.5.7:**
 - **Rate limit indicator** — visual `█░` bar in header + explicit `/rate_limit` endpoint

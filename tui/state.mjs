@@ -57,6 +57,7 @@ export const tabState = { current: 0 };
 export function setTab(i) {
   if (i < 0 || i >= TABS.length) return;
   tabState.current = i;
+  scheduleSessionSave();
   render();
 }
 
@@ -256,6 +257,7 @@ export const appState = {
   inputPrompt: '',
   inputContext: null,    // 'login' | 'search' | 'filter' | 'palette' | 'comment' | ...
   inputMask: false,
+  inputCursor: 0,
 
   // ── Issue/PR detail popup ──
   showDetail: false,
@@ -350,6 +352,7 @@ export function pushRecentRepo(repo) {
     { full_name: repo.full_name, url: repo.html_url, description: repo.description, language: repo.language, stars: repo.stargazers_count, visitedAt: Date.now() },
     ...appState.recentRepos.filter(r => r.full_name !== repo.full_name),
   ].slice(0, appState.MAX_RECENT);
+  scheduleSessionSave();
 }
 
 // ────────────────────────────────────────────────────────────────────────────
@@ -438,3 +441,10 @@ export function loadSession() {
 
 // Auto-save on normal exit.
 process.on('exit', saveSession);
+
+// Debounced session save — called during normal operation so crashes lose less state.
+let _sessionSaveTimer = null;
+export function scheduleSessionSave() {
+  if (_sessionSaveTimer) clearTimeout(_sessionSaveTimer);
+  _sessionSaveTimer = setTimeout(saveSession, 2000);
+}

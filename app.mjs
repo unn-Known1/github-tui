@@ -12,9 +12,10 @@ import { loadUserData } from './tui/tabs/repos.mjs';
 import { loadBookmarks, loadSavedSearches, loadPins, loadRepoPrefs, saveRepoPrefs } from './tui/store.mjs';
 import { getRateLimit } from './tui/github.mjs';
 
-import { readFileSync } from 'fs';
+import { readFileSync, appendFileSync } from 'fs';
 import { fileURLToPath } from 'url';
 import { dirname, join } from 'path';
+import { homedir } from 'os';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -22,6 +23,23 @@ const pkg = JSON.parse(readFileSync(join(__dirname, 'package.json'), 'utf8'));
 
 let rateLimitInterval = null;
 let autoRefreshInterval = null;
+
+// ── Structured debug logger — writes to ~/.github-tui/debug.log ──
+const DEBUG = !!process.env.DEBUG || !!process.env.GITHUB_TUI_DEBUG;
+function debug(...args) {
+  if (!DEBUG) return;
+  try {
+    const logPath = join(homedir(), '.github-tui', 'debug.log');
+    appendFileSync(logPath, `[${new Date().toISOString()}] ${args.join(' ')}\n`);
+  } catch {}
+}
+
+// ── Terminal environment detection ──
+const TERM_ENV = process.env.TERM || '';
+const TERM_IS_TMUX = !!process.env.TMUX;
+const TERM_IS_SSH = !!(process.env.SSH_CLIENT || process.env.SSH_TTY);
+const TERM_IS_SCREEN = !!process.env.STY;
+const TERM_IS_WSL = !!process.env.WSLENV;
 
 function startAutoRefresh() {
   if (autoRefreshInterval) clearInterval(autoRefreshInterval);
@@ -41,7 +59,7 @@ function startAutoRefresh() {
         const actions = await import('./tui/tabs/actions.mjs');
         if (appState.actionsView === 'runs') await actions.loadWorkflowRuns();
       }
-    } catch {}
+    } catch (e) { debug('auto-refresh error:', e.message); }
   }, appState.autoRefreshIntervalMs);
 }
 
@@ -60,7 +78,7 @@ async function refreshRateLimit() {
       lastRateLimit.reset = core.reset;
       render();
     }
-  } catch {}
+  } catch (e) { debug('rate-limit refresh error:', e.message); }
 }
 
 async function main() {
@@ -87,17 +105,9 @@ async function main() {
     process.exit(1);
   }
 
-  // Hide cursor; enable mouse; clear on exit.
+  // Hide cursor; enable mouse.
   process.stdout.write('\x1b[?25l');
   enableMouse();
-  const cleanup = () => {
-    disableMouse();
-    process.stdout.write('\x1b[?25h\x1b[2J\x1b[H');
-  };
-  process.on('exit', cleanup);
-  process.on('SIGINT',  () => { cleanup(); process.exit(0); });
-  process.on('SIGTERM', () => { cleanup(); process.exit(0); });
-  process.on('SIGHUP',  () => { cleanup(); process.exit(0); });
 
   // Load persisted state.
   loadTheme();
@@ -126,10 +136,14 @@ async function main() {
   process.stdin.setEncoding('utf8');
   process.stdin.on('data', handleKey);
 
-  // Resize listener.
+  // Resize listener — debounced to avoid render thrashing.
+  let resizeTimer = null;
   process.stdout.on('resize', () => {
-    screen.updateSize();
-    render();
+    if (resizeTimer) clearTimeout(resizeTimer);
+    resizeTimer = setTimeout(() => {
+      screen.updateSize();
+      render();
+    }, 50);
   });
   screen.updateSize();
 
@@ -143,10 +157,23 @@ async function main() {
       repoDensity: appState.repoDensity,
     });
   }
-  process.on('exit', saveCurrentRepoPrefs);
-  process.on('SIGINT', () => { if (rateLimitInterval) clearInterval(rateLimitInterval); saveCurrentRepoPrefs(); });
-  process.on('SIGTERM', () => { if (rateLimitInterval) clearInterval(rateLimitInterval); saveCurrentRepoPrefs(); });
-  process.on('SIGHUP', () => { if (rateLimitInterval) clearInterval(rateLimitInterval); });
+
+  // ── Atomic shutdown — single function, no double-calls ──
+  let _shuttingDown = false;
+  function shutdown() {
+    if (_shuttingDown) return;
+    _shuttingDown = true;
+    if (rateLimitInterval) clearInterval(rateLimitInterval);
+    if (autoRefreshInterval) clearInterval(autoRefreshInterval);
+    saveCurrentRepoPrefs();
+    try { process.stdin.setRawMode(false); } catch {}
+    disableMouse();
+    process.stdout.write('\x1b[?25h\x1b[2J\x1b[H');
+  }
+  process.on('exit', shutdown);
+  process.on('SIGINT',  () => { shutdown(); process.exit(0); });
+  process.on('SIGTERM', () => { shutdown(); process.exit(0); });
+  process.on('SIGHUP',  () => { shutdown(); process.exit(0); });
 
   // Auto-load if we already have a saved token.
   if (appState.token) {
@@ -179,6 +206,26 @@ async function main() {
 }
 
 main().catch(err => {
-  console.error('Fatal:', err);
+  debug('Fatal:', err.message, err.stack);
+  try {
+    process.stdout.write('\x1b[?25h');
+    process.stdout.write('\x1b[2J\x1b[H');
+    console.error('Fatal error:', err.message);
+    console.error(err.stack);
+  } catch {}
+  process.exit(1);
+});
+
+// ── Catch async errors that escape main() ──
+process.on('unhandledRejection', (reason) => {
+  debug('Unhandled rejection:', String(reason));
+});
+process.on('uncaughtException', (err) => {
+  debug('Uncaught exception:', err.message, err.stack);
+  try {
+    process.stdout.write('\x1b[?25h');
+    process.stdout.write('\x1b[2J\x1b[H');
+    console.error('Uncaught exception:', err.message);
+  } catch {}
   process.exit(1);
 });

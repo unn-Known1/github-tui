@@ -20,6 +20,12 @@ const ATTR = {
   underline: `${ESC}[4m`, inverse: `${ESC}[7m`, strikethrough: `${ESC}[9m`,
 };
 
+// Box-drawing characters — fallback to ASCII on Windows.
+const IS_WINDOWS = process.platform === 'win32';
+const BOX = IS_WINDOWS
+  ? { tl: '+', tr: '+', h: '-', v: '|', bl: '+', br: '+' }
+  : { tl: '┌', tr: '┐', h: '─', v: '│', bl: '└', br: '┘' };
+
 // Resolve a style value to a compiled escape sequence.
 // Accepts: null, or { fg?, bg?, bold?, dim?, italic?, underline?, inverse?, strikethrough? }.
 function compileStyle(s) {
@@ -71,8 +77,9 @@ export class Screen {
       this.charBuf.push(new Array(this.width).fill(' '));
       this.styleBuf.push(new Array(this.width).fill(null));
     }
-    this.prevChar = this.charBuf.map(r => [...r]);
-    this.prevStyle = this.styleBuf.map(r => [...r]);
+    // Start with prev buffers marked as different so first render draws everything.
+    this.prevChar = this.charBuf.map(r => r.map(() => '\x00'));
+    this.prevStyle = this.styleBuf.map(r => r.map(() => null));
   }
 
   updateSize() {
@@ -82,7 +89,7 @@ export class Screen {
       this.width = w;
       this.height = h;
       this._init();
-      process.stdout.write(`${ESC}[2J${ESC}[H`);
+      // Diff-based renderer handles the full redraw — no explicit clear needed.
     }
   }
 
@@ -146,26 +153,26 @@ export class Screen {
     this.fillRow(y, ch, style);
   }
 
-  // Draw a rounded box with double-line border. Falls back to single when w<4.
+  // Draw a rounded box with border. Falls back to ASCII on Windows.
   box(x, y, w, h, title = '', style = { bold: true }) {
     if (h < 2 || w < 4 || y < 0 || y >= this.height) return;
 
     if (title) {
       const pad = Math.max(0, Math.floor((w - title.length - 4) / 2));
       const rightPad = Math.max(0, w - 2 - pad - title.length - 2);
-      const top = '┌' + '─'.repeat(pad) + ' ' + title + ' ' + '─'.repeat(rightPad) + '┐';
+      const top = BOX.tl + BOX.h.repeat(pad) + ' ' + title + ' ' + BOX.h.repeat(rightPad) + BOX.tr;
       this.writeStr(x, y, top.substring(0, w), style);
     } else {
-      this.writeStr(x, y, '┌' + '─'.repeat(w - 2) + '┐', style);
+      this.writeStr(x, y, BOX.tl + BOX.h.repeat(w - 2) + BOX.tr, style);
     }
 
     for (let i = 1; i < h - 1; i++) {
       if (y + i >= this.height) break;
-      this.setCell(x, y + i, '│', style);
-      this.setCell(x + w - 1, y + i, '│', style);
+      this.setCell(x, y + i, BOX.v, style);
+      this.setCell(x + w - 1, y + i, BOX.v, style);
     }
     if (y + h - 1 < this.height) {
-      this.writeStr(x, y + h - 1, '└' + '─'.repeat(w - 2) + '┘', style);
+      this.writeStr(x, y + h - 1, BOX.bl + BOX.h.repeat(w - 2) + BOX.br, style);
     }
   }
 
@@ -178,14 +185,14 @@ export class Screen {
       this.fillRect(x + 1, y + 1, w - 2, h - 2, ' ', fillStyle);
     }
     const bs = borderStyle || { dim: true };
-    this.writeStr(x, y, '┌' + '─'.repeat(w - 2) + '┐', bs);
+    this.writeStr(x, y, BOX.tl + BOX.h.repeat(w - 2) + BOX.tr, bs);
     for (let i = 1; i < h - 1; i++) {
       if (y + i >= this.height) break;
-      this.setCell(x, y + i, '│', bs);
-      this.setCell(x + w - 1, y + i, '│', bs);
+      this.setCell(x, y + i, BOX.v, bs);
+      this.setCell(x + w - 1, y + i, BOX.v, bs);
     }
     if (y + h - 1 < this.height) {
-      this.writeStr(x, y + h - 1, '└' + '─'.repeat(w - 2) + '┘', bs);
+      this.writeStr(x, y + h - 1, BOX.bl + BOX.h.repeat(w - 2) + BOX.br, bs);
     }
     if (title) {
       const t = ' ' + title + ' ';
@@ -267,6 +274,12 @@ export class Screen {
     return x + t.length;
   }
 
+  // Build a style escape sequence, or return null when colors are disabled.
+  compileStyleSafe(s) {
+    const compiled = compileStyle(s);
+    return FORCE_COLOR === false ? null : compiled;
+  }
+
   render() {
     const out = [];
     let curCompiled = null;
@@ -282,7 +295,7 @@ export class Screen {
 
         out.push(`${ESC}[${y + 1};${x + 1}H`);
 
-        const compiled = compileStyle(st);
+        const compiled = FORCE_COLOR === false ? null : compileStyle(st);
         if (compiled !== curCompiled) {
           if (curCompiled) out.push(RESET);
           if (compiled) out.push(compiled);
@@ -299,7 +312,37 @@ export class Screen {
       process.stdout.write(out.join(''));
     }
 
-    this.prevChar = this.charBuf.map(r => [...r]);
-    this.prevStyle = this.styleBuf.map(r => [...r]);
+    // Swap buffers instead of copying — zero allocation after warm-up.
+    const tmpChar = this.prevChar;
+    const tmpStyle = this.prevStyle;
+    this.prevChar = this.charBuf;
+    this.prevStyle = this.styleBuf;
+    this.charBuf = tmpChar;
+    this.styleBuf = tmpStyle;
+    // Clear the new buffer (was prev buffer).
+    for (let y = 0; y < this.height; y++) {
+      for (let x = 0; x < this.width; x++) {
+        this.charBuf[y][x] = ' ';
+        this.styleBuf[y][x] = null;
+      }
+    }
   }
 }
+
+// Terminal capability detection.
+const TERM = process.env.TERM || '';
+const COLORTERM = process.env.COLORTERM || '';
+const FORCE_COLOR = (() => {
+  if (process.env.FORCE_COLOR === '0' || process.env.NO_COLOR) return false;
+  if (process.env.FORCE_COLOR) return true;
+  return undefined; // auto-detect
+})();
+
+export const TERM_CAPABILITIES = {
+  supports256: TERM.includes('256color') || COLORTERM === 'truecolor',
+  supportsTrueColor: COLORTERM === 'truecolor' || COLORTERM === '24bit',
+  isTmux: !!process.env.TMUX,
+  isSSH: !!(process.env.SSH_CLIENT || process.env.SSH_TTY),
+  isScreen: !!process.env.STY,
+  isWSL: !!process.env.WSLENV,
+};

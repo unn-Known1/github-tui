@@ -45,8 +45,15 @@
 | **Rate limit indicator** — visual `█░` bar in header | ✅ |
 | **Security pane** — Dependabot alerts with severity icons | ✅ |
 | **Traffic/Milestones/Labels/Checks panes** | ✅ |
-| **Modular architecture** — 23 modules, one file per tab | ✅ |
+| **Modular architecture** — 24 modules, one file per tab | ✅ |
 | **Zero dependencies** — just `node app.mjs` | ✅ |
+| **81 tests** — Node built-in test runner, zero deps | ✅ |
+| **Graceful shutdown** — atomic handlers, raw mode restore, crash logging | ✅ |
+| **Cross-platform rendering** — ASCII box fallback, FORCE_COLOR/NO_COLOR | ✅ |
+| **Input cursor movement** — arrow keys, Home/End, Ctrl-A/E/U/W | ✅ |
+| **Context-aware help** — current tab shortcuts shown first | ✅ |
+| **Mouse hover on all lists** — Repos, Inbox, Actions tabs | ✅ |
+| **Pure business logic** — testable repos-logic.mjs decoupled from state | ✅ |
 
 ---
 
@@ -221,6 +228,8 @@
 | Plugin system | 🎯 v2.0 |
 | Release automation | 🎯 v2.0 |
 | Offline + disk cache | 🎯 v0.6 |
+| Test suite (81 tests) | ✅ shipped |
+| Graceful shutdown + crash logging | ✅ shipped |
 
 ---
 

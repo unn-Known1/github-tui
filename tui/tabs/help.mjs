@@ -1,7 +1,7 @@
 // Help overlay — centered modal listing every keybinding.
 // v0.5+ polish: searchable filter, scannable layout with categories.
 
-import { appState } from '../state.mjs';
+import { appState, tabState } from '../state.mjs';
 import { color } from '../theme.mjs';
 import { truncate } from '../utils.mjs';
 
@@ -217,9 +217,21 @@ export function render(screen) {
 export function getHelpLines(q) {
   const lines = [];
   const query = (q || '').trim();
+
+  // Map tab index to category id.
+  const TAB_CATS = ['dashboard', 'repos', 'analyze', 'actions', 'inbox', 'settings'];
+  const currentCat = TAB_CATS[tabState.current] || 'global';
+
   if (!query) {
-    for (const cat of CATEGORIES) {
-      lines.push({ kind: 'header', text: cat.name });
+    // Show current tab's shortcuts first, then global, then others.
+    const current = CATEGORIES.find(c => c.id === currentCat);
+    const globalCat = CATEGORIES.find(c => c.id === 'global');
+    const others = CATEGORIES.filter(c => c.id !== currentCat && c.id !== 'global');
+
+    for (const cat of [current, globalCat, ...others]) {
+      if (!cat) continue;
+      const isCurrent = cat.id === currentCat;
+      lines.push({ kind: 'header', text: isCurrent ? cat.name + ' (current)' : cat.name });
       for (const s of cat.shortcuts) {
         lines.push({ kind: 'shortcut', key: s.key, desc: s.desc });
       }

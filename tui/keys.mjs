@@ -173,7 +173,6 @@ function refreshCurrent() {
 }
 
 function quit() {
-  process.stdout.write('\x1b[2J\x1b[H');
   process.exit(0);
 }
 
@@ -570,7 +569,12 @@ function handleDown() {
 }
 function handleBack() {
   const t = tabState.current;
-  if (t === 0) return;
+  if (t === 0) {
+    // Esc/h on Dashboard — show quit confirmation.
+    if (appState.confirmAction) return;
+    confirm('Quit GitHub TUI?', () => process.exit(0), 'Quit');
+    return;
+  }
   if (t === 2) { analyze.handleBack(); return; }
   if (t === 1) {
     if (appState.reposView === 'starred') { repos.toggleReposView(); return; }

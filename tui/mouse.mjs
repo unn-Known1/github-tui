@@ -53,11 +53,14 @@ export function handleMouseEvent(event) {
 
   const { button, col, row, pressed } = event;
 
-  // Motion (button 32–63) — live hover selection on trending list.
+  // Motion (button 32–63) — live hover selection on lists.
   if (button >= 32 && button < 64) {
     const sx = col - 1;
     const sy = row - 1;
-    if (tabState.current === 0 && inTrendingSection(sx, sy)) {
+    const t = tabState.current;
+
+    // Dashboard trending list.
+    if (t === 0 && inTrendingSection(sx, sy)) {
       const th = appState._sectionHeaders['dashboard:trending'];
       if (th && th.y > 0 && sy > th.y) {
         const listIdx = sy - th.y - 1;
@@ -68,6 +71,59 @@ export function handleMouseEvent(event) {
         }
       }
     }
+
+    // Repos tab list.
+    if (t === 1) {
+      const rowOff = HEADER_HEIGHT + 8;
+      if (sy >= rowOff) {
+        const listIdx = sy - rowOff;
+        const scroll = appState.reposView === 'starred' ? appState.starredScroll : appState.repoScroll;
+        const absIdx = listIdx + scroll;
+        const maxLen = appState.reposView === 'starred' ? appState.starred.length : (appState._filteredReposCount || appState.repos.length);
+        if (absIdx >= 0 && absIdx < maxLen) {
+          if (appState.reposView === 'starred') {
+            if (absIdx !== appState.starredSelected) { appState.starredSelected = absIdx; render(); }
+          } else {
+            if (absIdx !== appState.repoSelected) { appState.repoSelected = absIdx; render(); }
+          }
+        }
+      }
+    }
+
+    // Inbox tab list.
+    if (t === 4) {
+      const rowOff = HEADER_HEIGHT + 2;
+      if (sy >= rowOff) {
+        const listIdx = sy - rowOff;
+        const absIdx = listIdx + appState.inboxScroll;
+        if (absIdx >= 0 && absIdx < appState.notifications.length && absIdx !== appState.selectedNotification) {
+          appState.selectedNotification = absIdx;
+          render();
+        }
+      }
+    }
+
+    // Actions tab list.
+    if (t === 3) {
+      const rowOff = HEADER_HEIGHT + 2;
+      if (sy >= rowOff) {
+        const listIdx = sy - rowOff;
+        if (appState.actionsView === 'repos') {
+          const absIdx = listIdx + appState.actionsRepoScroll;
+          if (absIdx >= 0 && absIdx < appState.actionsRepos.length && absIdx !== appState.actionsRepoSelected) {
+            appState.actionsRepoSelected = absIdx;
+            render();
+          }
+        } else {
+          const absIdx = listIdx + appState.actionsScroll;
+          if (absIdx >= 0 && absIdx < appState.actionsRuns.length && absIdx !== appState.actionsSelected) {
+            appState.actionsSelected = absIdx;
+            render();
+          }
+        }
+      }
+    }
+
     return;
   }
 

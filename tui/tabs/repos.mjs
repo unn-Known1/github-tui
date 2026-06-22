@@ -12,6 +12,7 @@ import { loadDashboardWidgets } from './dashboard.mjs';
 import { isBookmarked } from '../store.mjs';
 import { togglePin } from '../store.mjs';
 import { loadRepoDetails } from './analyze.mjs';
+import { sortRepos as _sortRepos, applyAllFilters as _applyAllFilters, floatPinsToTop as _floatPinsToTop } from '../repos-logic.mjs';
 
 const REPOS_PER_PAGE = 30;
 const STALE_DAYS = 180;
@@ -27,22 +28,7 @@ export const REPO_SORT_OPTIONS = [
 const TYPE_FILTERS = ['all', 'sources', 'forks', 'archived', 'private', 'public', 'templates'];
 
 export function sortRepos(repos, sort) {
-  const sorted = [...repos];
-  sorted.sort((a, b) => {
-    let va, vb;
-    switch (sort.field) {
-      case 'name':    va = (a.name||'').toLowerCase(); vb = (b.name||'').toLowerCase(); break;
-      case 'stars':   va = a.stargazers_count || 0; vb = b.stargazers_count || 0; break;
-      case 'forks':   va = a.forks_count || 0; vb = b.forks_count || 0; break;
-      case 'issues':  va = a.open_issues_count || 0; vb = b.open_issues_count || 0; break;
-      case 'updated': va = new Date(a.updated_at).getTime(); vb = new Date(b.updated_at).getTime(); break;
-      default: va = 0; vb = 0;
-    }
-    if (va < vb) return sort.asc ? -1 : 1;
-    if (va > vb) return sort.asc ? 1 : -1;
-    return 0;
-  });
-  return sorted;
+  return _sortRepos(repos, sort);
 }
 
 export function toggleRepoSort(field) {
@@ -54,47 +40,16 @@ export function toggleRepoSort(field) {
 }
 
 export function applyAllFilters(repos) {
-  let out = [...repos];
-
-  switch (appState.repoTypeFilter) {
-    case 'sources':   out = out.filter(r => !r.fork); break;
-    case 'forks':     out = out.filter(r => r.fork); break;
-    case 'archived':  out = out.filter(r => r.archived); break;
-    case 'private':   out = out.filter(r => r.private); break;
-    case 'public':    out = out.filter(r => !r.private); break;
-    case 'templates': out = out.filter(r => r.is_template); break;
-  }
-
-  if (appState.reposLangFilter) {
-    out = out.filter(r => (r.language || '') === appState.reposLangFilter);
-  }
-
-  if (appState.repoStaleOnly) {
-    const cutoff = Date.now() - STALE_DAYS * 86400000;
-    out = out.filter(r => new Date(r.pushed_at || r.updated_at).getTime() < cutoff);
-  }
-
-  if (appState.repoFilter) {
-    const q = appState.repoFilter.toLowerCase();
-    out = out.filter(r =>
-      (r.name||'').toLowerCase().includes(q) ||
-      (r.description||'').toLowerCase().includes(q) ||
-      (r.language||'').toLowerCase().includes(q)
-    );
-  }
-
-  return out;
+  return _applyAllFilters(repos, {
+    typeFilter: appState.repoTypeFilter,
+    langFilter: appState.reposLangFilter,
+    staleOnly: appState.repoStaleOnly,
+    textFilter: appState.repoFilter,
+  });
 }
 
 export function floatPinsToTop(repos) {
-  if (appState.repoPins.length === 0) return repos;
-  const pins = new Set(appState.repoPins);
-  const pinned = [];
-  const rest = [];
-  for (const r of repos) (pins.has(r.full_name) ? pinned : rest).push(r);
-  pinned.sort((a, b) =>
-    appState.repoPins.indexOf(a.full_name) - appState.repoPins.indexOf(b.full_name));
-  return [...pinned, ...rest];
+  return _floatPinsToTop(repos, appState.repoPins);
 }
 
 // Build the list of currently active filter chips with dismiss handler.
