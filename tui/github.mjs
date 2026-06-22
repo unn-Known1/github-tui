@@ -4,18 +4,29 @@
 import https from 'https';
 import { readFileSync, writeFileSync, existsSync, mkdirSync } from 'fs';
 import { dirname } from 'path';
-import { ETAG_CACHE_FILE } from './config.mjs';
+import { ETAG_CACHE_FILE, LAST_SYNCED_FILE } from './config.mjs';
 
 const GITHUB_API = 'api.github.com';
 const USER_AGENT = 'GitHub-TUI';
 
 export const lastRateLimit = { remaining: null, limit: null, reset: null };
 export const lastScopes = { scopes: [], accepted: [] };
+
+// ── Offline detection ──
+export const offlineState = { isOffline: false, lastOnline: null };
+
+// ── ETag cache with LRU eviction and disk persistence ──
 const etagCache = new Map();
 const ETAG_CACHE_MAX = 500;
 const ETAG_TTL = 300_000; // 5 minutes
+let _cacheDirty = false;
+let _cacheFlushTimer = null;
 
-// ── Disk-backed ETag cache (survives restarts, saves rate-limit budget) ──
+// ── Last-synced timestamps ──
+const lastSynced = {};
+let _syncedDirty = false;
+
+// ── Disk-backed ETag cache ──
 
 function loadEtagCache() {
   if (!ETAG_CACHE_FILE) return;
@@ -25,10 +36,17 @@ function loadEtagCache() {
     const parsed = JSON.parse(raw);
     if (!Array.isArray(parsed)) return;
     const now = Date.now();
-    for (const [key, etag, body, ts] of parsed) {
-      if (now - ts < ETAG_TTL) {
-        // body is already the parsed JSON object from serialization
-        etagCache.set(key, { etag, body, ts });
+    for (const entry of parsed) {
+      // Support both old [key, etag, body, ts] and new { key, etag, body, ts, lastAccess } formats
+      let key, etag, body, ts, lastAccess;
+      if (Array.isArray(entry)) {
+        [key, etag, body, ts] = entry;
+        lastAccess = ts;
+      } else {
+        ({ key, etag, body, ts, lastAccess } = entry);
+      }
+      if (now - ts < ETAG_TTL * 6) { // Disk cache lives 6x longer (30 min)
+        etagCache.set(key, { etag, body, ts, lastAccess: lastAccess || ts });
       }
     }
   } catch { /* corrupt cache → discard silently */ }
@@ -39,21 +57,112 @@ function saveEtagCache() {
   try {
     const entries = [];
     for (const [key, entry] of etagCache) {
-      entries.push([key, entry.etag, entry.body, entry.ts]);
+      entries.push({ key, etag: entry.etag, body: entry.body, ts: entry.ts, lastAccess: entry.lastAccess });
     }
     const dir = dirname(ETAG_CACHE_FILE);
     if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
     writeFileSync(ETAG_CACHE_FILE, JSON.stringify(entries));
+    _cacheDirty = false;
   } catch { /* non-fatal */ }
 }
 
-// Load persisted cache on module init.
-loadEtagCache();
+// Periodic cache flush — every 60s if dirty.
+function scheduleCacheFlush() {
+  if (_cacheFlushTimer) return;
+  _cacheFlushTimer = setInterval(() => {
+    if (_cacheDirty) saveEtagCache();
+  }, 60_000);
+  // Don't let the timer keep the process alive.
+  if (_cacheFlushTimer.unref) _cacheFlushTimer.unref();
+}
 
-// Save cache on normal exit.
-process.on('exit', saveEtagCache);
-process.on('SIGINT', () => { saveEtagCache(); });
-process.on('SIGTERM', () => { saveEtagCache(); });
+// LRU eviction — evict least recently accessed entries.
+function evictLRU() {
+  if (etagCache.size <= ETAG_CACHE_MAX) return;
+  // First try expired entries.
+  const now = Date.now();
+  for (const [k, v] of etagCache) {
+    if (now - v.ts >= ETAG_TTL) etagCache.delete(k);
+  }
+  // If still over limit, evict by lastAccess.
+  if (etagCache.size > ETAG_CACHE_MAX) {
+    const entries = [...etagCache.entries()].sort((a, b) => a[1].lastAccess - b[1].lastAccess);
+    const toRemove = entries.slice(0, etagCache.size - ETAG_CACHE_MAX + 50);
+    for (const [k] of toRemove) etagCache.delete(k);
+  }
+  _cacheDirty = true;
+}
+
+// ── Last-synced timestamps ──
+
+function loadLastSynced() {
+  if (!LAST_SYNCED_FILE) return;
+  try {
+    if (!existsSync(LAST_SYNCED_FILE)) return;
+    const raw = readFileSync(LAST_SYNCED_FILE, 'utf-8');
+    const parsed = JSON.parse(raw);
+    if (typeof parsed === 'object' && parsed !== null) {
+      Object.assign(lastSynced, parsed);
+    }
+  } catch { /* corrupt → discard */ }
+}
+
+function saveLastSynced() {
+  if (!LAST_SYNCED_FILE) return;
+  try {
+    const dir = dirname(LAST_SYNCED_FILE);
+    if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
+    writeFileSync(LAST_SYNCED_FILE, JSON.stringify(lastSynced, null, 2));
+    _syncedDirty = false;
+  } catch { /* non-fatal */ }
+}
+
+function recordSync(path) {
+  lastSynced[path] = Date.now();
+  _syncedDirty = true;
+}
+
+export function getLastSynced(path) {
+  return lastSynced[path] || null;
+}
+
+export function getAllLastSynced() {
+  return { ...lastSynced };
+}
+
+// Load persisted data on module init.
+loadEtagCache();
+loadLastSynced();
+scheduleCacheFlush();
+
+// Save on exit.
+process.on('exit', () => {
+  if (_cacheDirty) saveEtagCache();
+  if (_syncedDirty) saveLastSynced();
+});
+process.on('SIGINT', () => { saveEtagCache(); saveLastSynced(); });
+process.on('SIGTERM', () => { saveEtagCache(); saveLastSynced(); });
+
+// ── Cache stats ──
+
+export function getCacheStats() {
+  let totalBytes = 0;
+  let oldestTs = Infinity;
+  let newestTs = 0;
+  for (const [, entry] of etagCache) {
+    try { totalBytes += JSON.stringify(entry.body).length; } catch {}
+    if (entry.ts < oldestTs) oldestTs = entry.ts;
+    if (entry.ts > newestTs) newestTs = entry.ts;
+  }
+  return {
+    entries: etagCache.size,
+    maxEntries: ETAG_CACHE_MAX,
+    totalBytes,
+    totalKB: Math.round(totalBytes / 1024),
+    oldestTs: oldestTs === Infinity ? null : oldestTs,
+    newestTs: newestTs || null,
+  };
+}
 
 function buildOptions(path, token, method, body) {
   const headers = {
@@ -85,11 +194,25 @@ export function request(path, opts) {
   const raw = !!o.raw;
   const bodyStr = body == null ? null : JSON.stringify(body);
 
+  // Offline mode: return cached data for GETs when offline.
+  if (method === 'GET' && offlineState.isOffline) {
+    const key = `${method}:${path}`;
+    const cached = etagCache.get(key);
+    if (cached) {
+      cached.lastAccess = Date.now();
+      _cacheDirty = true;
+      return Promise.resolve(cached.body);
+    }
+    return Promise.reject(new Error('Offline — no cached data available'));
+  }
+
   // Rate-limit-conservative mode: when budget is low, try cache before hitting the wire.
   if (method === 'GET' && lastRateLimit.remaining !== null && lastRateLimit.remaining < LOW_RATE_WARN) {
     const key = `${method}:${path}`;
     const cached = etagCache.get(key);
     if (cached && Date.now() - cached.ts < ETAG_TTL) {
+      cached.lastAccess = Date.now();
+      _cacheDirty = true;
       return Promise.resolve(cached.body);
     }
   }
@@ -101,6 +224,10 @@ export function request(path, opts) {
       if (settled) return;
       settled = true;
       try { if (req) req.destroy(); } catch (e) {}
+      // Timeout while online → mark as potential offline.
+      if (!offlineState.isOffline) {
+        offlineState.isOffline = true;
+      }
       reject(new Error('Request timed out'));
     }, timeoutMs);
 
@@ -119,6 +246,12 @@ export function request(path, opts) {
       if (sc !== undefined) lastScopes.scopes = sc.split(',').map(s => s.trim()).filter(Boolean);
       if (ac !== undefined) lastScopes.accepted = ac.split(',').map(s => s.trim()).filter(Boolean);
 
+      // We got a response — we're online.
+      if (offlineState.isOffline) {
+        offlineState.isOffline = false;
+        offlineState.lastOnline = Date.now();
+      }
+
       let data = '';
       res.on('data', (chunk) => { data += chunk; });
       res.on('end', () => {
@@ -129,7 +262,12 @@ export function request(path, opts) {
         if (res.statusCode === 304) {
           const key = `${method}:${path}`;
           const cached = etagCache.get(key);
-          if (cached && Date.now() - cached.ts < ETAG_TTL) return resolve(cached.body);
+          if (cached && Date.now() - cached.ts < ETAG_TTL) {
+            cached.lastAccess = Date.now();
+            _cacheDirty = true;
+            recordSync(path);
+            return resolve(cached.body);
+          }
           etagCache.delete(key);
         }
         if (res.statusCode === 403 && rr === '0') {
@@ -145,23 +283,12 @@ export function request(path, opts) {
             catch (e) { return reject(new Error('Invalid JSON response')); }
           }
           if (method === 'GET' && res.headers.etag) {
-            etagCache.set(`${method}:${path}`, { etag: res.headers.etag, body: payload, ts: Date.now() });
-            if (etagCache.size > ETAG_CACHE_MAX) {
-              const now = Date.now();
-              // First try to evict expired entries.
-              const expired = [];
-              for (const [k, v] of etagCache) {
-                if (now - v.ts >= ETAG_TTL) expired.push(k);
-              }
-              for (const k of expired) etagCache.delete(k);
-              // If still over limit, evict oldest entries.
-              if (etagCache.size > ETAG_CACHE_MAX) {
-                const entries = [...etagCache.entries()].sort((a, b) => a[1].ts - b[1].ts);
-                const toRemove = entries.slice(0, etagCache.size - ETAG_CACHE_MAX + 50);
-                for (const [k] of toRemove) etagCache.delete(k);
-              }
-            }
+            const now = Date.now();
+            etagCache.set(`${method}:${path}`, { etag: res.headers.etag, body: payload, ts: now, lastAccess: now });
+            evictLRU();
+            _cacheDirty = true;
           }
+          if (method === 'GET') recordSync(path);
           return resolve(payload);
         }
         let msg = 'GitHub API error: ' + res.statusCode;
@@ -177,6 +304,18 @@ export function request(path, opts) {
       if (settled) return;
       settled = true;
       clearTimeout(timer);
+      // Network error → mark offline.
+      offlineState.isOffline = true;
+      // Try to return cached data for GETs.
+      if (method === 'GET') {
+        const key = `${method}:${path}`;
+        const cached = etagCache.get(key);
+        if (cached) {
+          cached.lastAccess = Date.now();
+          _cacheDirty = true;
+          return resolve(cached.body);
+        }
+      }
       reject(err);
     });
     req.on('close', () => {

@@ -4,7 +4,7 @@
 
 import { appState, TABS, tabState, bindRender } from './state.mjs';
 import { Screen } from './screen.mjs';
-import { lastRateLimit } from './github.mjs';
+import { lastRateLimit, offlineState, getCacheStats } from './github.mjs';
 import { color } from './theme.mjs';
 import { readFileSync } from 'fs';
 import { fileURLToPath } from 'url';
@@ -202,6 +202,12 @@ function renderHeader(W) {
   const version = 'v' + VERSION;
   screen.writeStr(15, 0, version, { fg: 'gray', dim: true });
 
+  // Offline banner — shows when offline.
+  if (offlineState.isOffline) {
+    const banner = '⚠ OFFLINE';
+    screen.writeStr(22, 0, banner, { fg: 'yellow', bold: true });
+  }
+
   // User greeting on the right of the top line.
   if (appState.user) {
     const login = '@' + appState.user.login;
@@ -209,8 +215,17 @@ function renderHeader(W) {
     screen.writeStr(x, 0, login, { fg: 'cyan', bold: true });
   }
 
-  // Row 1: tagline (left)  |  rate-limit (right)
+  // Row 1: tagline (left)  |  rate-limit + cache stats (right)
   screen.writeStr(2, 1, 'A zero-dependency terminal client for GitHub', subtitleStyle);
+
+  // Cache stats on the right (small, dim).
+  const cacheStats = getCacheStats();
+  if (cacheStats.entries > 0) {
+    const cacheTxt = '📦' + cacheStats.totalKB + 'KB';
+    const cx = Math.max(2, W - cacheTxt.length - 2);
+    screen.writeStr(cx, 1, cacheTxt, { dim: true });
+  }
+
   if (lastRateLimit.remaining !== null && lastRateLimit.limit !== null) {
     const r = lastRateLimit.remaining, lim = lastRateLimit.limit;
     const pct = lim > 0 ? r / lim : 0;
@@ -222,7 +237,9 @@ function renderHeader(W) {
       : pct < 0.3 ? { fg: 'yellow' }
       : { fg: 'green' };
     const txt = 'API ' + bar + ' ' + r + '/' + lim;
-    const x = Math.max(2, W - txt.length - 2);
+    // Position before cache stats if both shown.
+    const cacheW = cacheStats.entries > 0 ? cacheStats.totalKB.toString().length + 8 : 0;
+    const x = Math.max(2, W - txt.length - cacheW - 3);
     screen.writeStr(x, 1, txt, style);
   } else if (!appState.user) {
     const x = Math.max(2, W - 18);
@@ -415,7 +432,7 @@ function statusLine() {
       return ' [↑↓jk] Nav' + sep + '[Enter] View runs' + sep + '[?] Help';
     }
     case 4: return ' [↑↓jk] Nav' + sep + '[Enter] Open' + sep + '[m] Read' + sep + '[M] All' + sep + '[f] Filter' + sep + '[u] Unsubscribe';
-    case 5: return ' [↑↓] Nav' + sep + '[Enter] Select' + sep + '[Ctrl-P] Palette' + sep + '[?] Help';
+    case 5: return ' [↑↓] Nav' + sep + '[Enter] Select' + sep + '[s] Star repo' + sep + '[?] Help';
   }
   return '';
 }

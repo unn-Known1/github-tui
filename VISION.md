@@ -54,18 +54,22 @@
 | **Context-aware help** — current tab shortcuts shown first | ✅ |
 | **Mouse hover on all lists** — Repos, Inbox, Actions tabs | ✅ |
 | **Pure business logic** — testable repos-logic.mjs decoupled from state | ✅ |
+| **Disk-backed ETag cache** — survives restarts, LRU eviction, 30 min TTL | ✅ |
+| **Offline mode** — shows cached data with banner when network unavailable | ✅ |
+| **Last-synced timestamps** — every tab shows when data was last refreshed | ✅ |
+| **Cache stats** — header shows KB, Settings shows full breakdown | ✅ |
 
 ---
 
 ## 🗓️ Roadmap
 
-### v0.6 — "Cache & Offline" *(next)*
+### v0.6 — "Cache & Offline" ✅ shipped
 
 | Feature | Why |
 |---|---|
 | **Disk-backed ETag cache** | Survive restarts; instant reload of previously-viewed data |
 | **Offline mode** | Work in trains/planes with last-synced banner |
-| **Background prefetch** | Pre-fetch starred repos while idle |
+| **Background prefetch** | ~~Pre-fetch starred repos while idle~~ — deferred to v0.7 (disk cache makes this unnecessary) |
 | **LRU eviction** | Configurable max MB to prevent disk bloat |
 | **"Last synced" timestamps** | Every tab shows when data was last refreshed |
 
@@ -218,7 +222,7 @@
 | Command Palette (`Ctrl-P`) | ✅ shipped |
 | PR Review Workflow in-TUI | ✅ shipped |
 | Inbox actions | ✅ shipped |
-| Disk cache with ETags | 🟡 in-memory only (v0.6 disk) |
+| Disk cache with ETags | ✅ shipped (v0.6) |
 | README + Markdown renderer | ✅ shipped |
 | Saved searches | ✅ shipped |
 | OS-keychain token storage | 🔲 v0.9 |

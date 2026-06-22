@@ -7,12 +7,14 @@ import {
 } from '../config.mjs';
 import {
   getAuthenticatedUser, getUserRepositories,
-  lastRateLimit, lastScopes,
+  lastRateLimit, lastScopes, getCacheStats, offlineState, isStarred as checkStarred,
 } from '../github.mjs';
 import { startInput, registerInputHandler } from '../input.mjs';
 import { color, listThemes, getThemeName, setTheme } from '../theme.mjs';
 import { loadDashboardWidgets } from './dashboard.mjs';
 import { loadUserData } from './repos.mjs';
+import { openUrl } from '../utils.mjs';
+import { starRepo as apiStarRepo } from '../github.mjs';
 
 const REPOS_PER_PAGE = 30;
 
@@ -195,9 +197,29 @@ export function renderSettings(screen, y, h) {
   sectionHeader(screen, 2, row, '◆ ABOUT', leftMaxW);
   row += 2;
   if (row < y + sectionH) {
-    screen.writeStr(4, row, 'Created by ', { dim: true });
-    screen.writeStr(15, row, '@unn-Known1', { fg: 'white', bold: true });
-    screen.writeStr(26, row, ' (https://github.com/unn-Known1)', { dim: true });
+    screen.writeStr(4, row, 'Built with', { dim: true });
+    screen.writeStr(14, row, 'zero dependencies', { fg: 'cyan', bold: true });
+    screen.writeStr(31, row, '— just Node.js and vibes.', { dim: true });
+    row++;
+  }
+  if (row < y + sectionH) {
+    screen.writeStr(4, row, 'Feedback, issues, and PRs are welcome!', { fg: 'white' });
+    row++;
+  }
+  if (row < y + sectionH) {
+    screen.writeStr(4, row, 'github.com/unn-Known1/github-tui', { fg: 'cyan', underline: true });
+    row++;
+  }
+  row++;
+  if (row < y + sectionH) {
+    const starSel = appState.settingsCursor === 7;
+    const starLabel = '★ Star this repo';
+    const starDesc = 'Press [s] to star on GitHub — helps more features get built';
+    if (starSel) {
+      for (let xx = 2; xx < leftMaxW - 2; xx++) screen.styleBuf[row][xx] = { bg: 'yellow', fg: 'darkGray', bold: true };
+    }
+    renderRow(screen, row, leftMaxW, starLabel, starDesc, true, starSel,
+      starSel ? { bg: 'yellow', fg: 'darkGray', bold: true } : { fg: 'yellow', bold: true });
     row++;
   }
 
@@ -223,7 +245,7 @@ export function renderSettings(screen, y, h) {
     screen.writeStr(21, creditY, '(https://github.com/unn-Known1)', { dim: true });
   }
 
-  appState._maxSettingsCursor = 6;
+  appState._maxSettingsCursor = 7;
 }
 
 function renderSystemPanel(screen, x, y, w, h, screenW) {
@@ -267,6 +289,14 @@ function buildSystemLines(screenW) {
   if (lastScopes.scopes && lastScopes.scopes.length) {
     lines.push(['Scopes', lastScopes.scopes.join(', '), { dim: true }]);
   }
+  // Cache stats
+  const cs = getCacheStats();
+  if (cs.entries > 0) {
+    lines.push(['Cache', cs.entries + ' entries, ' + cs.totalKB + ' KB', { dim: true }]);
+  }
+  if (offlineState.isOffline) {
+    lines.push(['Status', 'OFFLINE', { fg: 'yellow', bold: true }]);
+  }
   return lines;
 }
 
@@ -275,11 +305,15 @@ export const keys = {
     showMessage('Refreshing...', 'info');
     import('./repos.mjs').then(m => m.loadUserData());
   },
+  's': () => starRepo(),
+  'S': () => starRepo(),
+  'o': () => openUrl('https://github.com/unn-Known1/github-tui'),
 };
 const AUTH_ITEMS = [0, 1];  // Login, Logout
 const DATA_ITEMS = [2, 3, 4];  // Refresh Dashboard, Refresh User Data, Auto-Refresh
 const APPEARANCE_ITEMS = [5]; // Change Theme
 const DANGER_ITEMS = [6];  // Clear Token
+const ABOUT_ITEMS = [7];  // Star repo
 
 function isCursorEnabled(cursor) {
   const isLoggedIn = !!appState.token;
@@ -293,6 +327,7 @@ function isCursorEnabled(cursor) {
   }
   if (APPEARANCE_ITEMS.includes(cursor)) return true;
   if (DANGER_ITEMS.includes(cursor)) return isLoggedIn;
+  if (ABOUT_ITEMS.includes(cursor)) return true;
   return false;
 }
 
@@ -384,5 +419,24 @@ export function enter() {
         showMessage('Token file wiped', 'success');
       }, 'Wipe Token');
       break;
+    case 7:
+      starRepo();
+      break;
+  }
+}
+
+async function starRepo() {
+  if (!appState.token) { showMessage('Login required to star', 'warning'); return; }
+  try {
+    const already = await checkStarred(appState.token, 'unn-Known1', 'github-tui');
+    if (already) {
+      showMessage('Already starred! Thanks for the support ★', 'success');
+      openUrl('https://github.com/unn-Known1/github-tui');
+    } else {
+      await apiStarRepo(appState.token, 'unn-Known1', 'github-tui');
+      showMessage('★ Starred github-tui! Thanks for the support!', 'success');
+    }
+  } catch (e) {
+    showMessage(e.message || 'Star failed', 'error');
   }
 }

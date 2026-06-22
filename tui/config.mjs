@@ -8,7 +8,7 @@ import {
   mkdirSync, unlinkSync, chmodSync,
 } from 'fs';
 
-export const APP_VERSION = '0.5.8';
+export const APP_VERSION = '0.6.0';
 
 export const CONFIG_DIR = join(homedir(), '.github-tui');
 export const TOKEN_FILE = join(CONFIG_DIR, 'token');
@@ -18,6 +18,7 @@ export const SAVED_SEARCHES_FILE = join(CONFIG_DIR, 'saved-searches.json');
 export const THEME_FILE = join(CONFIG_DIR, 'theme');
 export const CACHE_DIR = join(CONFIG_DIR, 'cache');
 export const ETAG_CACHE_FILE = join(CONFIG_DIR, 'etag-cache.json');
+export const LAST_SYNCED_FILE = join(CONFIG_DIR, 'last-synced.json');
 export const SECTIONS_FILE = join(CONFIG_DIR, 'sections.json');
 export const KEYBINDINGS_FILE = join(CONFIG_DIR, 'keybindings.json');
 

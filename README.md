@@ -23,7 +23,10 @@ A fast, zero-dependency terminal user interface for GitHub — six tabs, a comma
 - ★ **Star anywhere** — `s` toggles a GitHub star on the highlighted repo (search results / details / forks / your repos).
 - 📋 **OSC-52 clipboard** — `y` copies the current URL; works over SSH and inside tmux.
 - 📉 **Live rate-limit indicator** — top-right of the screen; full breakdown (remaining/limit/reset minutes + **token scopes**) on the Settings tab.
-- 💾 **ETag caching** — repeated GETs return 304 and don't cost any rate-limit budget.
+- 💾 **ETag caching** — repeated GETs return 304 and don't cost any rate-limit budget. Disk-backed with LRU eviction, survives restarts.
+- 🛡️ **Offline mode** — shows cached data with `⚠ OFFLINE` banner when network is unavailable.
+- 📡 **Last-synced timestamps** — every tab shows when data was last refreshed.
+- 📦 **Cache stats** — header shows cache size in KB; Settings → System shows full breakdown.
 - 🔐 **Secure local auth** — PAT stored at `~/.github-tui/token` with `chmod 600`; masked while typing; auto-cleared on first 401.
 - 🖥️ **Diff-based renderer** — only changed cells are redrawn; resizes adaptively.
 - 📝 **Issue/PR detail popup** — `Enter` on an issue or PR opens a full detail view with rendered body, labels, comments tab, **reviews tab**, and PR files tab. Comment (`c`), react (`r`), close/reopen (`x`), merge PR (`M`) — all from the TUI.
@@ -202,6 +205,16 @@ Your current token scopes are shown in the Settings → System panel so you can 
 | `u` | Unsubscribe (ignore future updates to thread) |
 | `f` | Cycle filter: all → unread → mentions → review |
 | `r` | Refresh notifications |
+
+### Settings
+
+| Key | Action |
+|---|---|
+| `↑↓` | Navigate menu items |
+| `Enter` | Select / activate the highlighted item |
+| `s` / `S` | Star the github-tui repo (show support!) |
+| `o` | Open github-tui repo in browser |
+| `r` | Refresh user data |
 
 ## 🗂️ Project Layout
 
