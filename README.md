@@ -17,7 +17,7 @@ A fast, zero-dependency terminal user interface for GitHub — six tabs, a comma
 - 🔍 **Analyze any public repo** — search, 2-column detail view (metadata + languages bar + top contributors + latest releases), pane tabs `[O] Overview / [i] Issues / [P] PRs / [R] README / [F] Files / [T] Traffic / [M] Milestones / [L] Labels / [K] Checks / [S] Security`, parallel ahead/behind compares on forks.
 - 📊 **Repo Analytics** — Traffic (views/clones/popular paths/referrers), Milestones (title/state/due/issues), Labels (color dots/descriptions), Checks/CI (pass/fail/pending summary), Security (Dependabot alerts with severity icons).
 - 📥 **Inbox triage** — color-coded notification types, mark-as-read (`m`) / mark-all (`M`) / unsubscribe (`u`) / filter cycle (`f`: all/unread/mentions/review), repo-grouped summary.
-- 🎨 **Themes** — `default`, `highContrast`, `dracula`, `solarized`, `nord`, `monokai`, `gruvbox` — persisted across sessions.
+- 🎨 **Themes** — `default`, `highContrast`, `dracula`, `solarized`, `nord`, `monokai`, `gruvbox`, `light`, `ayu`, `catppuccin` — each with a fully distinct palette using true-color (24-bit) and 256-color rendering. Persisted across sessions.
 - ⚡ **Command Palette** — `Ctrl-P` or `:` opens a fuzzy-search modal listing every action.
 - 📖 **README viewer** — `R` on the details pane renders the repo's README in-terminal with naive Markdown styling.
 - ★ **Star anywhere** — `s` toggles a GitHub star on the highlighted repo (search results / details / forks / your repos).

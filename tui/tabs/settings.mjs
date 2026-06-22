@@ -162,7 +162,8 @@ export function renderSettings(screen, y, h) {
     const themeChips = [];
     const accentColors = {
       default: 'cyan', highContrast: 'white', dracula: 'magenta',
-      solarized: 'blue', nord: 'cyan', monokai: 'green', gruvbox: 'yellow', light: 'blue',
+      solarized: 'blue', nord: 'cyan', monokai: 'green',
+      gruvbox: 'yellow', light: 'blue', ayu: 'yellow', catppuccin: 'magenta',
     };
     for (const t of listThemes()) {
       const isCurrent = t === getThemeName();

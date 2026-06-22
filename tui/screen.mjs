@@ -3,18 +3,45 @@ const RESET = `${ESC}[0m`;
 
 import { NO_COLOR, FORCE_COLOR as _FORCE_COLOR_CFG } from './config.mjs';
 
+// ── Terminal capability detection (done early, used by compileStyle) ──
+const TERM = process.env.TERM || '';
+const COLORTERM = process.env.COLORTERM || '';
+const FORCE_COLOR = (() => {
+  if (NO_COLOR) return false;
+  if (_FORCE_COLOR_CFG) return true;
+  return undefined; // auto-detect
+})();
+
+export const TERM_CAPABILITIES = {
+  supports256: TERM.includes('256color') || COLORTERM === 'truecolor' || COLORTERM === '24bit',
+  supportsTrueColor: COLORTERM === 'truecolor' || COLORTERM === '24bit',
+  isTmux: !!process.env.TMUX,
+  isSSH: !!(process.env.SSH_CLIENT || process.env.SSH_TTY),
+  isScreen: !!process.env.STY,
+  isWSL: !!process.env.WSLENV,
+};
+
+// ── Named ANSI-8 color maps (fallback) ──────────────────────────────
 const FG = {
+  black: `${ESC}[30m`,
   red: `${ESC}[31m`, green: `${ESC}[32m`, yellow: `${ESC}[33m`,
   blue: `${ESC}[34m`, magenta: `${ESC}[35m`, cyan: `${ESC}[36m`,
   white: `${ESC}[37m`, gray: `${ESC}[90m`,
-  darkGray: `${ESC}[90m`, // alias used by some themes
+  darkGray: `${ESC}[90m`,
+  brightRed: `${ESC}[91m`, brightGreen: `${ESC}[92m`, brightYellow: `${ESC}[93m`,
+  brightBlue: `${ESC}[94m`, brightMagenta: `${ESC}[95m`, brightCyan: `${ESC}[96m`,
+  brightWhite: `${ESC}[97m`,
 };
 
 const BG = {
+  black: `${ESC}[40m`,
   red: `${ESC}[41m`, green: `${ESC}[42m`, yellow: `${ESC}[43m`,
   blue: `${ESC}[44m`, magenta: `${ESC}[45m`, cyan: `${ESC}[46m`,
   white: `${ESC}[47m`, gray: `${ESC}[100m`,
   darkGray: `${ESC}[100m`,
+  brightRed: `${ESC}[101m`, brightGreen: `${ESC}[102m`, brightYellow: `${ESC}[103m`,
+  brightBlue: `${ESC}[104m`, brightMagenta: `${ESC}[105m`, brightCyan: `${ESC}[106m`,
+  brightWhite: `${ESC}[107m`,
 };
 
 const ATTR = {
@@ -22,16 +49,80 @@ const ATTR = {
   underline: `${ESC}[4m`, inverse: `${ESC}[7m`, strikethrough: `${ESC}[9m`,
 };
 
-// Box-drawing characters — fallback to ASCII on Windows.
+// ── Color value resolver ─────────────────────────────────────────────
+// Accepts:
+//   'cyan'           → named ANSI color
+//   '#bd93f9'        → true-color hex (falls back to 256 or named)
+//   [r, g, b]        → true-color tuple
+//   256:n            → 256-color index string  (e.g. '256:135')
+
+function resolveFg(val) {
+  if (!val) return '';
+  if (Array.isArray(val)) return rgbFg(...val);
+  if (typeof val === 'string') {
+    if (val.startsWith('#')) return hexFg(val);
+    if (val.startsWith('256:')) return idx256Fg(parseInt(val.slice(4), 10));
+    return FG[val] || '';
+  }
+  return '';
+}
+
+function resolveBg(val) {
+  if (!val) return '';
+  if (Array.isArray(val)) return rgbBg(...val);
+  if (typeof val === 'string') {
+    if (val.startsWith('#')) return hexBg(val);
+    if (val.startsWith('256:')) return idx256Bg(parseInt(val.slice(4), 10));
+    return BG[val] || '';
+  }
+  return '';
+}
+
+// True-color (24-bit) sequences
+function rgbFg(r, g, b) { return TERM_CAPABILITIES.supportsTrueColor ? `${ESC}[38;2;${r};${g};${b}m` : idx256Fg(rgb2idx(r, g, b)); }
+function rgbBg(r, g, b) { return TERM_CAPABILITIES.supportsTrueColor ? `${ESC}[48;2;${r};${g};${b}m` : idx256Bg(rgb2idx(r, g, b)); }
+
+// Hex shorthand
+function hexFg(hex) { const [r, g, b] = hexParse(hex); return rgbFg(r, g, b); }
+function hexBg(hex) { const [r, g, b] = hexParse(hex); return rgbBg(r, g, b); }
+
+// 256-color index sequences
+function idx256Fg(n) { return TERM_CAPABILITIES.supports256 ? `${ESC}[38;5;${n}m` : ''; }
+function idx256Bg(n) { return TERM_CAPABILITIES.supports256 ? `${ESC}[48;5;${n}m` : ''; }
+
+function hexParse(hex) {
+  const h = hex.replace('#', '');
+  return [parseInt(h.slice(0, 2), 16), parseInt(h.slice(2, 4), 16), parseInt(h.slice(4, 6), 16)];
+}
+
+// Convert RGB to nearest xterm-256 color index (6x6x6 cube + grays)
+function rgb2idx(r, g, b) {
+  // Grayscale ramp: indices 232-255
+  if (Math.abs(r - g) < 10 && Math.abs(g - b) < 10) {
+    const gray = Math.round((r + g + b) / 3);
+    if (gray < 8) return 16;
+    if (gray > 248) return 231;
+    return Math.round((gray - 8) / 247 * 24) + 232;
+  }
+  // 6x6x6 cube: indices 16-231
+  const ri = Math.round(r / 255 * 5);
+  const gi = Math.round(g / 255 * 5);
+  const bi = Math.round(b / 255 * 5);
+  return 16 + 36 * ri + 6 * gi + bi;
+}
+
+// ── Box-drawing characters — fallback to ASCII on Windows ────────────
 const IS_WINDOWS = process.platform === 'win32';
 const BOX = IS_WINDOWS
   ? { tl: '+', tr: '+', h: '-', v: '|', bl: '+', br: '+' }
   : { tl: '┌', tr: '┐', h: '─', v: '│', bl: '└', br: '┘' };
 
-// Resolve a style value to a compiled escape sequence.
-// Accepts: null, or { fg?, bg?, bold?, dim?, italic?, underline?, inverse?, strikethrough? }.
+// ── Style compiler ───────────────────────────────────────────────────
+// Accepts: null, or { fg?, bg?, bold?, dim?, italic?, underline?, inverse?, strikethrough? }
+// fg/bg accept: named string, '#rrggbb', [r,g,b], '256:n'
 function compileStyle(s) {
   if (!s) return null;
+  if (FORCE_COLOR === false) return null;
   const parts = [];
   if (s.bold)      parts.push(ATTR.bold);
   if (s.dim)       parts.push(ATTR.dim);
@@ -39,18 +130,16 @@ function compileStyle(s) {
   if (s.underline) parts.push(ATTR.underline);
   if (s.inverse)   parts.push(ATTR.inverse);
   if (s.strikethrough) parts.push(ATTR.strikethrough);
-  if (s.fg)        parts.push(FG[s.fg] || '');
-  if (s.bg)        parts.push(BG[s.bg] || '');
+  if (s.fg)        { const r = resolveFg(s.fg); if (r) parts.push(r); }
+  if (s.bg)        { const r = resolveBg(s.bg); if (r) parts.push(r); }
   return parts.length > 0 ? parts.join('') : null;
 }
 
-// Unicode safe cell width — we treat most glyphs as width 1 to keep
-// box-drawing predictable across terminals.
+// Unicode safe cell width
 function strWidth(s) {
   let w = 0;
   for (let i = 0; i < s.length; i++) {
     const c = s.charCodeAt(i);
-    // Skip ANSI escapes that leaked in (defensive — shouldn't happen).
     if (c === 0x1b) {
       i++;
       while (i < s.length && !(s.charCodeAt(i) >= 0x40 && s.charCodeAt(i) <= 0x7e)) i++;
@@ -278,8 +367,7 @@ export class Screen {
 
   // Build a style escape sequence, or return null when colors are disabled.
   compileStyleSafe(s) {
-    const compiled = compileStyle(s);
-    return FORCE_COLOR === false ? null : compiled;
+    return compileStyle(s);
   }
 
   render() {
@@ -330,21 +418,3 @@ export class Screen {
     }
   }
 }
-
-// Terminal capability detection.
-const TERM = process.env.TERM || '';
-const COLORTERM = process.env.COLORTERM || '';
-const FORCE_COLOR = (() => {
-  if (NO_COLOR) return false;
-  if (_FORCE_COLOR_CFG) return true;
-  return undefined; // auto-detect
-})();
-
-export const TERM_CAPABILITIES = {
-  supports256: TERM.includes('256color') || COLORTERM === 'truecolor',
-  supportsTrueColor: COLORTERM === 'truecolor' || COLORTERM === '24bit',
-  isTmux: !!process.env.TMUX,
-  isSSH: !!(process.env.SSH_CLIENT || process.env.SSH_TTY),
-  isScreen: !!process.env.STY,
-  isWSL: !!process.env.WSLENV,
-};
