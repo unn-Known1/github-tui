@@ -239,6 +239,23 @@ function handleClick(col, row) {
     return;
   }
 
+  // Security sub-pane tabs — dynamic Y stored during render.
+  if (tabState.current === 2 && appState.analyzeView === 'details' && appState.detailsPane === 'security') {
+    const subTab = appState._securitySubTabBounds;
+    if (subTab && sy === subTab.y) {
+      for (const b of subTab.bounds) {
+        if (sx >= b.x1 && sx < b.x2) {
+          appState.securitySubPane = b.pane;
+          appState.securityAlertCursor = 0;
+          appState.securityAlertScroll = 0;
+          import('./tabs/analyze.mjs').then(a => a.loadSecurity());
+          render();
+          return;
+        }
+      }
+    }
+  }
+
   // Collapsible section headers — check exact arrow position.
   if (handleCollapsibleClick(sx, sy)) return;
 
@@ -722,16 +739,55 @@ function scrollDown(sx, sy) {
 
 // ── Settings tab ─────────────────────────────────────────────
 function dispatchSettingsClick(sx, sy) {
+  // Click on URL link → open in browser.
+  const urlBounds = appState._settingsUrlBounds;
+  if (urlBounds && sx >= urlBounds.x && sx < urlBounds.x + urlBounds.w && sy === urlBounds.y) {
+    import('../utils.mjs').then(m => m.openUrl(urlBounds.url));
+    render();
+    return;
+  }
+
+  // Click on theme chip → apply theme.
   const chips = appState._themeChips;
-  if (!chips) { render(); return; }
-  for (const chip of chips) {
-    if (sx >= chip.x1 && sx < chip.x2 && sy === chip.y) {
-      if (setTheme(chip.theme)) {
-        showMessage('Theme: ' + chip.theme, 'success');
+  if (chips) {
+    for (const chip of chips) {
+      if (sx >= chip.x1 && sx < chip.x2 && sy === chip.y) {
+        if (setTheme(chip.theme)) {
+          showMessage('Theme: ' + chip.theme, 'success');
+        }
+        render();
+        return;
       }
-      render();
-      return;
     }
   }
+
+  // Click on the star row → trigger starRepo() directly with full feedback.
+  const starBounds = appState._starRowBounds;
+  if (starBounds && sy === starBounds.y && sx >= starBounds.x1 && sx < starBounds.x2) {
+    appState.settingsCursor = 7;
+    import('./tabs/settings.mjs').then(m => m.starRepo());
+    render();
+    return;
+  }
+
+  // Click on settings menu row → select and activate.
+  const rowBounds = appState._settingsRowBounds;
+  if (rowBounds) {
+    for (const rb of rowBounds) {
+      if (sy === rb.y) {
+        appState.settingsCursor = rb.cursor;
+        // Star row (cursor 7) is handled above via _starRowBounds for wider hit area,
+        // but also handle it here in case it falls through.
+        if (rb.cursor === 7) {
+          import('./tabs/settings.mjs').then(m => m.starRepo());
+        } else {
+          import('./tabs/settings.mjs').then(m => m.enter());
+        }
+        render();
+        return;
+      }
+    }
+  }
+
   render();
 }

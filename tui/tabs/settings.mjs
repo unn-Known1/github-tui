@@ -4,6 +4,7 @@
 import { appState, render, startAsync, isStale, showMessage, confirm } from '../state.mjs';
 import {
   APP_VERSION, CONFIG_DIR, TOKEN_FILE, saveToken, removeToken,
+  tokenStorageBackend,
 } from '../config.mjs';
 import {
   getAuthenticatedUser, getUserRepositories,
@@ -105,6 +106,7 @@ export function renderSettings(screen, y, h) {
   screen.hline(y + 1, '─', { dim: true });
 
   let row = y + 3;
+  const rowBounds = [];  // Track Y position of each menu item for mouse clicks
 
   // First decide where the system panel goes so we can constrain left column.
   const sysPanelW = Math.min(56, Math.max(34, Math.floor(W * 0.35)));
@@ -122,6 +124,7 @@ export function renderSettings(screen, y, h) {
   for (const item of authItems) {
     if (row >= y + sectionH) break;
     renderRow(screen, row, leftMaxW, item.label, item.desc, item.enabled, item.sel);
+    rowBounds.push({ cursor: authItems.indexOf(item), y: row });
     row++;
   }
   row += 2;
@@ -137,6 +140,7 @@ export function renderSettings(screen, y, h) {
   for (const item of dataItems) {
     if (row >= y + sectionH) break;
     renderRow(screen, row, leftMaxW, item.label, item.desc, item.enabled, item.sel);
+    rowBounds.push({ cursor: dataItems.indexOf(item) + 2, y: row });
     row++;
   }
   row += 2;
@@ -147,6 +151,7 @@ export function renderSettings(screen, y, h) {
   const themeItem = { label: 'Change Theme', desc: 'Current: ' + getThemeName(), enabled: true, sel: appState.settingsCursor === 5 };
   if (row < y + sectionH) {
     renderRow(screen, row, leftMaxW, themeItem.label, themeItem.desc, true, themeItem.sel);
+    rowBounds.push({ cursor: 5, y: row });
     row++;
   }
   // Show all available themes as a small chip row with accent-colored indicators.
@@ -181,7 +186,7 @@ export function renderSettings(screen, y, h) {
   sectionHeader(screen, 2, row, '! DANGER ZONE', leftMaxW);
   row += 2;
   const dangerItems = [
-    { label: 'Clear Token File', desc: 'Wipe saved token',  enabled: isLoggedIn, sel: appState.settingsCursor === 6 },
+    { label: 'Clear Saved Token', desc: 'Wipe token from all storage',  enabled: isLoggedIn, sel: appState.settingsCursor === 6 },
   ];
   for (const item of dangerItems) {
     if (row >= y + sectionH) break;
@@ -189,6 +194,7 @@ export function renderSettings(screen, y, h) {
       ? { bg: 'red', fg: 'white', bold: true }
       : (item.enabled ? { fg: 'red', bold: true } : { dim: true });
     renderRow(screen, row, leftMaxW, item.label, item.desc, item.enabled, item.sel, dangerStyle);
+    rowBounds.push({ cursor: 6, y: row });
     row++;
   }
 
@@ -207,21 +213,36 @@ export function renderSettings(screen, y, h) {
     row++;
   }
   if (row < y + sectionH) {
-    screen.writeStr(4, row, 'github.com/unn-Known1/github-tui', { fg: 'cyan', underline: true });
+    const url = 'https://github.com/unn-Known1/github-tui';
+    screen.writeStr(4, row, url, { fg: 'cyan', underline: true });
+    appState._settingsUrlBounds = { x: 4, y: row, w: url.length, url };
     row++;
   }
   row++;
   if (row < y + sectionH) {
     const starSel = appState.settingsCursor === 7;
-    const starLabel = '★ Star this repo';
-    const starDesc = 'Press [s] to star on GitHub — helps more features get built';
-    if (starSel) {
-      for (let xx = 2; xx < leftMaxW - 2; xx++) screen.styleBuf[row][xx] = { bg: 'yellow', fg: 'darkGray', bold: true };
+    const isStarred = !!appState._repoIsStarred;
+    const isWorking = !!appState._starringInProgress;
+    const starLabel = isWorking ? '  Starring...' : (isStarred ? '★ Starred!' : '★ Star this repo');
+    const starDesc = isWorking
+      ? 'Please wait...'
+      : (isStarred
+          ? 'You have starred github-tui — thank you!'
+          : '[s] to star · click to star · helps more features get built');
+    const starRowStyle = isStarred
+      ? { bg: 'green', fg: 'white', bold: true }
+      : (starSel ? { bg: 'yellow', fg: 'darkGray', bold: true } : { fg: 'yellow', bold: true });
+    if (starSel || isStarred) {
+      const rowBg = isStarred ? { bg: 'green', fg: 'white', bold: true } : { bg: 'yellow', fg: 'darkGray', bold: true };
+      for (let xx = 2; xx < leftMaxW - 2; xx++) screen.styleBuf[row][xx] = rowBg;
     }
-    renderRow(screen, row, leftMaxW, starLabel, starDesc, true, starSel,
-      starSel ? { bg: 'yellow', fg: 'darkGray', bold: true } : { fg: 'yellow', bold: true });
+    renderRow(screen, row, leftMaxW, starLabel, starDesc, true, starSel, starRowStyle);
+    appState._starRowBounds = { y: row, x1: 2, x2: leftMaxW - 2 };
+    rowBounds.push({ cursor: 7, y: row });
     row++;
   }
+
+  appState._settingsRowBounds = rowBounds;
 
   // ── System panel (right side or below) ──
   if (sysX > 50) {
@@ -268,11 +289,21 @@ function renderSystemLines(screen, y, W, screenW) {
 }
 
 function buildSystemLines(screenW) {
+  // Determine storage label and color
+  const backend = tokenStorageBackend || 'plaintext';
+  const storageLabel =
+    backend === 'macos-keychain'      ? 'macOS Keychain' :
+    backend === 'secret-tool'         ? 'Linux libsecret' :
+    backend === 'windows-credential'  ? 'Windows Credential Manager' :
+                                        'plaintext (fallback)';
+  const storageStyle =
+    backend === 'plaintext' ? { fg: 'yellow', bold: true } : { fg: 'green', bold: true };
+
   const lines = [
     ['App',         APP_VERSION,                       { fg: 'cyan', bold: true }],
     ['Maker',       'https://github.com/unn-Known1',   { fg: 'cyan' }],
     ['Config',      CONFIG_DIR.replace(process.env.HOME || '', '~'), null],
-    ['Token file',  TOKEN_FILE.replace(process.env.HOME || '', '~'), null],
+    ['Token store', storageLabel,                      storageStyle],
     ['Node',        process.version,                   null],
     ['Platform',    process.platform + ' ' + process.arch, null],
     ['Terminal',    (screenW || 80) + '×' + (process.stdout.rows || 24), null],
@@ -298,6 +329,34 @@ function buildSystemLines(screenW) {
     lines.push(['Status', 'OFFLINE', { fg: 'yellow', bold: true }]);
   }
   return lines;
+}
+
+export async function starRepo() {
+  if (!appState.token) {
+    showMessage('Login required to star the repo', 'warning');
+    render();
+    return;
+  }
+  if (appState._starringInProgress) return; // Prevent double-trigger
+  appState._starringInProgress = true;
+  showMessage('Checking star status...', 'info');
+  render();
+  try {
+    const already = await checkStarred(appState.token, 'unn-Known1', 'github-tui');
+    if (already) {
+      appState._repoIsStarred = true;
+      showMessage('Already starred — thank you for the support! ★', 'success');
+    } else {
+      await apiStarRepo(appState.token, 'unn-Known1', 'github-tui');
+      appState._repoIsStarred = true;
+      showMessage('★ Starred github-tui! Thank you for the support!', 'success');
+    }
+  } catch (e) {
+    showMessage('Star failed: ' + (e.message || 'unknown error'), 'error');
+  } finally {
+    appState._starringInProgress = false;
+    render();
+  }
 }
 
 export const keys = {
@@ -414,29 +473,13 @@ export function enter() {
       break;
     }
     case 6:
-      if (isLoggedIn) confirm('Wipe token file and log out?', () => {
+      if (isLoggedIn) confirm('Wipe token and log out?', () => {
         handleLogout();
-        showMessage('Token file wiped', 'success');
+        showMessage('Token wiped from all storage', 'success');
       }, 'Wipe Token');
       break;
     case 7:
       starRepo();
       break;
-  }
-}
-
-async function starRepo() {
-  if (!appState.token) { showMessage('Login required to star', 'warning'); return; }
-  try {
-    const already = await checkStarred(appState.token, 'unn-Known1', 'github-tui');
-    if (already) {
-      showMessage('Already starred! Thanks for the support ★', 'success');
-      openUrl('https://github.com/unn-Known1/github-tui');
-    } else {
-      await apiStarRepo(appState.token, 'unn-Known1', 'github-tui');
-      showMessage('★ Starred github-tui! Thanks for the support!', 'success');
-    }
-  } catch (e) {
-    showMessage(e.message || 'Star failed', 'error');
   }
 }

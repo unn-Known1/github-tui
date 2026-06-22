@@ -27,7 +27,7 @@ A fast, zero-dependency terminal user interface for GitHub — six tabs, a comma
 - 🛡️ **Offline mode** — shows cached data with `⚠ OFFLINE` banner when network is unavailable.
 - 📡 **Last-synced timestamps** — every tab shows when data was last refreshed.
 - 📦 **Cache stats** — header shows cache size in KB; Settings → System shows full breakdown.
-- 🔐 **Secure local auth** — PAT stored at `~/.github-tui/token` with `chmod 600`; masked while typing; auto-cleared on first 401.
+- 🔐 **Secure local auth** — PAT stored in the **OS keychain** (macOS Keychain, Linux libsecret, Windows Credential Manager); falls back to `~/.github-tui/token` with `chmod 600` when no keychain is available. Existing plaintext tokens are auto-migrated on first run. Masked while typing; auto-cleared on first 401.
 - 🖥️ **Diff-based renderer** — only changed cells are redrawn; resizes adaptively.
 - 📝 **Issue/PR detail popup** — `Enter` on an issue or PR opens a full detail view with rendered body, labels, comments tab, **reviews tab**, and PR files tab. Comment (`c`), react (`r`), close/reopen (`x`), merge PR (`M`) — all from the TUI.
 - 🔀 **PR diff viewer** — Files tab in the detail popup shows changed files with `+/-` stats. Select a file to view its unified diff with syntax-colored additions/deletions.
@@ -225,14 +225,16 @@ The app is split into 24 focused modules. Adding a new tab is: create one file, 
 ├── app.mjs                          # ~70-line entrypoint — lifecycle only
 ├── README.md
 ├── VISION.md                        # Roadmap + persona-driven brainstorm
-├── tests/                           # 81 tests (Node built-in test runner, zero deps)
+├── tests/                           # 90 tests (Node built-in test runner, zero deps)
 │   ├── utils.test.mjs
 │   ├── repos-logic.test.mjs
-│   └── theme.test.mjs
+│   ├── theme.test.mjs
+│   └── keychain.test.mjs
 └── tui/
     ├── screen.mjs                   # Diff-based terminal renderer + buffer swap + FORCE_COLOR
     ├── github.mjs                   # HTTPS client + ETag cache + 60+ endpoints + streaming downloader
-    ├── config.mjs                   # Constants + token I/O + JSON store helpers
+    ├── config.mjs                   # Constants + token I/O (delegates to keychain.mjs) + JSON store helpers
+    ├── keychain.mjs                 # OS keychain abstraction (macOS / Linux / Windows, zero deps)
     ├── utils.mjs                    # Pure helpers (time, format, OSC-52, openUrl, safeCwdJoin, runCommand)
     ├── state.mjs                    # Single appState + async-stale guard + message bus + collapsible state
     ├── input.mjs                    # Modal text input + cursor movement + handler registry
@@ -304,6 +306,7 @@ Every tab module exports `render(screen, y, h)`, an optional `keys` map for tab-
 ## 🧠 Design Notes
 
 - **Zero npm dependencies.** Only Node's built-in `https`, `fs`, `os`, `path`, `child_process`. Tests use Node's built-in test runner.
+- **Secure token storage.** PAT is stored in the OS keychain (macOS Keychain / Linux libsecret / Windows Credential Manager) using only built-in CLI tools — no npm packages. Falls back to `chmod 600` plaintext when no keychain is available. Existing plaintext tokens are silently migrated.
 - **Single source of truth.** `tui/state.mjs` holds one `appState` object. ESM live bindings mean every module sees updates instantly without a pub/sub layer.
 - **Pure business logic.** `repos-logic.mjs` contains testable functions decoupled from global state — `sortRepos`, `applyAllFilters`, `floatPinsToTop` accept parameters, not globals.
 - **Stale-async guard.** Every long-running fetch grabs a generation number from `startAsync()`. If the user navigates away, `isStale(gen)` returns true and results are discarded. No "snap-back" to old state.
@@ -321,7 +324,7 @@ Every tab module exports `render(screen, y, h)`, an optional `keys` map for tab-
 
 ## ⚠️ Limitations
 
-- Token is stored in plaintext on disk (locked down with file permissions; OS keychain integration is on the roadmap).
+- Token is stored in the OS keychain where available (macOS Keychain, Linux libsecret, Windows Credential Manager). On systems without a supported keychain tool, it falls back to plaintext with `chmod 600` file permissions.
 - Mostly read-only client today — actions ship in waves:
   - ✅ **shipped:** star/unstar, bookmark, pin, save file, save folder, zipball, `git clone`, `gh clone`, notification mark/unsubscribe.
   - ✅ **shipped (v0.5):** commenting on issues/PRs, reactions, close/reopen, merge PRs, PR diff viewer, review comments.
@@ -339,6 +342,10 @@ Every tab module exports `render(screen, y, h)`, an optional `keys` map for tab-
 **Shipped in v0.4:** Dashboard enhancements — contribution heatmap (15-week grid), star history sparkline (30-day trend), recent issues/PRs activity, stale repos alert (60+ days), quick actions bar.
 
 **Shipped in v0.5:** Issue/PR detail popup with rendered body, labels, comments, and file diffs. Comment from TUI, emoji reactions, close/reopen, merge PRs with confirmation. PR diff viewer with unified diff and syntax coloring. Inbox notifications open detail popup for issues/PRs.
+
+**Shipped in v0.6.0:**
+- **OS keychain integration** — PAT stored in macOS Keychain, Linux libsecret, or Windows Credential Manager using zero npm dependencies. Automatic silent migration from legacy plaintext file. Falls back to `chmod 600` plaintext when no keychain tool is available. Settings tab shows active storage backend in green (secure) or yellow (plaintext fallback).
+- **90 tests** — added `keychain.test.mjs` covering backend detection, save/load/remove contract, and round-trip behaviour.
 
 **Shipped in v0.5.8 (this release):**
 - **Graceful shutdown** — atomic signal handling, raw mode restore, unhandled rejection/crash handlers, debug logging.

@@ -2,7 +2,7 @@
 
 > *The fastest way to live in GitHub without a browser tab — discovery, triage, review, and CI in one terminal.*
 
-**Current version:** v0.5.8
+**Current version:** v0.6.0
 
 ---
 
@@ -54,6 +54,7 @@
 | **Context-aware help** — current tab shortcuts shown first | ✅ |
 | **Mouse hover on all lists** — Repos, Inbox, Actions tabs | ✅ |
 | **Pure business logic** — testable repos-logic.mjs decoupled from state | ✅ |
+| **OS keychain token storage** — macOS / Linux / Windows, zero deps, auto-migration | ✅ |
 | **Disk-backed ETag cache** — survives restarts, LRU eviction, 30 min TTL | ✅ |
 | **Offline mode** — shows cached data with banner when network unavailable | ✅ |
 | **Last-synced timestamps** — every tab shows when data was last refreshed | ✅ |

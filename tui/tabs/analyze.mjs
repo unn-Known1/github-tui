@@ -809,6 +809,7 @@ const SECURITY_SUB_LABELS = {
   dependabot: 'Dependabot', secret: 'Secret Scanning', codescan: 'Code Scanning',
   advisories: 'Advisories', branch: 'Branch Protection', deps: 'Dependencies',
 };
+const SECURITY_SUB_KEYS = ['1', '2', '3', '4', '5', '6'];
 
 export async function loadSecurity() {
   const repo = appState.repoDetails;
@@ -917,13 +918,17 @@ function renderSecurityPane(screen, y, maxH) {
   // Sub-pane tabs
   const subPanes = SECURITY_SUB_PANES;
   let px = 2;
-  for (const sp of subPanes) {
+  const subTabBounds = [];
+  for (let i = 0; i < subPanes.length; i++) {
+    const sp = subPanes[i];
     const sel = appState.securitySubPane === sp;
     const label = SECURITY_SUB_LABELS[sp];
-    const text = '[' + label.charAt(0) + '] ' + label;
+    const text = '[' + SECURITY_SUB_KEYS[i] + '] ' + label;
     screen.writeStr(px, y, text, sel ? { bg: 'cyan', fg: 'darkGray', bold: true } : { dim: true });
+    subTabBounds.push({ x1: px, x2: px + text.length, pane: sp });
     px += text.length + 2;
   }
+  appState._securitySubTabBounds = { y, bounds: subTabBounds };
   y++;
   screen.hline(y, '─', { dim: true });
   y++;

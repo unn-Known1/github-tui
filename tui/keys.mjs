@@ -352,6 +352,12 @@ export function handleKey(key) {
   // 5. Global star toggle.
   if (key === '*' && currentRepoForAction()) { toggleStar(); return; }
 
+  // 5c. Settings tab: star repo on 's'/'S'.
+  if (tabState.current === 5 && (key === 's' || key === 'S')) {
+    settings.starRepo();
+    return;
+  }
+
   // 5a. Global watch toggle.
   if (key === 'W' && currentRepoForAction()) { toggleWatch(); return; }
 

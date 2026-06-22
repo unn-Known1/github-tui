@@ -221,7 +221,7 @@ function renderHeader(W) {
   // Cache stats on the right (small, dim).
   const cacheStats = getCacheStats();
   if (cacheStats.entries > 0) {
-    const cacheTxt = '📦' + cacheStats.totalKB + 'KB';
+    const cacheTxt = '[' + cacheStats.totalKB + 'KB]';
     const cx = Math.max(2, W - cacheTxt.length - 2);
     screen.writeStr(cx, 1, cacheTxt, { dim: true });
   }
