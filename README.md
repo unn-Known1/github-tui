@@ -4,7 +4,7 @@ A fast, zero-dependency terminal user interface for GitHub — six tabs, a comma
 
 ![status](https://img.shields.io/badge/status-active-success) ![node](https://img.shields.io/badge/node-%E2%89%A518-blue) ![deps](https://img.shields.io/badge/deps-0-green) [![Socket Badge](https://badge.socket.dev/npm/package/github-tui/0.6.0)](https://badge.socket.dev/npm/package/github-tui/0.6.0) ![license](https://img.shields.io/badge/license-MIT-blue)
 
-![GitHub TUI Screenshot](Screenshot.png)
+![GitHub TUI Screenshot](https://raw.githubusercontent.com/unn-Known1/github-tui/main/Screenshot.png)
 
 ## GitHub / User
 - Remote: `https://github.com/unn-Known1/github-tui`
