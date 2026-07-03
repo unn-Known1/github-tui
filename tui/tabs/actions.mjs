@@ -77,7 +77,7 @@ export async function loadWorkflowRuns() {
   render();
   try {
     const result = await getWorkflowRuns(appState.token, owner, name, RUNS_PER_PAGE, gen.signal);
-    if (isStale(gen)) { appState.loading = false; return; }
+    if (isStale(gen)) { appState.actionsLoading = false; return; }
     const runs = result && result.workflow_runs ? result.workflow_runs : [];
     appState.actionsRuns = runs;
     appState.actionsView = 'runs';
@@ -177,12 +177,12 @@ export function goBack() {
   if (appState.actionsView === 'runs') {
     if (appState.actionsExpandedRun) {
       appState.actionsExpandedRun = null;
-      render();
     } else {
       appState.actionsView = 'repos';
-      render();
     }
+    render();
   }
+  // repos view: fall through to handleBack → setTab(0)
 }
 
 export function renderActions(screen, y, h) {
@@ -252,7 +252,7 @@ function renderRepoList(screen, y, h, W) {
 }
 
 function renderRunList(screen, y, h, W) {
-  const repos = appState.actionsRepos;
+  const repos = getFilteredRepos();
   const repo = repos[appState.actionsRepoSelected];
   if (repo) {
     screen.writeStr(2, y, 'Repo: ' + (repo.full_name || '?'), { fg: 'cyan' });
@@ -401,6 +401,8 @@ export const keys = {
   'o': () => {
     if (appState.actionsView === 'runs') openSelectedRun();
   },
+  'R': () => { if (appState.actionsView === 'runs') rerunSelected(); },
+  'x': () => { if (appState.actionsView === 'runs') cancelSelected(); },
 };
 
 export function up() {
@@ -413,14 +415,14 @@ export function up() {
     }
     render();
   } else {
-    if (appState.actionsExpandedRun) {
-      appState.actionsScroll = Math.max(0, appState.actionsScroll - 1);
-      render();
-      return;
-    }
+    const runs = appState.actionsRuns;
+    if (runs.length === 0) return;
     appState.actionsSelected = Math.max(0, appState.actionsSelected - 1);
     if (appState.actionsSelected < appState.actionsScroll) {
       appState.actionsScroll = Math.max(0, appState.actionsScroll - 1);
+    }
+    if (appState.actionsExpandedRun != null) {
+      appState.actionsExpandedRun = runs[appState.actionsSelected] && runs[appState.actionsSelected].id || null;
     }
     render();
   }
@@ -429,7 +431,7 @@ export function up() {
 export function down() {
   if (appState.actionsView === 'repos') {
     const repos = getFilteredRepos();
-    const maxVisible = Math.max(1, Math.min(10, (process.stdout.rows || 24) - 12));
+    const maxVisible = Math.max(1, (process.stdout.rows || 24) - 12);
     if (repos.length === 0) return;
     appState.actionsRepoSelected = Math.min(repos.length - 1, appState.actionsRepoSelected + 1);
     if (appState.actionsRepoSelected >= appState.actionsRepoScroll + maxVisible) {
@@ -437,17 +439,15 @@ export function down() {
     }
     render();
   } else {
-    if (appState.actionsExpandedRun) {
-      appState.actionsScroll = Math.min(appState.actionsRuns.length - 1, appState.actionsScroll + 1);
-      render();
-      return;
-    }
     const runs = appState.actionsRuns;
-    const maxVisible = Math.max(1, Math.min(10, (process.stdout.rows || 24) - 16));
+    const maxVisible = Math.max(1, (process.stdout.rows || 24) - 16);
     if (runs.length === 0) return;
     appState.actionsSelected = Math.min(runs.length - 1, appState.actionsSelected + 1);
     if (appState.actionsSelected >= appState.actionsScroll + maxVisible) {
       appState.actionsScroll++;
+    }
+    if (appState.actionsExpandedRun != null) {
+      appState.actionsExpandedRun = runs[appState.actionsSelected] && runs[appState.actionsSelected].id || null;
     }
     render();
   }
@@ -457,12 +457,12 @@ export function bottom(screen) {
   if (appState.actionsView === 'repos') {
     const repos = getFilteredRepos();
     appState.actionsRepoSelected = Math.max(0, repos.length - 1);
-    const maxVisible = Math.max(1, Math.min(10, (screen ? screen.height : process.stdout.rows || 24) - 12));
+    const maxVisible = Math.max(1, (screen ? screen.height : process.stdout.rows || 24) - 12);
     appState.actionsRepoScroll = Math.max(0, repos.length - maxVisible);
   } else {
     const runs = appState.actionsRuns;
     appState.actionsSelected = Math.max(0, runs.length - 1);
-    const maxVisible = Math.max(1, Math.min(10, (screen ? screen.height : process.stdout.rows || 24) - 16));
+    const maxVisible = Math.max(1, (screen ? screen.height : process.stdout.rows || 24) - 16);
     appState.actionsScroll = Math.max(0, runs.length - maxVisible);
   }
   render();

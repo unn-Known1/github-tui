@@ -172,7 +172,8 @@ function refreshCurrent() {
     const [o, n] = appState.repoDetails.full_name.split('/');
     analyze.loadRepoDetails(o, n);
   } else if (t === 3) {
-    actions.loadActionsRepos();
+    if (appState.actionsView === 'runs') actions.loadWorkflowRuns();
+    else actions.loadActionsRepos();
   } else if (t === 4) {
     inbox.loadNotifications();
   }
@@ -313,7 +314,12 @@ export function handleKey(key) {
     case '?': appState.showHelp = true; render(); return;
     case '\x10':
     case ':': palette.open(); return;
-    case 'r': refreshCurrent(); return;
+    case 'r': {
+      // Actions runs view: 'r' re-runs selected workflow, not a generic refresh.
+      if (tabState.current === 3 && appState.actionsView === 'runs') { actions.rerunSelected(); return; }
+      refreshCurrent();
+      return;
+    }
     case 'o': openCurrent(); return;
     case 'y': copyCurrentUrl(); return;
     case 'b': toggleBookmark(); return;
@@ -345,7 +351,12 @@ export function handleKey(key) {
       handleCollapseAll();
       return;
     }
-    case 'X': handleExpandAll(); return;
+    case 'X': {
+      // Actions runs view: 'X' cancels selected workflow, not a generic expand-all.
+      if (tabState.current === 3 && appState.actionsView === 'runs') { actions.cancelSelected(); return; }
+      handleExpandAll();
+      return;
+    }
   }
 
   // 5. Global star toggle.
@@ -359,12 +370,6 @@ export function handleKey(key) {
 
   // 5a. Global watch toggle.
   if (key === 'W' && currentRepoForAction()) { toggleWatch(); return; }
-
-  // 5b. Actions tab per-tab keys.
-  if (tabState.current === 3 && appState.actionsView === 'runs') {
-    if (key === 'r' || key === 'R') { actions.rerunSelected(); return; }
-    if (key === 'x' || key === 'X') { actions.cancelSelected(); return; }
-  }
 
   // 6. Dashboard stat-card focus — ←/→ arrows and H/L move between cards.
   if (tabState.current === 0) {
