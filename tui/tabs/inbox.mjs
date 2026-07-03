@@ -180,7 +180,7 @@ export async function openCurrent() {
       return;
     }
   }
-  const htmlUrl = notificationToHtmlUrl(url);
+  const htmlUrl = notificationToHtmlUrl(url) || (n.repository && n.repository.html_url);
   if (!htmlUrl) { showMessage('No URL available for this notification', 'warning'); return; }
   const r = await openUrl(htmlUrl);
   if (r.ok) showMessage('Opened ' + htmlUrl, 'success');
@@ -328,7 +328,8 @@ export function renderInbox(screen, y, h) {
   const infoY = headerY + 2 + Math.min(maxRows, list.length) + 1;
   if (infoY < y + h) {
     screen.writeStr(2, infoY,
-      '[/] Search   [r] Refresh   [m] Mark read   [M] Mark all   [f] Filter   [u] Unsubscribe   [Enter] Open', { dim: true });
+      '[/] Search   [r] Refresh   [m] Mark read   [M] Mark all   [f] Filter   [u] Unsubscribe   [Enter] Open' +
+      (appState.inboxHasMore ? '   [Space] More' : ''), { dim: true });
   }
 }
 
@@ -372,7 +373,7 @@ export function up() {
 export function down(screen) {
   const list = filtered();
   if (list.length === 0) return;
-  const maxVisible = Math.max(1, screen.height - 15);
+  const maxVisible = Math.max(1, (screen ? screen.height : process.stdout.rows || 24) - 15);
   if (appState.selectedNotification < appState.inboxScroll + maxVisible - 1) {
     appState.selectedNotification = Math.min(list.length - 1, appState.selectedNotification + 1);
   } else if (appState.inboxScroll + maxVisible < list.length) {

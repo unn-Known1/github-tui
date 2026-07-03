@@ -413,7 +413,7 @@ function handleSpace() {
   else if (t === 1) repos.space();
   else if (t === 2) analyze.pageDown();
   else if (t === 3) actions.enter();
-  else if (t === 4) inbox.pageDown();
+  else if (t === 4) inbox.space();
 }
 function handlePageUp() {
   const t = tabState.current;

@@ -273,7 +273,7 @@ export const appState = {
   inboxFilter: 'all',    // 'all' | 'unread' | 'mentions' | 'review'
   inboxTextFilter: '',
   inboxPage: 1,
-  inboxHasMore: true,
+  inboxHasMore: false,
 
   // ── Settings ──
   settingsCursor: 0,

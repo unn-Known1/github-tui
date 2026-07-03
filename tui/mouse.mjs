@@ -102,7 +102,19 @@ export function handleMouseEvent(event) {
       if (sy >= rowOff) {
         const listIdx = sy - rowOff;
         const absIdx = listIdx + appState.inboxScroll;
-        if (absIdx >= 0 && absIdx < appState.notifications.length && absIdx !== appState.selectedNotification) {
+        const filteredLen = appState.notifications.filter(n => {
+          if (appState.inboxFilter === 'unread') return n.unread;
+          if (appState.inboxFilter === 'mentions') return n.reason === 'mention';
+          if (appState.inboxFilter === 'review') return n.reason === 'review_requested';
+          if (appState.inboxTextFilter) {
+            const q = appState.inboxTextFilter.toLowerCase();
+            const title = (n.subject && n.subject.title || '').toLowerCase();
+            const repo = (n.repository && n.repository.full_name || '').toLowerCase();
+            return title.includes(q) || repo.includes(q);
+          }
+          return true;
+        }).length;
+        if (absIdx >= 0 && absIdx < filteredLen && absIdx !== appState.selectedNotification) {
           appState.selectedNotification = absIdx;
           render();
         }
@@ -658,13 +670,26 @@ function dispatchInboxClick(sy) {
     if (appState.inboxFilter === 'unread') return n.unread;
     if (appState.inboxFilter === 'mentions') return n.reason === 'mention';
     if (appState.inboxFilter === 'review') return n.reason === 'review_requested';
+    if (appState.inboxTextFilter) {
+      const q = appState.inboxTextFilter.toLowerCase();
+      const title = (n.subject && n.subject.title || '').toLowerCase();
+      const repo = (n.repository && n.repository.full_name || '').toLowerCase();
+      return title.includes(q) || repo.includes(q);
+    }
     return true;
   }).length;
+  const screen = getScreen();
+  const maxVisible = screen ? Math.max(1, screen.height - 15) : 20;
   const scroll = appState.inboxScroll;
   const itemIdx = sy - HEADER_HEIGHT - 2 + scroll;
   if (itemIdx >= 0 && itemIdx < filteredLen) {
-    appState.inboxScroll = Math.max(0, itemIdx - 5);
     appState.selectedNotification = itemIdx;
+    // Only scroll if the item is outside the current viewport.
+    if (itemIdx < scroll) {
+      appState.inboxScroll = itemIdx;
+    } else if (itemIdx >= scroll + maxVisible) {
+      appState.inboxScroll = itemIdx - maxVisible + 1;
+    }
     render();
   }
 }
@@ -740,6 +765,12 @@ function scrollDown(sx, sy) {
       if (appState.inboxFilter === 'unread') return n.unread;
       if (appState.inboxFilter === 'mentions') return n.reason === 'mention';
       if (appState.inboxFilter === 'review') return n.reason === 'review_requested';
+      if (appState.inboxTextFilter) {
+        const q = appState.inboxTextFilter.toLowerCase();
+        const title = (n.subject && n.subject.title || '').toLowerCase();
+        const repo = (n.repository && n.repository.full_name || '').toLowerCase();
+        return title.includes(q) || repo.includes(q);
+      }
       return true;
     }).length;
     if (appState.inboxScroll + maxV < inboxCount) { appState.inboxScroll++; render(); }

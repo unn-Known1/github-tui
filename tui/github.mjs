@@ -408,7 +408,7 @@ export const markAllNotificationsRead = (token) =>
   request('/notifications', { token, method: 'PUT', body: { read: true } });
 export const unsubscribeNotification = (token, threadId) =>
   request('/notifications/threads/' + threadId + '/subscription', {
-    token, method: 'PUT', body: { ignored: true },
+    token, method: 'DELETE',
   });
 
 // ─── Activity, trending, starred ────────────────────────────────────
