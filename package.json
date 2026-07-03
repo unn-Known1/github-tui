@@ -39,6 +39,7 @@
     "app.mjs",
     "tui/",
     "README.md",
+    "CHANGELOG.md",
     "LICENSE"
   ]
 }
