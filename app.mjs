@@ -47,24 +47,41 @@ const TERM_IS_SSH = !!(process.env.SSH_CLIENT || process.env.SSH_TTY);
 const TERM_IS_SCREEN = !!process.env.STY;
 const TERM_IS_WSL = !!process.env.WSLENV;
 
+import { loadDashboardWidgets } from './tui/tabs/dashboard.mjs';
+import { loadNotifications } from './tui/tabs/inbox.mjs';
+import { loadActionsRepos, loadWorkflowRuns } from './tui/tabs/actions.mjs';
+
 function startAutoRefresh() {
   if (autoRefreshInterval) clearInterval(autoRefreshInterval);
   if (!appState.autoRefreshEnabled) return;
   autoRefreshInterval = setInterval(async () => {
     if (!appState.token || appState.loading) return;
-    const { tabState } = await import('./tui/state.mjs');
     const t = tabState.current;
     try {
       if (t === 0) {
-        const { loadDashboardWidgets } = await import('./tui/tabs/dashboard.mjs');
+        // Always refresh dashboard widgets, even if user has dived into
+        // the stat-card focus sub-view — that's part of the dashboard.
         await loadDashboardWidgets(true);
-      } else if (t === 4) {
-        const { loadNotifications } = await import('./tui/tabs/inbox.mjs');
-        await loadNotifications();
+      } else if (t === 1) {
+        // Refresh the repo list so pushes/updates land idle. Skip when the
+        // user is mid-paginate (reposHasMore already shows them the hint).
+        await loadUserData();
+      } else if (t === 2) {
+        // Analyze tab is mostly user-driven (search/drill-in). Skip refresh
+        // to avoid clobbering in-progress loads. Users can press 'r'.
       } else if (t === 3) {
-        const actions = await import('./tui/tabs/actions.mjs');
-        if (appState.actionsView === 'runs') await actions.loadWorkflowRuns();
+        // Actions tab: always refresh regardless of actionsView sub-state.
+        // Previously we only refreshed when sub-view was 'runs', which meant
+        // a user parked on 'repos' would never see new jobs land.
+        if (appState.actionsView === 'runs' && appState.actionsRepos.length > 0) {
+          await loadWorkflowRuns();
+        } else {
+          loadActionsRepos();
+        }
+      } else if (t === 4) {
+        await loadNotifications();
       }
+      // Tab 5 (Settings): nothing to auto-refresh.
     } catch (e) { debugAsync('auto-refresh error:', e.message); }
   }, appState.autoRefreshIntervalMs);
 }

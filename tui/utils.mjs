@@ -191,3 +191,11 @@ export function runCommand(cmd, args, opts = {}) {
 export function ghCloneUrl(owner, repo) {
   return 'https://github.com/' + owner + '/' + repo + '.git';
 }
+
+export function sectionHeader(screen, x, y, text, hint) {
+  screen.writeStr(x, y, text, { fg: 'cyan', bold: true });
+  if (hint) {
+    const hx = screen.width - hint.length - 2;
+    if (hx > x + text.length + 4) screen.writeStr(hx, y, hint, { dim: true });
+  }
+}
