@@ -68,7 +68,7 @@ async function loadDetail() {
     } else {
       data = await getIssue(appState.token, owner, repo, number, gen.signal);
     }
-    if (isStale(gen, 'detail')) { appState.loading = false; return; }
+    if (isStale(gen, 'detail')) { appState.loading = false; appState.detailLoading = false; return; }
     appState.detailData = data;
 
     const safe = (p) => p.catch(() => null);
@@ -77,7 +77,7 @@ async function loadDetail() {
       type === 'pull_request' ? safe(getPullRequestReviews(appState.token, owner, repo, number, gen.signal)) : Promise.resolve([]),
       type === 'pull_request' ? safe(getPullRequestFiles(appState.token, owner, repo, number, 1, 30, gen.signal)) : Promise.resolve([]),
     ]);
-    if (isStale(gen, 'detail')) { appState.loading = false; return; }
+    if (isStale(gen, 'detail')) { appState.loading = false; appState.detailLoading = false; return; }
     appState.detailComments = Array.isArray(comments) ? comments : [];
     appState.detailReviews = Array.isArray(reviews) ? reviews : [];
     appState.detailFiles = Array.isArray(files) ? files : [];
@@ -85,6 +85,7 @@ async function loadDetail() {
     showMessage('Loaded #' + number, 'success');
   } catch (e) {
     if (!isStale(gen, 'detail')) showMessage(e.message || 'Failed to load detail', 'error');
+    appState.detailLoading = false;
     appState.showDetail = false;
   }
   if (!isStale(gen, 'detail')) render();
@@ -172,7 +173,7 @@ export function closeOrReopen() {
 export function mergePR() {
   if (!appState.token || !appState.detailData || appState.detailType !== 'pull_request') return;
   const pr = appState.detailData;
-  if (!pr.mergeable) {
+  if (pr.mergeable === false) {
     showMessage('PR is not mergeable', 'warning');
     return;
   }

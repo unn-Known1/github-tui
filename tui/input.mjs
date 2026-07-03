@@ -61,7 +61,7 @@ export function handleInputKey(key) {
   // Backspace — delete char before cursor.
   if (key === '\x7f' || key === '\b') {
     const buf = Array.from(appState.inputBuffer);
-    const cur = appState.inputCursor || buf.length;
+    const cur = appState.inputCursor != null ? appState.inputCursor : buf.length;
     if (cur > 0) {
       buf.splice(cur - 1, 1);
       appState.inputBuffer = buf.join('');
@@ -99,7 +99,7 @@ export function handleInputKey(key) {
   // Ctrl-W — delete word before cursor.
   if (key === '\x17') {
     const buf = Array.from(appState.inputBuffer);
-    const cur = appState.inputCursor || buf.length;
+    const cur = appState.inputCursor != null ? appState.inputCursor : buf.length;
     if (cur === 0) { render(); return true; }
     let i = cur - 1;
     while (i > 0 && buf[i - 1] === ' ') i--;
@@ -168,10 +168,10 @@ export function handleInputKey(key) {
   // Printable ASCII + above. We accept multi-byte UTF-8 too.
   if (key.length >= 1 && (key.charCodeAt(0) >= 32 || key.charCodeAt(0) > 127)) {
     const buf = Array.from(appState.inputBuffer);
-    const cur = appState.inputCursor || buf.length;
-    buf.splice(cur, 0, key);
+    const cur = appState.inputCursor != null ? appState.inputCursor : buf.length;
+    buf.splice(cur, 0, ...Array.from(key));
     appState.inputBuffer = buf.join('');
-    appState.inputCursor = cur + key.length;
+    appState.inputCursor = cur + Array.from(key).length;
     render();
     return true;
   }

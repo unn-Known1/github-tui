@@ -181,6 +181,7 @@ export async function openCurrent() {
     }
   }
   const htmlUrl = notificationToHtmlUrl(url);
+  if (!htmlUrl) { showMessage('No URL available for this notification', 'warning'); return; }
   const r = await openUrl(htmlUrl);
   if (r.ok) showMessage('Opened ' + htmlUrl, 'success');
   else showMessage(r.error || 'Open failed', 'error');

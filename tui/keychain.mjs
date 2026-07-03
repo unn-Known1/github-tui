@@ -175,12 +175,13 @@ function _saveWindows(token) {
 function _loadWindows() {
   // cmdkey cannot print the password; PowerShell's CredentialManager can
   // We use [System.Net.NetworkCredential] which is always available
+  const safeService = String(SERVICE).replace(/'/g, "''");
   const ps =
-    `$c = Get-StoredCredential -Target '${SERVICE}'; ` +
+    `$c = Get-StoredCredential -Target '${safeService}'; ` +
     `if ($c) { $c.GetNetworkCredential().Password }`;
   try {
     const out = execSync(
-      'powershell -NoProfile -NonInteractive -Command "' + ps + '"',
+      'powershell -NoProfile -NonInteractive -Command "' + ps.replace(/"/g, '\\"') + '"',
       { stdio: ['pipe', 'pipe', 'pipe'], encoding: 'utf-8', timeout: 5000 }
     ).trim();
     return out || null;
@@ -222,10 +223,10 @@ function _q(str) {
 
 /**
  * Escape a string for Windows cmd.exe — wrap in double quotes,
- * escape embedded double quotes with backslash.
+ * escape cmd.exe metacharacters with ^, and escape embedded double quotes.
  */
 function _qWin(str) {
-  return '"' + String(str).replace(/"/g, '\\"') + '"';
+  return '"' + String(str).replace(/([&|<>^%])/g, '^$1').replace(/"/g, '\\"') + '"';
 }
 
 /** Write debug messages when DEBUG env var is set. */

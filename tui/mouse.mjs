@@ -80,7 +80,7 @@ export function handleMouseEvent(event) {
 
     // Repos tab list.
     if (t === 1) {
-      const rowOff = HEADER_HEIGHT + 8;
+      const rowOff = appState.reposView === 'starred' ? HEADER_HEIGHT + 5 : HEADER_HEIGHT + 8;
       if (sy >= rowOff) {
         const listIdx = sy - rowOff;
         const scroll = appState.reposView === 'starred' ? appState.starredScroll : appState.repoScroll;
@@ -720,7 +720,8 @@ function scrollDown(sx, sy) {
     if (appState.reposView === 'starred') {
       if (appState.starredScroll + maxV < appState.starred.length) { appState.starredScroll++; render(); }
     } else {
-      if (appState.repoScroll + maxV < appState.repos.length) { appState.repoScroll++; render(); }
+      const repoCount = appState._filteredReposCount || appState.repos.length;
+      if (appState.repoScroll + maxV < repoCount) { appState.repoScroll++; render(); }
     }
   } else if (t === 2) {
     appState.detailsScroll++;
@@ -735,7 +736,13 @@ function scrollDown(sx, sy) {
     }
   } else if (t === 4) {
     const maxV = Math.max(1, screen.height - 12);
-    if (appState.inboxScroll + maxV < appState.notifications.length) { appState.inboxScroll++; render(); }
+    const inboxCount = appState.notifications.filter(n => {
+      if (appState.inboxFilter === 'unread') return n.unread;
+      if (appState.inboxFilter === 'mentions') return n.reason === 'mention';
+      if (appState.inboxFilter === 'review') return n.reason === 'review_requested';
+      return true;
+    }).length;
+    if (appState.inboxScroll + maxV < inboxCount) { appState.inboxScroll++; render(); }
   }
 }
 

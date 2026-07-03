@@ -77,7 +77,13 @@ function copyCurrentUrl() {
   else showMessage('Clipboard copy failed', 'error');
 }
 
+let _starToggling = false;
 async function toggleStar() {
+  if (_starToggling) return;
+  _starToggling = true;
+  try { await _toggleStarInner(); } finally { _starToggling = false; }
+}
+async function _toggleStarInner() {
   const r = currentRepoForAction();
   if (!r || !appState.token) { showMessage('Login + select a repo first', 'warning'); return; }
   const fullName = r.full_name;
@@ -311,12 +317,17 @@ export function handleKey(key) {
     case 'o': openCurrent(); return;
     case 'y': copyCurrentUrl(); return;
     case 'b': toggleBookmark(); return;
-    case 'B': bookmarks.openBookmarks(); return;
+    case 'B': {
+      // In files pane, B opens branch picker (falls through to per-tab keys below).
+      if (tabState.current === 2 && appState.analyzeView === 'details' && appState.detailsPane === 'files') break;
+      bookmarks.openBookmarks();
+      return;
+    }
     case 'w': onboarding.startWelcome(); return;
     case '\r': case '\n': handleEnter(); return;
     case '\x1b[A': case 'k': handleUp(); return;
     case '\x1b[B': case 'j': handleDown(); return;
-    case '\x1b[D': case 'h': case '\x7f': handleBack(); return;
+    case 'h': case '\x7f': handleBack(); return;
     case ' ': handleSpace(); return;
     case '\x1b[5~': handlePageUp(); return;  // PageUp
     case '\x1b[6~': handlePageDown(); return;  // PageDown
@@ -335,12 +346,6 @@ export function handleKey(key) {
       return;
     }
     case 'X': handleExpandAll(); return;
-    case 'B': {
-      // In files pane, B opens branch picker (not bookmarks overlay).
-      if (tabState.current === 2 && appState.analyzeView === 'details' && appState.detailsPane === 'files') break;
-      bookmarks.openBookmarks();
-      return;
-    }
   }
 
   // 5. Global star toggle.
@@ -371,6 +376,12 @@ export function handleKey(key) {
       dashboard.unfocusCards();
       return;
     }
+  }
+
+  // Left arrow on non-dashboard tabs acts as back (same as 'h').
+  if (key === '\x1b[D' && tabState.current !== 0) {
+    handleBack();
+    return;
   }
 
   // l (lowercase vi "right/forward") — acts as Enter on non-dashboard tabs

@@ -430,7 +430,10 @@ export const getStarredRepos = (token, page, perPage, signal) =>
   });
 export const isStarred = async (token, owner, repo) => {
   try { await request('/user/starred/' + owner + '/' + repo, { token }); return true; }
-  catch (e) { return false; }
+  catch (e) {
+    if (e && e.status === 404) return false;
+    throw e;
+  }
 };
 export const starRepo = (token, owner, repo) =>
   request('/user/starred/' + owner + '/' + repo, { token, method: 'PUT' });
@@ -465,16 +468,16 @@ export const getCommitActivity = (token, owner, repo, signal) =>
 // ─── Actions / Workflows  (CI cockpit foundation) ──────────────────
 export const getWorkflows = (token, owner, repo) =>
   request('/repos/' + owner + '/' + repo + '/actions/workflows', { token });
-export const getWorkflowRuns = (token, owner, repo, perPage) =>
-  request('/repos/' + owner + '/' + repo + '/actions/runs?per_page=' + (perPage||20), { token });
+export const getWorkflowRuns = (token, owner, repo, perPage, signal) =>
+  request('/repos/' + owner + '/' + repo + '/actions/runs?per_page=' + (perPage||20), { token, signal });
 export const rerunWorkflow = (token, owner, repo, runId) =>
   request('/repos/' + owner + '/' + repo + '/actions/runs/' + runId + '/rerun',
     { token, method: 'POST' });
 export const cancelWorkflowRun = (token, owner, repo, runId) =>
   request('/repos/' + owner + '/' + repo + '/actions/runs/' + runId + '/cancel',
     { token, method: 'POST' });
-export const getWorkflowJobs = (token, owner, repo, runId) =>
-  request('/repos/' + owner + '/' + repo + '/actions/runs/' + runId + '/jobs', { token });
+export const getWorkflowJobs = (token, owner, repo, runId, signal) =>
+  request('/repos/' + owner + '/' + repo + '/actions/runs/' + runId + '/jobs', { token, signal });
 
 // ─── Branches, zipball, per-file commits, raw bytes ──────────────────
 export const getBranches = (token, owner, repo, perPage) =>
@@ -501,11 +504,14 @@ export function downloadToFile(url, destPath, token) {
   return new Promise((resolve, reject) => {
     const out = createWriteStream(destPath);
     let bytes = 0;
-    let cleaned = false;
+    let settled = false;
     function cleanup() {
-      if (cleaned) return;
-      cleaned = true;
       try { out.destroy(); } catch {}
+    }
+    function settle(fn) {
+      if (settled) return;
+      settled = true;
+      fn();
     }
     function get(u, redirectsLeft) {
       const u2 = new URL(u);
@@ -517,21 +523,21 @@ export function downloadToFile(url, destPath, token) {
         headers,
       }, (res) => {
         if (res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) {
-          if (redirectsLeft <= 0) { cleanup(); return reject(new Error('Too many redirects')); }
+          if (redirectsLeft <= 0) { cleanup(); return settle(() => reject(new Error('Too many redirects'))); }
           res.resume();
           return get(res.headers.location, redirectsLeft - 1);
         }
         if (res.statusCode !== 200) {
           res.resume();
           cleanup();
-          return reject(new Error('Download HTTP ' + res.statusCode));
+          return settle(() => reject(new Error('Download HTTP ' + res.statusCode)));
         }
         res.on('data', (chunk) => { bytes += chunk.length; });
         res.pipe(out);
-        out.on('finish', () => out.close(() => resolve({ bytes, path: destPath })));
-        out.on('error', (e) => { cleanup(); reject(e); });
+        out.on('finish', () => out.close(() => settle(() => resolve({ bytes, path: destPath }))));
+        out.on('error', (e) => { cleanup(); settle(() => reject(e)); });
       });
-      req.on('error', (e) => { cleanup(); reject(e); });
+      req.on('error', (e) => { cleanup(); settle(() => reject(e)); });
     }
     get(url, 5);
   });

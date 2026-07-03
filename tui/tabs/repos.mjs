@@ -143,7 +143,7 @@ async function loadAllReposBackground(gen) {
     capped = true;
     if (!isStale(gen)) showMessage(
       'Loaded first ' + appState.repos.length + ' repos (' + MAX_PAGES + ' pages). ' +
-      'Press [L] or run \":repos loadMore\" in palette to fetch more.',
+      'Press [l] or run \":repos loadMore\" in palette to fetch more.',
       'info', 6000
     );
   }
@@ -275,6 +275,7 @@ export function renderRepos(screen, y, h) {
   let repos = sortRepos(appState.repos, appState.repoSort);
   repos = applyAllFilters(repos);
   repos = floatPinsToTop(repos);
+  appState._filteredReposCount = repos.length;
 
   // Aggregate stats.
   const totalStars = appState.repos.reduce((a, r) => a + (r.stargazers_count || 0), 0);
@@ -405,12 +406,12 @@ export function renderRepos(screen, y, h) {
 
   const footerY = curY + 1;
   if (footerY < y + h) {
-    const range = (start + 1) + '-' + Math.min(start + maxRows, repos.length) +
+    const range = (start + 1) + '-' + Math.min(start + drawn, repos.length) +
       ' of ' + repos.length;
     const more = appState.reposHasMore
       ? '   [Space] Load more'
       : (appState._moreReposAvailable
-          ? '   [L] More repos available'
+          ? '   [l] More repos available'
           : '');
     screen.writeStr(2, footerY, range + more, { dim: true });
   }
@@ -539,7 +540,8 @@ export async function loadMoreStarred() {
     const more = await getStarredRepos(appState.token, page, 100);
     if (isStale(gen, 'repos')) { appState.loading = false; return; }
     if (Array.isArray(more) && more.length > 0) {
-      appState.starred = [...appState.starred, ...more];
+      const mapped = more.map(s => ({ ...(s.repo || s), starred_at: s.starred_at || s.created_at }));
+      appState.starred = [...appState.starred, ...mapped];
       appState.starredPage = page;
       appState.starredHasMore = more.length >= 100;
       showMessage('Loaded ' + appState.starred.length + ' starred repos', 'success');
@@ -563,7 +565,7 @@ export function pageUp() {
     getStarredRepos(appState.token, page, 100).then(more => {
       if (isStale(gen, 'repos')) { appState.loading = false; return; }
       if (Array.isArray(more)) {
-        appState.starred = more;
+        appState.starred = more.map(s => ({ ...(s.repo || s), starred_at: s.starred_at || s.created_at }));
         appState.starredPage = page;
         appState.starredHasMore = true;
         appState.starredSelected = 0;
@@ -588,7 +590,7 @@ export function pageDown() {
     getStarredRepos(appState.token, page, 100).then(more => {
       if (isStale(gen, 'repos')) { appState.loading = false; return; }
       if (Array.isArray(more) && more.length > 0) {
-        appState.starred = more;
+        appState.starred = more.map(s => ({ ...(s.repo || s), starred_at: s.starred_at || s.created_at }));
         appState.starredPage = page;
         appState.starredHasMore = more.length >= 100;
         appState.starredSelected = 0;
@@ -609,8 +611,8 @@ export function pageDown() {
 export const keys = {
   '/': () => { if (appState.reposView === 'own') startInput('Filter: ', 'filter'); },
   'c': clearAllFilters,
-  'L': () => {
-    // Manual load-more if the background cap kicked in.
+  'l': () => {
+    // Manual load-more if the background cap kicked in (lowercase l).
     if (appState._moreReposAvailable && appState.reposView === 'own') {
       appState._moreReposAvailable = false;
       const gen = startAsync('repos-more');

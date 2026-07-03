@@ -10,7 +10,7 @@
 // Supported placeholders: {owner}, {repo}, {number}, {branch}
 
 import { KEYBINDINGS_FILE, readJson } from './config.mjs';
-import { appState, showMessage, render } from './state.mjs';
+import { appState, tabState, showMessage, render } from './state.mjs';
 import { spawn } from 'child_process';
 
 let _bindings = null;
@@ -67,7 +67,7 @@ function contextMatches(binding) {
   if (ctx === 'detail') return !!appState.showDetail;
   if (ctx === 'repo') return !!appState.repoDetails || !!appState.localRepo;
   if (ctx === 'dashboard') {
-    return !appState.showDetail;
+    return tabState.current === 0 && !appState.showDetail;
   }
   return true;
 }
