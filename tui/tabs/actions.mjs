@@ -66,7 +66,7 @@ export async function loadWorkflowRuns() {
   const repo = repos[idx];
   if (!repo) return;
   const [owner, name] = repo.full_name.split('/');
-  const gen = startAsync();
+  const gen = startAsync('actions-runs');
   appState.actionsLoading = true;
   appState.actionsRuns = [];
   appState.actionsSelected = 0;
@@ -76,7 +76,7 @@ export async function loadWorkflowRuns() {
   appState.actionsJobSteps = {};
   render();
   try {
-    const result = await getWorkflowRuns(appState.token, owner, name, RUNS_PER_PAGE);
+    const result = await getWorkflowRuns(appState.token, owner, name, RUNS_PER_PAGE, gen.signal);
     if (isStale(gen)) { appState.loading = false; return; }
     const runs = result && result.workflow_runs ? result.workflow_runs : [];
     appState.actionsRuns = runs;
@@ -107,11 +107,11 @@ export async function toggleRunDetail() {
     const repo = repos[appState.actionsRepoSelected];
     if (!repo) return;
     const [owner, name] = repo.full_name.split('/');
-    const gen = startAsync();
+    const gen = startAsync('actions-jobs');
     appState.actionsLoading = true;
     render();
     try {
-      const result = await getWorkflowJobs(appState.token, owner, name, runId);
+      const result = await getWorkflowJobs(appState.token, owner, name, runId, gen.signal);
       if (isStale(gen)) { appState.actionsLoading = false; return; }
       const jobs = result && result.jobs ? result.jobs : [];
       appState.actionsJobs[runId] = jobs;

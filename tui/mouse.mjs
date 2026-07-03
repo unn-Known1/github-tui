@@ -4,6 +4,12 @@ import { appState, tabState, setTab, render, TABS, toggleCollapse, showMessage }
 import { getScreen, HEADER_HEIGHT } from './render.mjs';
 import { setTheme } from './theme.mjs';
 import { startInput } from './input.mjs';
+import { openUrl } from './utils.mjs';
+import * as analyze from './tabs/analyze.mjs';
+import * as detail from './tabs/detail.mjs';
+import * as repos from './tabs/repos.mjs';
+import * as dashboard from './tabs/dashboard.mjs';
+import * as settings from './tabs/settings.mjs';
 
 export function enableMouse() {
   process.stdout.write('\x1b[?1000h');
@@ -158,7 +164,7 @@ function handleClick(col, row) {
     const by = 2;
     const inside = sx >= bx && sx < bx + boxW && sy >= by && sy < by + boxH;
     if (!inside) {
-      import('./tabs/detail.mjs').then(m => m.closeDetail()).catch(() => {});
+      detail.closeDetail();
       return;
     }
     // Click inside — handle interactive elements, then swallow.
@@ -177,12 +183,10 @@ function handleClick(col, row) {
         for (let i = actions.length - 1; i >= 0; i--) {
           ax -= actions[i].length + 1;
           if (sx >= ax && sx < ax + actions[i].length) {
-            import('./tabs/detail.mjs').then(m => {
-              if (actions[i] === 'c Comment') m.openCommentInput();
-              else if (actions[i] === 'r React') m.toggleReactionPicker();
-              else if (actions[i] === 'M Merge') m.mergePR();
-              else m.closeOrReopen();
-            }).catch(() => {});
+            if (actions[i] === 'c Comment') detail.openCommentInput();
+            else if (actions[i] === 'r React') detail.toggleReactionPicker();
+            else if (actions[i] === 'M Merge') detail.mergePR();
+            else detail.closeOrReopen();
             return;
           }
         }
@@ -248,7 +252,7 @@ function handleClick(col, row) {
           appState.securitySubPane = b.pane;
           appState.securityAlertCursor = 0;
           appState.securityAlertScroll = 0;
-          import('./tabs/analyze.mjs').then(a => a.loadSecurity());
+          analyze.loadSecurity();
           render();
           return;
         }
@@ -325,7 +329,7 @@ function handleDblClick(sx, sy) {
         if (r && r.full_name) {
           const [owner, name] = r.full_name.split('/');
           setTab(2);
-          import('./tabs/analyze.mjs').then(a => a.loadRepoDetails(owner, name));
+          analyze.loadRepoDetails(owner, name);
           return true;
         }
       }
@@ -388,20 +392,24 @@ function handlePaneTabClick(sx) {
 
 function loadPane(paneId) {
   if (paneId === 'readme') {
-    import('./tabs/analyze.mjs').then(a => a.viewReadme()).catch(() => {});
+    analyze.viewReadme();
   } else if (paneId === 'files') {
     import('./tabs/files.mjs').then(f => f.openFilesPane()).catch(() => {});
   } else if (paneId === 'packages') {
     appState.selectedAsset = 0;
-    import('./tabs/analyze.mjs').then(a => a.loadReleaseAssets()).catch(() => {});
-  } else if (paneId === 'traffic' || paneId === 'milestones' || paneId === 'labels' || paneId === 'checks' || paneId === 'security') {
-    import('./tabs/analyze.mjs').then(a => {
-      if (paneId === 'traffic') a.loadTraffic();
-      else if (paneId === 'milestones') a.loadMilestones();
-      else if (paneId === 'labels') a.loadLabels();
-      else if (paneId === 'checks') a.loadChecks();
-      else if (paneId === 'security') a.loadSecurity();
-    }).catch(() => {});
+    analyze.loadReleaseAssets();
+  } else if (paneId === 'traffic') {
+    analyze.loadTraffic();
+  } else if (paneId === 'milestones') {
+    analyze.loadMilestones();
+  } else if (paneId === 'labels') {
+    analyze.loadLabels();
+  } else if (paneId === 'checks') {
+    analyze.loadChecks();
+  } else if (paneId === 'security') {
+    analyze.loadSecurity();
+  } else {
+    // 'overview', 'issues', 'prs' — pure state switches, no fetch needed.
   }
 }
 
@@ -492,14 +500,14 @@ function dispatchDashboardClick(sx, sy) {
     if (th && th.y > 0 && sy > th.y) {
       const listIdx = sy - th.y - 1;
       if (listIdx >= 0 && listIdx < 5) {
-        const repos = [...appState.repos]
+        const reposList = [...appState.repos]
           .sort((a, b) => (b.stargazers_count || 0) - (a.stargazers_count || 0));
-        if (listIdx < repos.length) {
-          const r = repos[listIdx];
+        if (listIdx < reposList.length) {
+          const r = reposList[listIdx];
           if (r && r.full_name) {
             const [owner, name] = r.full_name.split('/');
             setTab(2);
-            import('./tabs/analyze.mjs').then(a => a.loadRepoDetails(owner, name));
+            analyze.loadRepoDetails(owner, name);
           }
         }
         return;
@@ -513,50 +521,48 @@ function dispatchDashboardClick(sx, sy) {
 // ── Repos tab ─────────────────────────────────────────────────
 
 function dispatchReposClick(sx, sy) {
-  import('./tabs/repos.mjs').then(repos => {
-    if (repos.tryDismissChipAt(sx, sy)) { render(); return; }
+  if (repos.tryDismissChipAt(sx, sy)) { render(); return; }
 
-    if (appState.reposView === 'starred') {
-      const list = appState.starred;
-      const scroll = appState.starredScroll;
-      const rowOff = HEADER_HEIGHT + 5;
-      const itemIdx = sy - rowOff + scroll;
-      if (itemIdx >= 0 && itemIdx < list.length) {
-        appState.starredScroll = Math.max(0, itemIdx - 5);
-        appState.starredSelected = itemIdx;
-        render();
-      }
+  if (appState.reposView === 'starred') {
+    const list = appState.starred;
+    const scroll = appState.starredScroll;
+    const rowOff = HEADER_HEIGHT + 5;
+    const itemIdx = sy - rowOff + scroll;
+    if (itemIdx >= 0 && itemIdx < list.length) {
+      appState.starredScroll = Math.max(0, itemIdx - 5);
+      appState.starredSelected = itemIdx;
+      render();
+    }
+    return;
+  }
+
+  // Own repos: need to account for PINNED headers and comfortable density.
+  const reposList = repos.floatPinsToTop(repos.applyAllFilters(repos.sortRepos(appState.repos, appState.repoSort)));
+  const scroll = appState.repoScroll;
+  const compact = appState.repoDensity === 'compact';
+  const rowH = compact ? 1 : 2;
+  const rowOff = HEADER_HEIGHT + 8;
+
+  // Determine which items have a "★ PINNED" header before them.
+  const isPinnedArr = new Array(reposList.length).fill(false);
+  const isSectionStart = new Array(reposList.length).fill(false);
+  for (let i = 0; i < reposList.length; i++) {
+    isPinnedArr[i] = repos.isPinnedLocal(reposList[i].full_name);
+    if (isPinnedArr[i] && (i === 0 || !isPinnedArr[i - 1])) isSectionStart[i] = true;
+  }
+
+  // Simulate the render loop to find which item was clicked.
+  let curY = rowOff;
+  for (let i = scroll; i < reposList.length; i++) {
+    if (isSectionStart[i]) curY++;
+    if (sy >= curY && sy < curY + rowH) {
+      appState.repoScroll = Math.max(0, i - 5);
+      appState.repoSelected = i;
+      render();
       return;
     }
-
-    // Own repos: need to account for PINNED headers and comfortable density.
-    const reposList = repos.floatPinsToTop(repos.applyAllFilters(repos.sortRepos(appState.repos, appState.repoSort)));
-    const scroll = appState.repoScroll;
-    const compact = appState.repoDensity === 'compact';
-    const rowH = compact ? 1 : 2;
-    const rowOff = HEADER_HEIGHT + 8;
-
-    // Determine which items have a "★ PINNED" header before them.
-    const isPinnedArr = new Array(reposList.length).fill(false);
-    const isSectionStart = new Array(reposList.length).fill(false);
-    for (let i = 0; i < reposList.length; i++) {
-      isPinnedArr[i] = repos.isPinnedLocal(reposList[i].full_name);
-      if (isPinnedArr[i] && (i === 0 || !isPinnedArr[i - 1])) isSectionStart[i] = true;
-    }
-
-    // Simulate the render loop to find which item was clicked.
-    let curY = rowOff;
-    for (let i = scroll; i < reposList.length; i++) {
-      if (isSectionStart[i]) curY++;
-      if (sy >= curY && sy < curY + rowH) {
-        appState.repoScroll = Math.max(0, i - 5);
-        appState.repoSelected = i;
-        render();
-        return;
-      }
-      curY += rowH;
-    }
-  }).catch(() => {});
+    curY += rowH;
+  }
 }
 
 // ── Analyze tab ───────────────────────────────────────────────
@@ -583,7 +589,7 @@ function dispatchAnalyzeClick(sx, sy) {
       const r = appState.recentRepos[idx];
       if (r && r.full_name) {
         const [owner, name] = r.full_name.split('/');
-        import('./tabs/analyze.mjs').then(a => a.loadRepoDetails(owner, name));
+        analyze.loadRepoDetails(owner, name);
       }
       return;
     }
@@ -594,58 +600,54 @@ function dispatchAnalyzeClick(sx, sy) {
   if (appState.detailsPane === 'overview') {
     const assetBounds = appState._overviewAssetBounds;
     if (assetBounds) {
-      import('./tabs/analyze.mjs').then(mod => {
-        for (const b of assetBounds) {
-          if (sy === b.y && sx >= b.x) {
-            const asset = appState.repoReleaseAssets[b.idx];
-            if (asset && mod && mod.downloadAsset) {
-              appState.selectedAsset = b.idx;
-              mod.downloadAsset(asset);
-            }
-            return;
+      for (const b of assetBounds) {
+        if (sy === b.y && sx >= b.x) {
+          const asset = appState.repoReleaseAssets[b.idx];
+          if (asset) {
+            appState.selectedAsset = b.idx;
+            if (analyze.downloadAsset) analyze.downloadAsset(asset);
           }
+          return;
         }
-      }).catch(() => {});
+      }
     }
     return;
   }
 
   // ── Detail view: issues / PRs / packages list ──
-  import('./tabs/analyze.mjs').then(mod => {
-    const scroll = appState.detailsScroll;
+  const scroll = appState.detailsScroll;
 
-    const contentStartY = HEADER_HEIGHT + 9;
-    const itemIdx = sy - contentStartY + scroll;
-    let listLen = 0;
-    if (appState.detailsPane === 'issues')   listLen = appState.repoIssues.length;
-    else if (appState.detailsPane === 'prs') listLen = appState.repoPullRequests.length;
-    else if (appState.detailsPane === 'packages') listLen = appState.repoReleaseAssets.length;
+  // Click on filter indicator row → cycle filter state.
+  if ((appState.detailsPane === 'issues' || appState.detailsPane === 'prs') &&
+      (sy === HEADER_HEIGHT + 7 || sy === HEADER_HEIGHT + 8)) {
+    if (analyze.cycleIssueStateFilter) analyze.cycleIssueStateFilter();
+    return;
+  }
 
-    // Click on filter indicator row → cycle filter state.
-    if ((appState.detailsPane === 'issues' || appState.detailsPane === 'prs') &&
-        (sy === HEADER_HEIGHT + 7 || sy === HEADER_HEIGHT + 8)) {
-      if (mod && mod.cycleIssueStateFilter) mod.cycleIssueStateFilter();
+  let listLen = 0;
+  if (appState.detailsPane === 'issues')   listLen = appState.repoIssues.length;
+  else if (appState.detailsPane === 'prs') listLen = appState.repoPullRequests.length;
+  else if (appState.detailsPane === 'packages') listLen = appState.repoReleaseAssets.length;
+
+  const contentStartY = HEADER_HEIGHT + 9;
+  const itemIdx = sy - contentStartY + scroll;
+  if (itemIdx >= 0 && itemIdx < listLen) {
+    appState.detailsScroll = itemIdx;
+    if (appState.detailsPane === 'packages') {
+      appState.selectedAsset = itemIdx;
+    } else if ((appState.detailsPane === 'issues' || appState.detailsPane === 'prs') && appState.repoDetails) {
+      const [owner, name] = appState.repoDetails.full_name.split('/');
+      if (appState.detailsPane === 'issues') {
+        const issue = appState.repoIssues[itemIdx];
+        if (issue && analyze.openDetail) analyze.openDetail('issue', owner, name, issue.number);
+      } else {
+        const pr = appState.repoPullRequests[itemIdx];
+        if (pr && analyze.openDetail) analyze.openDetail('pull_request', owner, name, pr.number);
+      }
       return;
     }
-
-    if (itemIdx >= 0 && itemIdx < listLen) {
-      appState.detailsScroll = itemIdx;
-      if (appState.detailsPane === 'packages') {
-        appState.selectedAsset = itemIdx;
-      } else if ((appState.detailsPane === 'issues' || appState.detailsPane === 'prs') && appState.repoDetails) {
-        const [owner, name] = appState.repoDetails.full_name.split('/');
-        if (appState.detailsPane === 'issues') {
-          const issue = appState.repoIssues[itemIdx];
-          if (issue && mod && mod.openDetail) mod.openDetail('issue', owner, name, issue.number);
-        } else {
-          const pr = appState.repoPullRequests[itemIdx];
-          if (pr && mod && mod.openDetail) mod.openDetail('pull_request', owner, name, pr.number);
-        }
-        return;
-      }
-      render();
-    }
-  }).catch(() => {});
+    render();
+  }
 }
 
 // ── Inbox tab ─────────────────────────────────────────────────

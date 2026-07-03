@@ -22,17 +22,33 @@ const REPOS_PER_PAGE = 30;
 export async function submitLogin(value) {
   const token = (value || '').trim();
   if (!token) { showMessage('Token cannot be empty', 'error'); render(); return; }
-  const gen = startAsync();
+  const gen = startAsync('login');
   appState.loading = true;
   render();
   try {
-    const user = await getAuthenticatedUser(token);
-    if (isStale(gen)) { appState.loading = false; return; }
+    const user = await getAuthenticatedUser(token, gen.signal);
+    if (isStale(gen, 'login')) { appState.loading = false; return; }
     if (user) {
-      saveToken(token);
+      // Attempt to persist the token to OS keychain first. If that fails
+      // we NEVER set the in-memory token — fail loudly so the user knows
+      // their next session won't be logged in.
+      const tokenBackend = saveToken(token);
+      if (!tokenBackend || tokenBackend === 'plaintext') {
+        // saveToken throws on hard failure, but returns 'plaintext' only when
+        // the keychain write succeeded and plaintext is the fallback for read.
+        // We treat any plaintext-only result as a soft success on macOS/Windows
+        // and a hard fail on Linux (no libsecret available).
+        if (process.platform === 'linux') {
+          showMessage(
+            'Login OK, but no OS keychain (libsecret) is available. ' +
+            'Token will be lost on exit. Install gnome-keyring or KWallet.',
+            'warning', 8000
+          );
+        }
+      }
       appState.token = token;
       appState.user = user;
-      appState.repos = await getUserRepositories(token, 1, REPOS_PER_PAGE);
+      appState.repos = await getUserRepositories(token, 1, REPOS_PER_PAGE, gen.signal);
       appState.reposPage = 1;
       appState.reposHasMore = appState.repos.length >= REPOS_PER_PAGE;
       appState.dashboardLoaded = false;
@@ -42,10 +58,10 @@ export async function submitLogin(value) {
       showMessage('Invalid token', 'error');
     }
   } catch (e) {
-    if (!isStale(gen)) showMessage(e.message || 'Login failed', 'error');
+    if (!isStale(gen, 'login')) showMessage(e.message || 'Login failed', 'error');
   }
   appState.loading = false;
-  if (!isStale(gen)) render();
+  if (!isStale(gen, 'login')) render();
 }
 registerInputHandler('login', submitLogin);
 
@@ -71,10 +87,11 @@ registerInputHandler('theme', (value) => {
 });
 
 function sectionHeader(screen, x, y, text, maxW) {
+  // Local extension of utils.sectionHeader that ALSO draws an underline row
+  // at y+1 — used for the Settings tab's left-column dividers.
   screen.writeStr(x, y, text, { fg: 'cyan', bold: true });
-  // Underline separator, limited to the left column.
   const W = maxW || screen.width;
-  for (let i = x; i < x + W - x; i++) {
+  for (let i = x; i < x + (W - x); i++) {
     screen.setCell(i, y + 1, '─', { dim: true });
   }
 }

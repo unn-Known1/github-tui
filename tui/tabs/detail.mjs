@@ -57,37 +57,37 @@ export function openDetail(type, owner, repo, number) {
 }
 
 async function loadDetail() {
-  const gen = startAsync();
+  const gen = startAsync('detail');
   appState.detailLoading = true;
   render();
   try {
     const { detailType: type, detailOwner: owner, detailRepo: repo, detailNumber: number } = appState;
     let data;
     if (type === 'pull_request') {
-      data = await getPullRequest(appState.token, owner, repo, number);
+      data = await getPullRequest(appState.token, owner, repo, number, gen.signal);
     } else {
-      data = await getIssue(appState.token, owner, repo, number);
+      data = await getIssue(appState.token, owner, repo, number, gen.signal);
     }
-    if (isStale(gen)) { appState.loading = false; return; }
+    if (isStale(gen, 'detail')) { appState.loading = false; return; }
     appState.detailData = data;
 
     const safe = (p) => p.catch(() => null);
     const [comments, reviews, files] = await Promise.all([
-      safe(getIssueComments(appState.token, owner, repo, number)),
-      type === 'pull_request' ? safe(getPullRequestReviews(appState.token, owner, repo, number)) : Promise.resolve([]),
-      type === 'pull_request' ? safe(getPullRequestFiles(appState.token, owner, repo, number)) : Promise.resolve([]),
+      safe(getIssueComments(appState.token, owner, repo, number, 1, 20, gen.signal)),
+      type === 'pull_request' ? safe(getPullRequestReviews(appState.token, owner, repo, number, gen.signal)) : Promise.resolve([]),
+      type === 'pull_request' ? safe(getPullRequestFiles(appState.token, owner, repo, number, 1, 30, gen.signal)) : Promise.resolve([]),
     ]);
-    if (isStale(gen)) { appState.loading = false; return; }
+    if (isStale(gen, 'detail')) { appState.loading = false; return; }
     appState.detailComments = Array.isArray(comments) ? comments : [];
     appState.detailReviews = Array.isArray(reviews) ? reviews : [];
     appState.detailFiles = Array.isArray(files) ? files : [];
     appState.detailLoading = false;
     showMessage('Loaded #' + number, 'success');
   } catch (e) {
-    if (!isStale(gen)) showMessage(e.message || 'Failed to load detail', 'error');
+    if (!isStale(gen, 'detail')) showMessage(e.message || 'Failed to load detail', 'error');
     appState.showDetail = false;
   }
-  if (!isStale(gen)) render();
+  if (!isStale(gen, 'detail')) render();
 }
 
 export function closeDetail() {

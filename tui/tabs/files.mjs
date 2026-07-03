@@ -71,12 +71,12 @@ export async function openFilesPane() {
 export async function loadTree() {
   const [owner, name] = repoOwnerName();
   if (!owner) return;
-  const gen = startAsync();
+  const gen = startAsync('files-tree');
   appState.loading = true;
   render();
   try {
     const list = await getRepoContents(
-      appState.token, owner, name, appState.filesPath, appState.filesRef);
+      appState.token, owner, name, appState.filesPath, appState.filesRef, gen.signal);
     if (isStale(gen)) { appState.loading = false; return; }
     const arr = Array.isArray(list) ? list : [list];
     // Sort: directories first, then files; alpha within each group.
@@ -134,12 +134,12 @@ export async function viewFile(ent) {
       '). Use [s] to save instead.', 'warning');
     return;
   }
-  const gen = startAsync();
+  const gen = startAsync('files-view');
   appState.loading = true;
   render();
   try {
     const text = await getRepoFile(
-      appState.token, owner, name, ent.path, appState.filesRef);
+      appState.token, owner, name, ent.path, appState.filesRef, gen.signal);
     if (isStale(gen)) { appState.loading = false; return; }
     appState.fileViewing = ent.path;
     appState.fileText = typeof text === 'string' ? text : String(text);
@@ -155,11 +155,11 @@ export async function openBranchPicker() {
   const [owner, name] = repoOwnerName();
   if (!owner) return;
   if (appState.filesBranches.length === 0) {
-    const gen = startAsync();
+    const gen = startAsync('files-branches');
     appState.loading = true;
     render();
     try {
-      const list = await getBranches(appState.token, owner, name, 50);
+      const list = await getBranches(appState.token, owner, name, 50, gen.signal);
       if (isStale(gen)) { appState.loading = false; return; }
       appState.filesBranches = Array.isArray(list) ? list : [];
     } catch (e) {
@@ -224,40 +224,54 @@ export async function saveCurrentFolder() {
   showMessage('Walking tree…', 'info');
   let count = 0;
   let bytes = 0;
+  let abortedAt = 0;  // how many files existed in the truncated folder
   const stack = [root];
-  const gen = startAsync();
+  const gen = startAsync('files-bulk');
   const seenFiles = [];
   try {
     // BFS to enumerate files.
     while (stack.length) {
-      if (isStale(gen)) { appState.loading = false; return; }
+      // Bail fast if superseded (e.g., user navigated away) or signal aborted
+      // — otherwise we keep firing getRepoContents calls until the next await.
+      if (isStale(gen) || gen.signal.aborted) { appState.loading = false; return; }
       const cur = stack.shift();
       const list = await getRepoContents(
-        appState.token, owner, name, cur, appState.filesRef);
+        appState.token, owner, name, cur, appState.filesRef, gen.signal);
       const arr = Array.isArray(list) ? list : [list];
       for (const e of arr) {
         if (e.type === 'dir') stack.push(e.path);
         else if (e.type === 'file') {
           seenFiles.push(e);
           if (seenFiles.length > MAX_BULK_FILES) {
-            showMessage('Aborting — folder has >' + MAX_BULK_FILES +
-              ' files. Use zipball [Z] instead.', 'warning');
-            return;
+            abortedAt = seenFiles.length;
+            break;
           }
         }
       }
+      if (abortedAt > 0) break;
     }
-    showMessage('Downloading ' + seenFiles.length + ' files…', 'info');
-    render();
-    // Concurrency cap 4 — fetch + write each.
-    let cursor = 0;
-    const worker = async () => {
-      while (cursor < seenFiles.length) {
-        if (isStale(gen)) { appState.loading = false; return; }
-        const e = seenFiles[cursor++];
-        try {
-          const txt = await getRepoFile(
-            appState.token, owner, name, e.path, appState.filesRef);
+    if (abortedAt > 0) {
+      // Surface the truncation. We still save what we already enumerated
+      // (up to MAX_BULK_FILES) so the user gets *some* files.
+      showMessage(
+        'Folder has >' + MAX_BULK_FILES + ' files (found ' + abortedAt + '). ' +
+        'Saving first ' + seenFiles.length + ' — use zipball [Z] for the rest.',
+        'warning'
+      );
+      render();
+    }
+    if (seenFiles.length > 0) {
+      showMessage('Downloading ' + seenFiles.length + ' files…', 'info');
+      render();
+      // Concurrency cap 4 — fetch + write each.
+      let cursor = 0;
+      const worker = async () => {
+        while (cursor < seenFiles.length) {
+          if (isStale(gen) || gen.signal.aborted) { appState.loading = false; return; }
+          const e = seenFiles[cursor++];
+          try {
+            const txt = await getRepoFile(
+              appState.token, owner, name, e.path, appState.filesRef, gen.signal);
           const rel = repoName + '/' + e.path.replace(
             new RegExp('^' + root.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '/?'), '');
           writeFileSafe(rel, txt);
@@ -271,9 +285,14 @@ export async function saveCurrentFolder() {
       }
     };
     await Promise.all([worker(), worker(), worker(), worker()]);
-    if (!isStale(gen))
+    if (!isStale(gen)) {
+      const truncatedNote = abortedAt > 0
+        ? ' (truncated — folder had ' + abortedAt + ' files)'
+        : '';
       showMessage('Saved ' + count + ' files (' + formatBytes(bytes) +
-        ') → ./' + repoName + '/', 'success');
+        ') → ./' + repoName + '/' + truncatedNote, abortedAt > 0 ? 'warning' : 'success');
+    }
+    }
   } catch (e) {
     if (!isStale(gen)) showMessage('Folder save failed: ' + e.message, 'error');
   }

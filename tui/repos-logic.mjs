@@ -1,7 +1,10 @@
 // Pure business logic for repos — no global state, no I/O, fully testable.
 // Imports from repos.mjs delegate here; tests import directly.
 
-const STALE_DAYS = 180;
+// Single source of truth for "stale repo" cutoff. Used by both the Repos tab
+// (filter) and the Dashboard stale-count tile so the two never disagree.
+export const STALE_DAYS = 90;
+const _STALE_DAYS = STALE_DAYS;  // back-compat alias if anyone imported the old name
 
 export function sortRepos(repos, sort) {
   const sorted = [...repos];
@@ -40,7 +43,7 @@ export function applyAllFilters(repos, filters) {
   }
 
   if (staleOnly) {
-    const cutoff = Date.now() - STALE_DAYS * 86400000;
+    const cutoff = Date.now() - _STALE_DAYS * 86400000;
     out = out.filter(r => new Date(r.pushed_at || r.updated_at).getTime() < cutoff);
   }
 

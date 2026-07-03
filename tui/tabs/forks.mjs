@@ -70,7 +70,7 @@ async function runCompares(owner, name, defaultBranch, range, gen) {
 export async function loadForks() {
   const repo = appState.repoDetails;
   if (!repo) return;
-  const gen = startAsync();
+  const gen = startAsync('forks');
   appState.loading = true;
   appState.analyzeView = 'forks';
   appState.forks = [];
@@ -80,7 +80,7 @@ export async function loadForks() {
   render();
   try {
     const [owner, name] = repo.full_name.split('/');
-    const forks = await getRepositoryForks(appState.token, owner, name, 1, FORKS_PER_PAGE);
+    const forks = await getRepositoryForks(appState.token, owner, name, 1, FORKS_PER_PAGE, gen.signal);
     if (isStale(gen)) { appState.loading = false; return; }
     appState.forks = forks;
     appState.forksHasMore = forks.length >= FORKS_PER_PAGE;
@@ -97,13 +97,13 @@ export async function loadForks() {
 export async function loadMoreForks() {
   const repo = appState.repoDetails;
   if (!repo || !appState.forksHasMore) return;
-  const gen = startAsync();
+  const gen = startAsync('forks-more');
   appState.loading = true;
   render();
   try {
     const [owner, name] = repo.full_name.split('/');
     const page = appState.forksPage + 1;
-    const more = await getRepositoryForks(appState.token, owner, name, page, FORKS_PER_PAGE);
+    const more = await getRepositoryForks(appState.token, owner, name, page, FORKS_PER_PAGE, gen.signal);
     if (isStale(gen)) { appState.loading = false; return; }
     const offset = appState.forks.length;
     appState.forks = [...appState.forks, ...more];

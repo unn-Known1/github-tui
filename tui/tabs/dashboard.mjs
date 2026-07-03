@@ -2,6 +2,7 @@
 // v0.5+ design: cleaner section cards, focus-aware stat cards, breadcrumb-aware.
 
 import { appState, render, startAsync, isStale, showMessage, setTab, confirm } from '../state.mjs';
+import { STALE_DAYS } from '../repos-logic.mjs';
 import { startInput, registerInputHandler } from '../input.mjs';
 import {
   getUserEvents, getTrendingRepos, getStarredRepos,
@@ -16,20 +17,20 @@ import { loadRepoDetails } from './analyze.mjs';
 export async function loadDashboardWidgets(force = false) {
   if (!appState.token || !appState.user) return;
   if (appState.dashboardLoaded && !force) return;
-  const gen = startAsync();
+  const gen = startAsync('dashboard-widgets');
   const username = appState.user.login;
   try {
     const safe = (p) => p.catch(() => null);
     const days = appState.trendingPeriod || 7;
     const [events, trending, starred, issues, prs, followers] = await Promise.all([
-      safe(getUserEvents(appState.token, username, 100)),
-      safe(getTrendingRepos(appState.token, days, 100)),
-      safe(getStarredRepos(appState.token, 1, 100)),
-      safe(getUserIssues(appState.token, 1, 10)),
-      safe(getUserPullRequests(appState.token, 1, 10)),
-      safe(getUserFollowers(appState.token, 1, 10)),
+      safe(getUserEvents(appState.token, username, 100, gen.signal)),
+      safe(getTrendingRepos(appState.token, days, 100, gen.signal)),
+      safe(getStarredRepos(appState.token, 1, 100, gen.signal)),
+      safe(getUserIssues(appState.token, 1, 10, gen.signal)),
+      safe(getUserPullRequests(appState.token, 1, 10, gen.signal)),
+      safe(getUserFollowers(appState.token, 1, 10, gen.signal)),
     ]);
-    if (isStale(gen)) { appState.loading = false; return; }
+    if (isStale(gen, 'dashboard-widgets')) { appState.loading = false; return; }
     appState.events = Array.isArray(events) ? events : [];
     appState.trending = Array.isArray(trending) ? trending : [];
     appState.trendingPage = 1;
@@ -61,7 +62,7 @@ export async function loadDashboardWidgets(force = false) {
 
     render();
   } catch (e) {
-    if (!isStale(gen)) showMessage('Dashboard widgets failed: ' + e.message, 'error');
+    if (!isStale(gen, 'dashboard-widgets')) showMessage('Dashboard widgets failed: ' + e.message, 'error');
   }
 }
 
@@ -111,10 +112,11 @@ function buildHeatmap(events) {
 }
 
 function findStaleRepos(repos) {
-  const cutoff60 = Date.now() - 60 * 86400000;
+  // Use the same STALE_DAYS constant as the Repos tab so the two views agree.
+  const cutoff = Date.now() - STALE_DAYS * 86400000;
   const stale = repos.filter(r => {
     const lastPush = new Date(r.pushed_at || r.updated_at).getTime();
-    return lastPush < cutoff60;
+    return lastPush < cutoff;
   });
   return { count: stale.length, repos: stale.slice(0, 5).map(r => r.name) };
 }
@@ -156,6 +158,9 @@ function sparkline(data, width) {
 }
 
 // Section header: title + optional key hint on the right.
+// When `section` is supplied, route to collapsibleHeader (which handles
+// collapse/expand) — that's a different signature from utils.sectionHeader,
+// so we keep the local wrapper to compose both behaviours.
 function sectionHeader(screen, x, y, text, hint, section) {
   if (section) {
     return collapsibleHeader(screen, x, y, section, text, hint);
@@ -592,7 +597,7 @@ export function renderDashboard(screen, y, h) {
 
 export async function loadMoreTrending() {
   if (!appState.trendingHasMore || !appState.token || appState.loading) return;
-  const gen = startAsync();
+  const gen = startAsync('dashboard-trending');
   appState.loading = true;
   render();
   try {
@@ -600,8 +605,8 @@ export async function loadMoreTrending() {
     const since = new Date(Date.now() - days * 86400000).toISOString().split('T')[0];
     const q = 'created:>' + since;
     const page = appState.trendingPage + 1;
-    const more = await searchRepositories(appState.token, q, page, 10);
-    if (isStale(gen)) { appState.loading = false; render(); return; }
+    const more = await searchRepositories(appState.token, q, page, 10, gen.signal);
+    if (isStale(gen, 'dashboard-trending')) { appState.loading = false; render(); return; }
     if (Array.isArray(more) && more.length > 0) {
       appState.trending = [...appState.trending, ...more];
       appState.trendingPage = page;
@@ -613,7 +618,7 @@ export async function loadMoreTrending() {
     render();
   } catch (e) {
     appState.loading = false;
-    if (!isStale(gen)) showMessage('Failed to load more trending', 'error');
+    if (!isStale(gen, 'dashboard-trending')) showMessage('Failed to load more trending', 'error');
   }
 }
 
@@ -660,11 +665,11 @@ export function pageUp() {
     const days = appState.trendingPeriod || 7;
     const since = new Date(Date.now() - days * 86400000).toISOString().split('T')[0];
     const q = 'created:>' + since;
-    const gen = startAsync();
+    const gen = startAsync('dashboard-trending');
     appState.loading = true;
     render();
-    searchRepositories(appState.token, q, page, 10).then(more => {
-      if (isStale(gen)) { appState.loading = false; return; }
+    searchRepositories(appState.token, q, page, 10, gen.signal).then(more => {
+      if (isStale(gen, 'dashboard-trending')) { appState.loading = false; return; }
       if (Array.isArray(more)) {
         appState.trending = more;
         appState.trendingPage = page;
@@ -682,11 +687,11 @@ export function pageDown() {
     const days = appState.trendingPeriod || 7;
     const since = new Date(Date.now() - days * 86400000).toISOString().split('T')[0];
     const q = 'created:>' + since;
-    const gen = startAsync();
+    const gen = startAsync('dashboard-trending');
     appState.loading = true;
     render();
-    searchRepositories(appState.token, q, page, 10).then(more => {
-      if (isStale(gen)) { appState.loading = false; return; }
+    searchRepositories(appState.token, q, page, 10, gen.signal).then(more => {
+      if (isStale(gen, 'dashboard-trending')) { appState.loading = false; return; }
       if (Array.isArray(more) && more.length > 0) {
         appState.trending = [...appState.trending, ...more];
         appState.trendingPage = page;
@@ -739,11 +744,11 @@ function getFilteredTrending() {
 function reloadTrending() {
   if (!appState.token) return;
   const days = appState.trendingPeriod;
-  const gen = startAsync();
+  const gen = startAsync('dashboard-trending');
   appState.loading = true;
   render();
-  getTrendingRepos(appState.token, days, 100).then(more => {
-    if (isStale(gen)) { appState.loading = false; return; }
+  getTrendingRepos(appState.token, days, 100, gen.signal).then(more => {
+    if (isStale(gen, 'dashboard-trending')) { appState.loading = false; return; }
     appState.trending = Array.isArray(more) ? more : [];
     appState.trendingPage = 1;
     appState.trendingScroll = 0;

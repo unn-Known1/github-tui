@@ -245,6 +245,24 @@ export function request(path, opts) {
     const options = buildOptions(path, token, method, bodyStr);
     if (accept) options.headers['Accept'] = accept;
 
+    // Honor an external AbortSignal — when fired, kill the socket immediately
+    // and reject so the caller's rate-limit budget isn't consumed by a no-op
+    // wait for the response.
+    const signal = o.signal;
+    if (signal) {
+      if (signal.aborted) {
+        clearTimeout(timer);
+        return reject(new Error('Aborted'));
+      }
+      signal.addEventListener('abort', () => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
+        try { if (req) req.destroy(); } catch (e) {}
+        reject(new Error('Aborted'));
+      }, { once: true });
+    }
+
     req = https.request(options, (res) => {
       const rr = res.headers['x-ratelimit-remaining'];
       const rl = res.headers['x-ratelimit-limit'];
@@ -348,42 +366,42 @@ export function request(path, opts) {
 }
 
 // ─── User & repos ───────────────────────────────────────────────────
-export const getAuthenticatedUser = (token) => request('/user', { token });
-export const getUserRepositories = (token, page, perPage) =>
-  request('/user/repos?page=' + (page||1) + '&per_page=' + (perPage||50) + '&sort=updated', { token });
-export const getUser = (token, username) => request('/users/' + username, { token });
-export const searchRepositories = async (token, query, page, perPage) => {
+export const getAuthenticatedUser = (token, signal) => request('/user', { token, signal });
+export const getUserRepositories = (token, page, perPage, signal) =>
+  request('/user/repos?page=' + (page||1) + '&per_page=' + (perPage||50) + '&sort=updated', { token, signal });
+export const getUser = (token, username, signal) => request('/users/' + username, { token, signal });
+export const searchRepositories = async (token, query, page, perPage, signal) => {
   const r = await request('/search/repositories?q=' + encodeURIComponent(query) +
-    '&page=' + (page||1) + '&per_page=' + (perPage||100), { token });
+    '&page=' + (page||1) + '&per_page=' + (perPage||100), { token, signal });
   return r.items || [];
 };
-export const getRepositoryDetails = (token, owner, repo) =>
-  request('/repos/' + owner + '/' + repo, { token });
-export const getRepositoryForks = (token, owner, repo, page, perPage) =>
+export const getRepositoryDetails = (token, owner, repo, signal) =>
+  request('/repos/' + owner + '/' + repo, { token, signal });
+export const getRepositoryForks = (token, owner, repo, page, perPage, signal) =>
   request('/repos/' + owner + '/' + repo + '/forks?page=' + (page||1) +
-    '&per_page=' + (perPage||30) + '&sort=stargazers', { token });
-export const getCompare = (token, owner, repo, base, head) =>
-  request('/repos/' + owner + '/' + repo + '/compare/' + base + '...' + head, { token });
-export const getRepositoryIssues = (token, owner, repo, page, perPage, state = 'open') =>
+    '&per_page=' + (perPage||30) + '&sort=stargazers', { token, signal });
+export const getCompare = (token, owner, repo, base, head, signal) =>
+  request('/repos/' + owner + '/' + repo + '/compare/' + base + '...' + head, { token, signal });
+export const getRepositoryIssues = (token, owner, repo, page, perPage, state = 'open', signal) =>
   request('/repos/' + owner + '/' + repo + '/issues?page=' + (page||1) +
-    '&per_page=' + (perPage||100) + '&state=' + state, { token });
-export const getRepositoryPullRequests = (token, owner, repo, page, perPage, state = 'open') =>
+    '&per_page=' + (perPage||100) + '&state=' + state, { token, signal });
+export const getRepositoryPullRequests = (token, owner, repo, page, perPage, state = 'open', signal) =>
   request('/repos/' + owner + '/' + repo + '/pulls?page=' + (page||1) +
-    '&per_page=' + (perPage||100) + '&state=' + state, { token });
-export const getRepositoryContributors = (token, owner, repo, page, perPage) =>
+    '&per_page=' + (perPage||100) + '&state=' + state, { token, signal });
+export const getRepositoryContributors = (token, owner, repo, page, perPage, signal) =>
   request('/repos/' + owner + '/' + repo + '/contributors?page=' + (page||1) +
-    '&per_page=' + (perPage||100), { token });
-export const getRepositoryLanguages = (token, owner, repo) =>
-  request('/repos/' + owner + '/' + repo + '/languages', { token });
-export const getRepositoryReleases = (token, owner, repo, page, perPage) =>
+    '&per_page=' + (perPage||100), { token, signal });
+export const getRepositoryLanguages = (token, owner, repo, signal) =>
+  request('/repos/' + owner + '/' + repo + '/languages', { token, signal });
+export const getRepositoryReleases = (token, owner, repo, page, perPage, signal) =>
   request('/repos/' + owner + '/' + repo + '/releases?page=' + (page||1) +
-    '&per_page=' + (perPage||100), { token });
-export const getReleaseAssets = (token, owner, repo, releaseId) =>
-  request('/repos/' + owner + '/' + repo + '/releases/' + releaseId + '/assets', { token });
+    '&per_page=' + (perPage||100), { token, signal });
+export const getReleaseAssets = (token, owner, repo, releaseId, signal) =>
+  request('/repos/' + owner + '/' + repo + '/releases/' + releaseId + '/assets', { token, signal });
 
 // ─── Notifications ──────────────────────────────────────────────────
-export const getNotifications = (token, page, perPage) =>
-  request('/notifications?page=' + (page||1) + '&per_page=' + (perPage||50), { token });
+export const getNotifications = (token, page, perPage, signal) =>
+  request('/notifications?page=' + (page||1) + '&per_page=' + (perPage||50), { token, signal });
 export const markNotificationRead = (token, threadId) =>
   request('/notifications/threads/' + threadId, { token, method: 'PATCH' });
 export const markAllNotificationsRead = (token) =>
@@ -394,20 +412,20 @@ export const unsubscribeNotification = (token, threadId) =>
   });
 
 // ─── Activity, trending, starred ────────────────────────────────────
-export const getUserEvents = (token, username, perPage) =>
-  request('/users/' + username + '/events?per_page=' + (perPage||15), { token });
-export const getTrendingRepos = async (token, days, perPage) => {
+export const getUserEvents = (token, username, perPage, signal) =>
+  request('/users/' + username + '/events?per_page=' + (perPage||15), { token, signal });
+export const getTrendingRepos = async (token, days, perPage, signal) => {
   const d = days || 7;
   const pp = perPage || 5;
   const since = new Date(Date.now() - d * 86400000).toISOString().split('T')[0];
   const q = encodeURIComponent('created:>' + since);
   const r = await request('/search/repositories?q=' + q +
-    '&sort=stars&order=desc&per_page=' + pp, { token });
+    '&sort=stars&order=desc&per_page=' + pp, { token, signal });
   return r.items || [];
 };
-export const getStarredRepos = (token, page, perPage) =>
+export const getStarredRepos = (token, page, perPage, signal) =>
   request('/user/starred?page=' + (page||1) + '&per_page=' + (perPage||30), {
-    token,
+    token, signal,
     accept: 'application/vnd.github.v3.star+json',
   });
 export const isStarred = async (token, owner, repo) => {
@@ -420,27 +438,27 @@ export const unstarRepo = (token, owner, repo) =>
   request('/user/starred/' + owner + '/' + repo, { token, method: 'DELETE' });
 
 // ─── Code, READMEs, file browser ────────────────────────────────────
-export const getReadme = (token, owner, repo) =>
+export const getReadme = (token, owner, repo, signal) =>
   request('/repos/' + owner + '/' + repo + '/readme', {
-    token, accept: 'application/vnd.github.raw', raw: true,
+    token, signal, accept: 'application/vnd.github.raw', raw: true,
   });
-export const getRepoContents = (token, owner, repo, path, ref) =>
+export const getRepoContents = (token, owner, repo, path, ref, signal) =>
   request('/repos/' + owner + '/' + repo + '/contents/' + (path||'') +
-    (ref ? '?ref=' + ref : ''), { token });
-export const getRepoFile = (token, owner, repo, path, ref) =>
+    (ref ? '?ref=' + ref : ''), { token, signal });
+export const getRepoFile = (token, owner, repo, path, ref, signal) =>
   request('/repos/' + owner + '/' + repo + '/contents/' + path +
     (ref ? '?ref=' + ref : ''), {
-    token, accept: 'application/vnd.github.raw', raw: true,
+    token, signal, accept: 'application/vnd.github.raw', raw: true,
   });
 // ─── User issues / PRs (for dashboard) ─────────────────────────────
-export const getUserIssues = (token, page, perPage) =>
+export const getUserIssues = (token, page, perPage, signal) =>
   request('/issues?filter=created&sort=updated&direction=desc&page=' + (page||1) +
-    '&per_page=' + (perPage||100), { token });
-export const getUserPullRequests = (token, page, perPage) =>
+    '&per_page=' + (perPage||100), { token, signal });
+export const getUserPullRequests = (token, page, perPage, signal) =>
   request('/search/issues?q=author:@me+type:pr&sort=updated&order=desc&page=' + (page||1) +
-    '&per_page=' + (perPage||100), { token });
-export const getCommitActivity = (token, owner, repo) =>
-  request('/repos/' + owner + '/' + repo + '/stats/commit_activity', { token });
+    '&per_page=' + (perPage||100), { token, signal });
+export const getCommitActivity = (token, owner, repo, signal) =>
+  request('/repos/' + owner + '/' + repo + '/stats/commit_activity', { token, signal });
 
 
 
@@ -520,18 +538,18 @@ export function downloadToFile(url, destPath, token) {
 }
 
 // ─── Issue / PR detail, comments, actions ──────────────────────────
-export const getIssue = (token, owner, repo, number) =>
-  request('/repos/' + owner + '/' + repo + '/issues/' + number, { token });
-export const getPullRequest = (token, owner, repo, number) =>
-  request('/repos/' + owner + '/' + repo + '/pulls/' + number, { token });
-export const getIssueComments = (token, owner, repo, number, page, perPage) =>
+export const getIssue = (token, owner, repo, number, signal) =>
+  request('/repos/' + owner + '/' + repo + '/issues/' + number, { token, signal });
+export const getPullRequest = (token, owner, repo, number, signal) =>
+  request('/repos/' + owner + '/' + repo + '/pulls/' + number, { token, signal });
+export const getIssueComments = (token, owner, repo, number, page, perPage, signal) =>
   request('/repos/' + owner + '/' + repo + '/issues/' + number +
-    '/comments?page=' + (page||1) + '&per_page=' + (perPage||20), { token });
-export const getPullRequestReviews = (token, owner, repo, number) =>
-  request('/repos/' + owner + '/' + repo + '/pulls/' + number + '/reviews', { token });
-export const getPullRequestFiles = (token, owner, repo, number, page, perPage) =>
+    '/comments?page=' + (page||1) + '&per_page=' + (perPage||20), { token, signal });
+export const getPullRequestReviews = (token, owner, repo, number, signal) =>
+  request('/repos/' + owner + '/' + repo + '/pulls/' + number + '/reviews', { token, signal });
+export const getPullRequestFiles = (token, owner, repo, number, page, perPage, signal) =>
   request('/repos/' + owner + '/' + repo + '/pulls/' + number +
-    '/files?page=' + (page||1) + '&per_page=' + (perPage||30), { token });
+    '/files?page=' + (page||1) + '&per_page=' + (perPage||30), { token, signal });
 export const postComment = (token, owner, repo, number, body) =>
   request('/repos/' + owner + '/' + repo + '/issues/' + number + '/comments', {
     token, method: 'POST', body: { body },
@@ -607,8 +625,10 @@ export const dismissDependabotAlert = (token, owner, repo, alertId, dismissedRea
   });
 
 // ─── Security (Secret Scanning) ───────────────────────────────────
-export const getSecretScanningAlerts = (token, owner, repo, state) =>
-  request('/repos/' + owner + '/' + repo + '/secret-scanning/alerts' + (state ? '?state=' + state : ''), { token });
+
+export const getSecretScanningAlerts = (token, owner, repo, state, signal) =>
+  request('/repos/' + owner + '/' + repo + '/secret-scanning/alerts' +
+    (state ? '?state=' + state : ''), { token, signal });
 
 // ─── Security (Code Scanning) ─────────────────────────────────────
 export const getCodeScanningAlerts = (token, owner, repo, state, perPage) =>

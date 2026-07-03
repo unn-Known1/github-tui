@@ -20,12 +20,12 @@ export async function loadNotifications() {
     showMessage('Login required to view notifications', 'warning');
     return;
   }
-  const gen = startAsync();
+  const gen = startAsync('inbox');
   appState.loading = true;
   appState.inboxPage = 1;
   render();
   try {
-    const notes = await getNotifications(appState.token, 1, INBOX_PER_PAGE);
+    const notes = await getNotifications(appState.token, 1, INBOX_PER_PAGE, gen.signal);
     if (isStale(gen)) { appState.loading = false; return; }
     appState.notifications = Array.isArray(notes) ? notes : [];
     appState.inboxHasMore = notes.length >= INBOX_PER_PAGE;
@@ -41,12 +41,12 @@ export async function loadNotifications() {
 
 export async function loadMoreNotifications() {
   if (!appState.inboxHasMore || !appState.token) return;
-  const gen = startAsync();
+  const gen = startAsync('inbox-more');
   appState.loading = true;
   render();
   try {
     const page = appState.inboxPage + 1;
-    const more = await getNotifications(appState.token, page, INBOX_PER_PAGE);
+    const more = await getNotifications(appState.token, page, INBOX_PER_PAGE, gen.signal);
     if (isStale(gen)) { appState.loading = false; return; }
     appState.notifications = [...appState.notifications, ...more];
     appState.inboxPage = page;
@@ -61,10 +61,10 @@ export async function loadMoreNotifications() {
 export function pageUp() {
   if (appState.inboxPage > 1) {
     const page = appState.inboxPage - 1;
-    const gen = startAsync();
+    const gen = startAsync('inbox-page');
     appState.loading = true;
     render();
-    getNotifications(appState.token, page, INBOX_PER_PAGE).then(more => {
+    getNotifications(appState.token, page, INBOX_PER_PAGE, gen.signal).then(more => {
       if (isStale(gen)) { appState.loading = false; return; }
       if (Array.isArray(more)) {
         appState.notifications = more;
@@ -82,10 +82,10 @@ export function pageUp() {
 export function pageDown() {
   if (appState.inboxHasMore) {
     const page = appState.inboxPage + 1;
-    const gen = startAsync();
+    const gen = startAsync('inbox-page');
     appState.loading = true;
     render();
-    getNotifications(appState.token, page, INBOX_PER_PAGE).then(more => {
+    getNotifications(appState.token, page, INBOX_PER_PAGE, gen.signal).then(more => {
       if (isStale(gen)) { appState.loading = false; return; }
       if (Array.isArray(more) && more.length > 0) {
         appState.notifications = more;
@@ -187,6 +187,9 @@ export async function openCurrent() {
 }
 
 function sectionHeader(screen, x, y, text, hint) {
+  // Local copy retained because inbox's chip row immediately follows and
+  // relies on the return-not-used style. Kept character-for-character
+  // identical to utils.sectionHeader so behavior matches.
   screen.writeStr(x, y, text, { fg: 'cyan', bold: true });
   if (hint) {
     const hx = screen.width - hint.length - 2;

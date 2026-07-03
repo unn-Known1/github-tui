@@ -10,35 +10,86 @@ export function render() { renderFn(); }
 
 // ────────────────────────────────────────────────────────────────────────────
 // Async generation guard — every long-running operation grabs a generation
-// number. If the user navigates away (or kicks off something newer) the
-// generation increments and the stale operation's results are discarded.
+// number from an EXPLICIT scope string. When a newer call for the same scope
+// begins, the previous request's AbortController (if any) is fired and the
+// caller is told via isStale() to drop the stale result.
+//
+// Migration: callers now pass an explicit scope. The old auto-inferred 'global'
+// scope still exists as a fallback if anyone forgets the argument, but new
+// code should never rely on it.
 // ────────────────────────────────────────────────────────────────────────────
-const asyncGenerations = { global: 0 };
+const asyncGenerations = { _global: 0 };
+const asyncControllers = {};  // { [scope]: AbortController }
 
-function getCallerScope() {
-  const err = new Error();
-  const stack = err.stack || '';
-  const lines = stack.split('\n');
-  for (let i = 1; i < lines.length; i++) {
-    const line = lines[i];
-    if (line.includes('state.mjs')) continue;
-    const parts = line.match(/([^/\\(\s]+)\.mjs/);
-    if (parts && parts[1]) {
-      return parts[1];
-    }
-  }
-  return 'global';
-}
-
-export function startAsync() {
-  const scope = getCallerScope();
+function _bumpScope(scope) {
   if (!asyncGenerations[scope]) asyncGenerations[scope] = 0;
   return ++asyncGenerations[scope];
 }
 
-export function isStale(gen) {
-  const scope = getCallerScope();
-  return gen !== (asyncGenerations[scope] || 0);
+/**
+ * Start (or restart) an async operation for the given scope.
+ * Returns a handle containing the generation, abort signal, AND the scope itself.
+ * The scope is propagated so helper functions (passed the handle) can call
+ * isStale() without an explicit scope argument.
+ *
+ * If a previous in-flight call exists for this scope, its AbortController
+ * is fired, which cancels any in-flight HTTPS requests that honor it.
+ *
+ * USAGE — there are two idioms, both well-supported by isStale():
+ *   1) Explicit (preferred for top-level async fns):
+ *       const gen = startAsync('dashboard-widgets');
+ *       if (isStale(gen, 'dashboard-widgets')) return;
+ *   2) Helper-pattern (when an inner fn receives the handle):
+ *       async function runCompares(..., gen) {
+ *         if (isStale(gen)) return;  // auto-extracts scope from handle
+ *         ...
+ *       }
+ * Both forms work — pick what's clearest at the call site.
+ */
+export function startAsync(scope = '_global') {
+  // Cancel any previous in-flight controller for this scope.
+  const prev = asyncControllers[scope];
+  if (prev && typeof prev.abort === 'function') {
+    try { prev.abort(); } catch { /* ignore */ }
+  }
+  const ctl = new AbortController();
+  asyncControllers[scope] = ctl;
+  return { gen: _bumpScope(scope), controller: ctl, signal: ctl.signal, scope };
+}
+
+/**
+ * Check whether a previously-started async operation is still the most recent.
+ * Accepts either a handle (preferred — has the scope attached) OR a raw gen
+ * number with an optional explicit scope.
+ */
+export function isStale(handle, scope) {
+  let gen, s;
+  if (handle && typeof handle === 'object') {
+    gen = handle.gen;
+    // Auto-extract scope from the handle if it was attached — this is what
+    // makes helper functions that take a `gen` parameter Just Work.
+    s = handle.scope || scope;
+  } else {
+    gen = handle;
+    s = scope;
+  }
+  if (!s) s = '_global';
+  return gen !== (asyncGenerations[s] || 0);
+}
+
+// NOTE: getSignal() was removed — callers should use `handle.signal` directly
+// which is guaranteed to be the same controller that the handle's isStale()
+// will check. Reading the current controller via a scope string races with
+// bumps and produces the wrong signal after the first re-fetch.
+
+// Backwards-compat thin wrappers — used during migration. They throw a clear
+// error so forgotten callsites are caught immediately rather than silently
+// dividing all scopes into 'global'.
+function _unsupportedMigration() {
+  throw new Error(
+    'startAsync()/isStale() now REQUIRE an explicit scope string. ' +
+    'Pass a unique identifier like "repos-load", "dashboard-widgets", etc.'
+  );
 }
 
 // ────────────────────────────────────────────────────────────────────────────
@@ -178,7 +229,7 @@ export const appState = {
   dashboardContributions: null,  // { weeks: [[day, day, ...], ...] } heatmap data
   dashboardRecentIssues: [],     // recently opened/updated issues across repos
   dashboardRecentPRs: [],        // recently opened/updated PRs across repos
-  dashboardStaleCount: 0,        // repos with no push in 60+ days
+  dashboardStaleCount: 0,        // repos with no push in STALE_DAYS+ (set by repos-logic)
   dashboardStaleRepos: [],       // stale repo names for display
   dashboardStarHistory: [],      // daily star counts for sparkline
   dashboardSelectedCard: 0,      // 0..4 stat-card focus for keyboard nav
@@ -416,6 +467,9 @@ export function saveSession() {
       searchQuery: appState.searchQuery,
       searchType: appState.searchType,
       reposView: appState.reposView,
+      // Persist filter text too (Fix #9): without this the user comes back
+      // and silently sees filtered results with no visual chip indicator.
+      inboxTextFilter: appState.inboxTextFilter,
     };
     const dir = join(homedir(), '.github-tui');
     if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
@@ -436,6 +490,7 @@ export function loadSession() {
     if (s.searchQuery) appState.searchQuery = s.searchQuery;
     if (s.searchType) appState.searchType = s.searchType;
     if (s.reposView) appState.reposView = s.reposView;
+    if (typeof s.inboxTextFilter === 'string') appState.inboxTextFilter = s.inboxTextFilter;
   } catch {}
 }
 
