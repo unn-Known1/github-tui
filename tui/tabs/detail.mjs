@@ -537,16 +537,19 @@ export const keys = {
 
     confirm('Checkout branch "' + branch + '"?', async () => {
       try {
-        const { execSync } = await import('child_process');
+        const { spawnSync } = await import('child_process');
+        const opts = { stdio: 'pipe', timeout: 30000 };
         let success = false;
-        try {
-          // 1. Try github-cli first, which is the most robust and sets up correct remotes
-          execSync('gh pr checkout ' + pr.number, { stdio: 'pipe', timeout: 30000 });
+        // 1. Try github-cli first, which is the most robust and sets up correct remotes
+        const ghResult = spawnSync('gh', ['pr', 'checkout', String(pr.number)], opts);
+        if (ghResult.status === 0) {
           success = true;
-        } catch {
-          // 2. Fall back to manual fetch from PR head ref and checkout-reset branch
-          execSync('git fetch origin pull/' + pr.number + '/head && git checkout -B ' + branch + ' FETCH_HEAD',
-            { stdio: 'pipe', timeout: 30000 });
+        } else {
+          // 2. Fall back: fetch PR head ref then checkout — args array avoids shell injection
+          const fetch = spawnSync('git', ['fetch', 'origin', 'pull/' + pr.number + '/head'], opts);
+          if (fetch.status !== 0) throw new Error(fetch.stderr && fetch.stderr.toString());
+          const checkout = spawnSync('git', ['checkout', '-B', branch, 'FETCH_HEAD'], opts);
+          if (checkout.status !== 0) throw new Error(checkout.stderr && checkout.stderr.toString());
           success = true;
         }
         if (success) {
