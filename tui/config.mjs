@@ -22,7 +22,7 @@ import {
 export const NO_COLOR   = !!process.env.NO_COLOR;
 export const FORCE_COLOR = process.env.FORCE_COLOR !== '0' && !!process.env.FORCE_COLOR;
 
-export const APP_VERSION = '0.6.1';
+export const APP_VERSION = '0.6.2';
 
 export const CONFIG_DIR = join(homedir(), '.github-tui');
 export const TOKEN_FILE = join(CONFIG_DIR, 'token');
