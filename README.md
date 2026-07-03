@@ -2,7 +2,7 @@
 
 A fast, zero-dependency terminal user interface for GitHub — six tabs, a command palette, an in-terminal file explorer that can clone or save anything to your CWD, an inbox triage workflow, themes, persistent bookmarks & pins, OSC-52 clipboard, ETag-aware caching, mouse support, collapsible sections, and comprehensive repo analytics. All driven by your keyboard (and mouse).
 
-![status](https://img.shields.io/badge/status-active-success) ![node](https://img.shields.io/badge/node-%E2%89%A518-blue) ![deps](https://img.shields.io/badge/deps-0-green) [![Socket Badge](https://badge.socket.dev/npm/package/github-tui/0.6.0)](https://badge.socket.dev/npm/package/github-tui/0.6.0) ![license](https://img.shields.io/badge/license-MIT-blue)
+![status](https://img.shields.io/badge/status-active-success) ![node](https://img.shields.io/badge/node-%E2%89%A518-blue) ![deps](https://img.shields.io/badge/deps-0-green) [![Socket Badge](https://badge.socket.dev/npm/package/github-tui/0.6.2)](https://badge.socket.dev/npm/package/github-tui/0.6.2) ![license](https://img.shields.io/badge/license-MIT-blue)
 
 ![GitHub TUI Screenshot](https://raw.githubusercontent.com/unn-Known1/github-tui/main/Screenshot.png)
 
@@ -191,21 +191,25 @@ Your current token scopes are shown in the Settings → System panel so you can 
 | Key | Action |
 |---|---|
 | `↑↓` `j` `k` | Navigate repos or runs |
-| `Enter` | View runs for selected repo / open run in browser |
-| `r` | Re-run selected workflow |
-| `x` | Cancel running workflow |
-| `t` | Back to repo list (from runs view) |
-| `/` | Filter repos |
+| `Enter` | View runs for selected repo / expand or collapse job details |
+| `r` / `R` | Re-run selected workflow (runs view) |
+| `x` / `X` | Cancel selected running workflow (runs view) |
+| `o` | Open selected run in browser |
+| `t` / `Esc` | Back to repo list (from runs view) |
+| `/` | Filter repos by name |
 
 ### Inbox
 
 | Key | Action |
 |---|---|
-| `Enter` / `o` | Open notification's subject in browser |
+| `Enter` | Open Issue/PR inline detail popup; other types open in browser |
+| `o` | Open notification subject in browser |
 | `m` | Mark the current thread as read |
 | `M` | Mark all notifications as read |
-| `u` | Unsubscribe (ignore future updates to thread) |
+| `u` | Unsubscribe from thread (DELETE subscription) |
 | `f` | Cycle filter: all → unread → mentions → review |
+| `/` | Text search across title and repo name |
+| `Space` | Load more notifications (append next page) |
 | `r` | Refresh notifications |
 
 ### Settings
@@ -227,7 +231,7 @@ The app is split into 24 focused modules. Adding a new tab is: create one file, 
 ├── app.mjs                          # ~70-line entrypoint — lifecycle only
 ├── README.md
 ├── VISION.md                        # Roadmap + persona-driven brainstorm
-├── tests/                           # 90 tests (Node built-in test runner, zero deps)
+├── tests/                           # 128 tests (Node built-in test runner, zero deps)
 │   ├── utils.test.mjs
 │   ├── repos-logic.test.mjs
 │   ├── theme.test.mjs
@@ -295,14 +299,25 @@ Every tab module exports `render(screen, y, h)`, an optional `keys` map for tab-
 - **Files pane** = full in-terminal file browser + viewer with save/clone/zipball actions (see above).
 - From details: `Enter` opens Forks with ahead/behind columns; `Space` paginates more.
 
-### 4 · Settings
-- **Actions:** Login, Logout, Refresh Dashboard, Refresh User Data, **Change Theme**, Clear Token File, Token display.
-- **System panel:** app version, config dir, token file path, Node version, platform/arch, terminal size, **API remaining / limit / reset-in minutes**, **token scopes**.
+### 4 · Actions (CI)
+- Select a repo from the list to browse its workflow runs.
+- Each run row shows: status icon (`✓`/`✗`/`~`/`ø`), run number, workflow name, branch, trigger event, and relative age.
+- `Enter` expands a run to show its jobs and steps inline; press `Enter` again to collapse.
+- `r`/`R` re-queues the selected run; `X` cancels it if in-progress.
+- `/` filters the repo list; `t`/`Esc` returns from runs view to repo list.
+- `r` refreshes the current view (repo list or runs list).
 
-### 5 · Inbox
+### 5 · Settings
+- **Actions:** Login, Logout, Refresh Dashboard, Refresh User Data, **Change Theme**, Clear Token File, Token display.
+- **System panel:** app version (`0.6.2`), config dir, token file path, Node version, platform/arch, terminal size, **API remaining / limit / reset-in minutes**, **token scopes**, active keychain backend.
+
+### 6 · Inbox
 - Per-row: ▶ selection, ● yellow unread dot, color-coded subject type (PR/cyan, Issue/yellow, Release/green, Discussion/magenta, Commit/blue, CheckSuite/red), repo·title, reason, relative time.
 - Header shows unread/total counts + active filter (`all` / `unread` / `mentions` / `review`).
 - Right-side **By Repo** widget — top 5 noisiest repos with counts.
+- `/` text search filters by title and repo name simultaneously.
+- `Space` appends the next page of notifications without replacing the current list.
+- `u` unsubscribes from the thread (calls DELETE on the GitHub subscription endpoint).
 - Triage actions: `m`/`M`/`u`/`f`.
 
 ## 🧠 Design Notes
@@ -331,6 +346,7 @@ Every tab module exports `render(screen, y, h)`, an optional `keys` map for tab-
   - ✅ **shipped:** star/unstar, bookmark, pin, save file, save folder, zipball, `git clone`, `gh clone`, notification mark/unsubscribe.
   - ✅ **shipped (v0.5):** commenting on issues/PRs, reactions, close/reopen, merge PRs, PR diff viewer, review comments.
   - ✅ **shipped (v0.5.8):** rate limit indicator, traffic/milestones/labels/checks/security panes, mouse support, collapsible sections, hover effects, followers section, Windows and terminal icon compatibility, File Explorer selection fixes, help overlay scroll clamping.
+  - ✅ **shipped (v0.6.2):** Actions tab full rewrite (rerun, cancel, expand jobs/steps, correct key bindings), Inbox triage fixes (append-more, true unsubscribe, filtered scroll bounds, fallback URLs).
 - Only the GitHub REST v3 API is used (no GraphQL yet).
 - Requires a true TTY — won't run when stdin is piped.
 - The naive file-viewer syntax coloring is style-only — no real lexer. Adequate for reading, not editing.
@@ -345,11 +361,21 @@ Every tab module exports `render(screen, y, h)`, an optional `keys` map for tab-
 
 **Shipped in v0.5:** Issue/PR detail popup with rendered body, labels, comments, and file diffs. Comment from TUI, emoji reactions, close/reopen, merge PRs with confirmation. PR diff viewer with unified diff and syntax coloring. Inbox notifications open detail popup for issues/PRs.
 
+**Shipped in v0.6.2 (this release):**
+- **Actions tab overhaul** — fixed 8 bugs: stale loading flag, wrong repo shown under filter, Esc no-op in repos view, up/down moving wrong cursor when expanded, maxVisible capped at 10 rows, `r`/`X` keys shadowed by globals (rerun/cancel never fired), refresh always reset to repos list instead of reloading runs.
+- **Inbox tab overhaul** — fixed 8 bugs: Space was loading the next server page (replacing list) instead of appending; `inboxHasMore` initialized to `true` causing a spurious page-2 request; `unsubscribeNotification` was muting (PUT) instead of unsubscribing (DELETE); mouse hover and scroll used unfiltered count instead of filtered; click always jumped scroll even when item was visible; `down()` crashed without a screen object; `openCurrent` had no fallback URL for Discussion/CheckSuite notifications.
+- **Zero dependencies** — removed stray `@anthropic-ai/claude-code` entry from `package.json`; added `.gitignore` to exclude `package-lock.json`.
+- **128 tests** — all passing.
+
+**Shipped in v0.6.1:**
+- **15 bug fixes** across input, keys, mouse, github, keychain, repos, detail, and inbox modules — falsy-zero cursor, emoji code-point insertion, duplicate case labels, left-arrow back nav, toggleStar re-entrancy, custom-keys context check, hover offsets, scroll bounds, `isStarred` error swallowing, workflow signal support, cmd.exe metachar escaping, `_filteredReposCount`, starred pagination mapping, footer range, `loadDetail` stale paths, `mergePR` null-check, and null URL crash.
+- **Version string** unified — `APP_VERSION` in `tui/config.mjs` now matches `package.json`.
+
 **Shipped in v0.6.0:**
 - **OS keychain integration** — PAT stored in macOS Keychain, Linux libsecret, or Windows Credential Manager using zero npm dependencies. Automatic silent migration from legacy plaintext file. Falls back to `chmod 600` plaintext when no keychain tool is available. Settings tab shows active storage backend in green (secure) or yellow (plaintext fallback).
 - **90 tests** — added `keychain.test.mjs` covering backend detection, save/load/remove contract, and round-trip behaviour.
 
-**Shipped in v0.5.8 (this release):**
+**Shipped in v0.5.8:**
 - **Graceful shutdown** — atomic signal handling, raw mode restore, unhandled rejection/crash handlers, debug logging.
 - **Terminal lifecycle** — debounced resize, buffer-swap renderer (zero allocation), NO_COLOR/FORCE_COLOR support, terminal multiplexer detection.
 - **Input cursor movement** — arrow keys, Home/End, Ctrl-A/E/U/W in all text inputs.
