@@ -6,6 +6,7 @@ import { appState, TABS, tabState, bindRender } from './state.mjs';
 import { Screen } from './screen.mjs';
 import { lastRateLimit, offlineState, getCacheStats } from './github.mjs';
 import { color } from './theme.mjs';
+import { truncate } from './utils.mjs';
 import { readFileSync } from 'fs';
 import { fileURLToPath } from 'url';
 import { dirname, join } from 'path';

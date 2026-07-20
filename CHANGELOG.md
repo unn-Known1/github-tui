@@ -2,6 +2,14 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.6.4] - 2026-07-20
+
+### Fixed
+- Fix `formatBytes is not defined` crash in Analyze tab (missing import)
+- Fix `truncate is not defined` crash in Bookmarks overlay (missing import in render.mjs)
+
+---
+
 ## [0.6.3] - 2026-07-20
 
 ### Added — GitHub CLI Login

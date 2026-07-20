@@ -9,7 +9,7 @@ import {
   getRepositoryReleases, getRepositoryIssues, getRepositoryPullRequests,
 } from '../github.mjs';
 import { startInput } from '../input.mjs';
-import { shortNum, truncate, openUrl, sectionHeader } from '../utils.mjs';
+import { shortNum, truncate, openUrl, sectionHeader, formatBytes } from '../utils.mjs';
 import { color } from '../theme.mjs';
 import { scrollIndicators } from '../render.mjs';
 import { loadForks, loadMoreForks, renderForks, toggleForkSort } from './forks.mjs';
