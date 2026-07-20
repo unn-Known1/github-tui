@@ -4,6 +4,7 @@
 
 import { appState, tabState, showMessage, loadCollapsed, loadSession } from './tui/state.mjs';
 import { enableMouse, disableMouse } from './tui/mouse.mjs';
+import { enableBracketedPaste, disableBracketedPaste } from './tui/input.mjs';
 import { loadToken } from './tui/config.mjs';
 import { loadTheme } from './tui/theme.mjs';
 import { initScreen, getScreen, render } from './tui/render.mjs';
@@ -128,9 +129,10 @@ async function main() {
     process.exit(1);
   }
 
-  // Hide cursor; enable mouse.
+  // Hide cursor; enable mouse; enable bracketed paste.
   process.stdout.write('\x1b[?25l');
   enableMouse();
+  enableBracketedPaste();
 
   // Load persisted state.
   loadTheme();
@@ -200,6 +202,7 @@ async function main() {
     saveCurrentRepoPrefs();
     try { process.stdin.setRawMode(false); } catch {}
     disableMouse();
+    disableBracketedPaste();
     process.stdout.write('\x1b[?25h\x1b[2J\x1b[H');
   }
   process.on('exit', shutdown);

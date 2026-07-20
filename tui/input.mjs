@@ -4,6 +4,21 @@
 
 import { appState, render, showMessage } from './state.mjs';
 
+// Bracketed paste mode — enables proper paste handling.
+export function enableBracketedPaste() {
+  process.stdout.write('\x1b[?2004h');
+}
+
+export function disableBracketedPaste() {
+  process.stdout.write('\x1b[?2004l');
+}
+
+// Paste state tracking.
+let _pasting = false;
+let _pasteBuffer = '';
+
+export function isPasting() { return _pasting; }
+
 // Registry of input contexts. Each handler receives the trimmed buffer and
 // is responsible for actually consuming it / dispatching follow-up actions.
 const handlers = Object.create(null);
@@ -37,6 +52,26 @@ export function cancelInput() {
 // Returns true if the key was consumed by the input subsystem.
 export function handleInputKey(key) {
   if (appState.inputMode !== 'input') return false;
+
+  // Handle bracketed paste mode.
+  if (key === '\x1b[200~') { _pasting = true; _pasteBuffer = ''; return true; }
+  if (_pasting) {
+    if (key === '\x1b[201~') {
+      // End of paste — insert all buffered content at once.
+      _pasting = false;
+      const buf = Array.from(appState.inputBuffer);
+      const cur = appState.inputCursor != null ? appState.inputCursor : buf.length;
+      const pasted = Array.from(_pasteBuffer);
+      buf.splice(cur, 0, ...pasted);
+      appState.inputBuffer = buf.join('');
+      appState.inputCursor = cur + pasted.length;
+      _pasteBuffer = '';
+      render();
+      return true;
+    }
+    _pasteBuffer += key;
+    return true;
+  }
 
   if (key === '\r' || key === '\n') {
     const ctx = appState.inputContext;
@@ -166,7 +201,7 @@ export function handleInputKey(key) {
   }
 
   // Printable ASCII + above. We accept multi-byte UTF-8 too.
-  if (key.length >= 1 && (key.charCodeAt(0) >= 32 || key.charCodeAt(0) > 127)) {
+  if (key.length >= 1 && key.charCodeAt(0) >= 32) {
     const buf = Array.from(appState.inputBuffer);
     const cur = appState.inputCursor != null ? appState.inputCursor : buf.length;
     buf.splice(cur, 0, ...Array.from(key));

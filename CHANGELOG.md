@@ -2,6 +2,106 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.6.3] - 2026-07-20
+
+### Added — Undo/Redo System
+- New `tui/undo.mjs` module with full undo/redo stack (20-entry limit)
+- Supports: bookmark removal, star/unstar, unsubscribe, issue/PR close
+- Keybindings: `u` for undo, `Ctrl+Y` for redo
+- Convenience functions: `undoableRemoveBookmark()`, `undoableUnstar()`, `undoableUnsubscribe()`, `undoableCloseIssue()`
+
+### Added — Virtual Scrolling Helper
+- New `tui/virtual-scroll.mjs` module for standardized virtual scrolling
+- `calculateViewport()` — computes visible window for large lists
+- `handleScroll()` — standardizes scroll behavior (up/down/page/top/bottom)
+- `handleWheel()` — mouse wheel scroll handling
+- `getItemAtRow()` — maps row position to item index
+
+### Added — Error Recovery System
+- New `tui/error-recovery.mjs` with contextual error messages and recovery hints
+- `showError()` — displays error with recovery suggestion based on pattern matching
+- `withErrorRecovery()` — wraps async functions with automatic error handling
+- `createRetryHandler()` — creates retry handlers for failed operations
+- Recognizes 8 error patterns: 401, 403/rate limit, 404, network, timeout, connection reset, SSL
+- Updated repos, inbox, dashboard, actions, and detail tabs to use error recovery
+
+### Added — Responsive Layout System
+- New `tui/layout.mjs` with percentage-based sizing and adaptive columns
+- `getBreakpoint()` — returns 'xs'/'sm'/'md'/'lg'/'xl' based on terminal width
+- `calculateColumns()` — ratio-based column width calculation with min/max
+- `splitLayout()` — left/right panel split with configurable ratio
+- `getStatCardLayout()` — responsive stat card sizing for dashboard
+- `getResponsiveConfig()` — compact mode, column visibility settings
+- `getDetailPopupLayout()` — adaptive popup dimensions
+- Repos tab columns and dashboard stat cards now adapt to terminal width
+
+### Added — Focus Management System
+- New `tui/focus.mjs` with Tab/Shift+Tab navigation between focus zones
+- Per-tab focus zones with canFocus() guards
+- `focusNext()` / `focusPrev()` / `resetFocus()` for keyboard navigation
+- `getFocusedSelection()` for tracking current focus state
+
+### Added — Paste Handling
+- Bracketed paste mode enabled for proper multi-line text paste
+- `enableBracketedPaste()` / `disableBracketedPaste()` in `tui/input.mjs`
+- Pasted content is inserted atomically instead of character-by-character
+
+### Added — Per-Widget Loading States
+- Dashboard widgets now track individual loading state
+- `setWidgetLoading()` / `isWidgetLoading()` in `tui/state.mjs`
+- Enables granular UI feedback during dashboard load
+
+### Added — Custom Keybindings Validation
+- `tui/custom-keys.mjs` now validates keybinding entries against schema
+- Invalid entries show warnings with specific error messages
+- Supports contexts: any, detail, repo, dashboard, files
+
+### Fixed — CJK/Wide Character Support
+- `strWidth()` now correctly counts CJK characters as width 2
+- Handles UTF-16 surrogate pairs for emoji and extended Unicode
+- Fixed ESC sequence parsing to properly skip CSI parameter/intermediate bytes
+
+### Fixed — 16-Color/Monochrome Fallback
+- `idx256Fg()` / `idx256Bg()` now fall back to nearest 16-color ANSI when 256-color isn't supported
+- Added `idx256ToAnsi16()` helper for accurate color mapping
+
+### Fixed — Confirm Dialog
+- `Enter` now confirms (previously was treated as cancel)
+- `Escape` / `n` / `N` cancels the dialog
+- Guard against concurrent confirm dialogs
+
+### Fixed — Render Debouncing
+- `render()` now uses `queueMicrotask` batching for rapid state mutations
+- Prevents render flooding during parallel operations
+
+### Fixed — Key Repeat Debouncing
+- Arrow keys held down are debounced at ~60fps
+- Prevents render flooding when keys are held
+
+### Fixed — Resize Recovery
+- `recoverScrollPositions()` ensures selections stay visible after terminal resize
+- Clamps selection indices and scroll offsets automatically
+
+### Fixed — Dynamic Import Optimization
+- Custom keybindings module is lazy-loaded once at startup
+- No longer imports module on every unrecognized keypress
+
+### Fixed — Mouse Coordinate Constants
+- Extracted `TAB_CONTENT_Y` in `tui/render.mjs`
+- Replaced hardcoded `HEADER_HEIGHT + N` values in `tui/mouse.mjs`
+
+### Changed
+- Removed `_global` scope fallback from `startAsync()` — now throws if no scope is provided
+- Updated repos, inbox, dashboard, actions, and detail tabs to use error recovery
+
+### Docs
+- README: updated version to 0.6.3
+- README: added new keyboard shortcuts (u for undo, Ctrl+Y for redo)
+- README: updated project layout with new modules
+- README: added v0.6.3 to roadmap
+
+---
+
 ## [0.6.2] - 2026-07-03
 
 ### Fixed — Actions tab (8 bugs)

@@ -10,6 +10,7 @@ import {
 import { startInput, registerInputHandler } from '../input.mjs';
 import { truncate, relTime, copyToClipboard } from '../utils.mjs';
 import { color } from '../theme.mjs';
+import { showError } from '../error-recovery.mjs';
 
 const REACTIONS = ['+1', '-1', 'laugh', 'confused', 'heart', 'hooray', 'rocket', 'eyes'];
 
@@ -84,9 +85,9 @@ async function loadDetail() {
     appState.detailLoading = false;
     showMessage('Loaded #' + number, 'success');
   } catch (e) {
-    if (!isStale(gen, 'detail')) showMessage(e.message || 'Failed to load detail', 'error');
-    appState.detailLoading = false;
+    if (!isStale(gen, 'detail')) showError(e.message || 'Unknown error', 'Load detail', { retry: loadDetail });
     appState.showDetail = false;
+    appState.detailLoading = false;
   }
   if (!isStale(gen, 'detail')) render();
 }

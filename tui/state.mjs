@@ -6,7 +6,17 @@
 
 let renderFn = () => {};
 export function bindRender(fn) { renderFn = fn; }
-export function render() { renderFn(); }
+
+// Debounced render — batches rapid state mutations into a single render.
+let _renderScheduled = false;
+export function render() {
+  if (_renderScheduled) return;
+  _renderScheduled = true;
+  queueMicrotask(() => {
+    _renderScheduled = false;
+    renderFn();
+  });
+}
 
 // ────────────────────────────────────────────────────────────────────────────
 // Async generation guard — every long-running operation grabs a generation
@@ -46,7 +56,11 @@ function _bumpScope(scope) {
  *       }
  * Both forms work — pick what's clearest at the call site.
  */
-export function startAsync(scope = '_global') {
+export function startAsync(scope) {
+  if (!scope) throw new Error(
+    'startAsync() requires an explicit scope string. ' +
+    'Pass a unique identifier like "repos-load", "dashboard-widgets", etc.'
+  );
   // Cancel any previous in-flight controller for this scope.
   const prev = asyncControllers[scope];
   if (prev && typeof prev.abort === 'function') {
@@ -81,16 +95,6 @@ export function isStale(handle, scope) {
 // which is guaranteed to be the same controller that the handle's isStale()
 // will check. Reading the current controller via a scope string races with
 // bumps and produces the wrong signal after the first re-fetch.
-
-// Backwards-compat thin wrappers — used during migration. They throw a clear
-// error so forgotten callsites are caught immediately rather than silently
-// dividing all scopes into 'global'.
-function _unsupportedMigration() {
-  throw new Error(
-    'startAsync()/isStale() now REQUIRE an explicit scope string. ' +
-    'Pass a unique identifier like "repos-load", "dashboard-widgets", etc.'
-  );
-}
 
 // ────────────────────────────────────────────────────────────────────────────
 // Current tab index. 0-based. Drives the top tab strip and render dispatch.
@@ -226,6 +230,7 @@ export const appState = {
   starredPage: 1,
   starredHasMore: false,
   dashboardLoaded: false,
+  dashboardLoadingWidgets: {},  // { [widgetName]: boolean } — per-widget loading state
   dashboardContributions: null,  // { weeks: [[day, day, ...], ...] } heatmap data
   dashboardRecentIssues: [],     // recently opened/updated issues across repos
   dashboardRecentPRs: [],        // recently opened/updated PRs across repos
@@ -374,12 +379,15 @@ export function showMessage(text, type = 'info', durationMs = 3000) {
 export function clearMessage() {
   appState.message = null;
   if (appState.messageTimer) { clearTimeout(appState.messageTimer); appState.messageTimer = null; }
+  render();
 }
 
 // ────────────────────────────────────────────────────────────────────────────
 // Confirmation dialog for destructive actions.
 // ────────────────────────────────────────────────────────────────────────────
 export function confirm(message, action, title = 'Confirm') {
+  // Guard: if a confirm is already showing, ignore the new one.
+  if (appState.confirmAction) return;
   appState.confirmMessage = message;
   appState.confirmAction = action;
   appState.confirmTitle = title;
@@ -452,6 +460,15 @@ export function loadCollapsed() {
       appState.collapsed = JSON.parse(readFileSync(COLLAPSED_PATH, 'utf8'));
     }
   } catch {}
+}
+
+// ── Per-widget loading state for dashboard ──
+export function setWidgetLoading(widget, loading) {
+  appState.dashboardLoadingWidgets[widget] = loading;
+}
+
+export function isWidgetLoading(widget) {
+  return appState.dashboardLoadingWidgets[widget] === true;
 }
 
 // ── Session persistence — save/restore navigation state across restarts ──

@@ -1,7 +1,7 @@
 // Mouse support — parse terminal mouse events and dispatch to handlers.
 
 import { appState, tabState, setTab, render, TABS, toggleCollapse, showMessage } from './state.mjs';
-import { getScreen, HEADER_HEIGHT } from './render.mjs';
+import { getScreen, HEADER_HEIGHT, TAB_CONTENT_Y } from './render.mjs';
 import { setTheme } from './theme.mjs';
 import { startInput } from './input.mjs';
 import { openUrl } from './utils.mjs';
@@ -80,7 +80,7 @@ export function handleMouseEvent(event) {
 
     // Repos tab list.
     if (t === 1) {
-      const rowOff = appState.reposView === 'starred' ? HEADER_HEIGHT + 5 : HEADER_HEIGHT + 8;
+      const rowOff = appState.reposView === 'starred' ? TAB_CONTENT_Y[1] + 3 : TAB_CONTENT_Y[1] + 6;
       if (sy >= rowOff) {
         const listIdx = sy - rowOff;
         const scroll = appState.reposView === 'starred' ? appState.starredScroll : appState.repoScroll;
@@ -98,7 +98,7 @@ export function handleMouseEvent(event) {
 
     // Inbox tab list.
     if (t === 4) {
-      const rowOff = HEADER_HEIGHT + 2;
+      const rowOff = TAB_CONTENT_Y[4];
       if (sy >= rowOff) {
         const listIdx = sy - rowOff;
         const absIdx = listIdx + appState.inboxScroll;
@@ -123,7 +123,7 @@ export function handleMouseEvent(event) {
 
     // Actions tab list.
     if (t === 3) {
-      const rowOff = HEADER_HEIGHT + 2;
+      const rowOff = TAB_CONTENT_Y[3];
       if (sy >= rowOff) {
         const listIdx = sy - rowOff;
         if (appState.actionsView === 'repos') {
@@ -250,7 +250,7 @@ function handleClick(col, row) {
   }
 
   // Pane tabs at screen row HEADER_HEIGHT + 5 (9), analyze only.
-  if (sy === HEADER_HEIGHT + 5 && tabState.current === 2) {
+  if (sy === TAB_CONTENT_Y[2] + 3 && tabState.current === 2) {
     handlePaneTabClick(sx);
     return;
   }
@@ -299,7 +299,7 @@ function handleDblClick(sx, sy) {
   const screen = getScreen();
   if (!screen) return false;
   const W = screen.width, H = screen.height;
-  const y = HEADER_HEIGHT + 2;
+  const y = TAB_CONTENT_Y[0];
   const h = H - HEADER_HEIGHT - 2 - 2;
   const cardW = Math.min(16, Math.max(10, Math.floor((W - 2) / 5) - 2));
   const gap = 2;
@@ -470,7 +470,7 @@ function dispatchDashboardClick(sx, sy) {
   const screen = getScreen();
   if (!screen) { render(); return; }
   const W = screen.width, H = screen.height;
-  const y = HEADER_HEIGHT + 2;  // contentY
+  const y = TAB_CONTENT_Y[0];
   const h = H - HEADER_HEIGHT - 2 - 2;
   const cardW = Math.min(16, Math.max(10, Math.floor((W - 2) / 5) - 2));
   const gap = 2;

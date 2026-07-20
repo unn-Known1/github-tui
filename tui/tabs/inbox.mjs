@@ -8,9 +8,10 @@ import {
 } from '../github.mjs';
 import { relTime, notifTypeColor, notificationToHtmlUrl, openUrl, truncate } from '../utils.mjs';
 import { color } from '../theme.mjs';
-import { emptyState, loadingIndicator, scrollIndicators } from '../render.mjs';
+import { emptyState, loadingIndicator, scrollIndicators, errorState } from '../render.mjs';
 import { openDetail } from './detail.mjs';
 import { startInput, registerInputHandler } from '../input.mjs';
+import { showError } from '../error-recovery.mjs';
 
 const FILTERS = ['all', 'unread', 'mentions', 'review'];
 const INBOX_PER_PAGE = 50;
@@ -33,7 +34,7 @@ export async function loadNotifications() {
     appState.selectedNotification = 0;
     showMessage('Loaded ' + appState.notifications.length + ' notifications', 'success');
   } catch (e) {
-    if (!isStale(gen)) showMessage(e.message || 'Failed to load notifications', 'error');
+    if (!isStale(gen)) showError(e.message || 'Unknown error', 'Load notifications', { retry: loadNotifications });
   }
   appState.loading = false;
   if (!isStale(gen)) render();
@@ -130,6 +131,11 @@ export async function markCurrentRead() {
   try {
     await markNotificationRead(appState.token, n.id);
     n.unread = false;
+    // Clamp cursor to filtered list bounds
+    const list = filtered();
+    if (appState.selectedNotification >= list.length) {
+      appState.selectedNotification = Math.max(0, list.length - 1);
+    }
     showMessage('✓ Marked as read', 'success');
     render();
   } catch (e) { showMessage('Failed: ' + e.message, 'error'); }
@@ -359,14 +365,14 @@ export function bottom(screen) {
   render();
 }
 
-export function up() {
+export function up(screen) {
   const list = filtered();
   if (list.length === 0) return;
-  if (appState.selectedNotification > appState.inboxScroll) {
-    appState.selectedNotification--;
-  } else if (appState.inboxScroll > 0) {
-    appState.inboxScroll--;
-    appState.selectedNotification--;
+  const maxVisible = Math.max(1, (screen ? screen.height : process.stdout.rows || 24) - 15);
+  appState.selectedNotification = Math.max(0, appState.selectedNotification - 1);
+  // Scroll up to keep selection visible
+  if (appState.selectedNotification < appState.inboxScroll) {
+    appState.inboxScroll = appState.selectedNotification;
   }
   render();
 }
@@ -374,11 +380,10 @@ export function down(screen) {
   const list = filtered();
   if (list.length === 0) return;
   const maxVisible = Math.max(1, (screen ? screen.height : process.stdout.rows || 24) - 15);
-  if (appState.selectedNotification < appState.inboxScroll + maxVisible - 1) {
-    appState.selectedNotification = Math.min(list.length - 1, appState.selectedNotification + 1);
-  } else if (appState.inboxScroll + maxVisible < list.length) {
-    appState.inboxScroll++;
-    appState.selectedNotification = Math.min(list.length - 1, appState.selectedNotification + 1);
+  appState.selectedNotification = Math.min(list.length - 1, appState.selectedNotification + 1);
+  // Scroll down to keep selection visible
+  if (appState.selectedNotification >= appState.inboxScroll + maxVisible) {
+    appState.inboxScroll = appState.selectedNotification - maxVisible + 1;
   }
   render();
 }
@@ -393,5 +398,5 @@ export function getSections() {
 }
 
 export function getCurrentSection() {
-  return 'inbox:unread';
+  return 'inbox:' + (appState.inboxFilter || 'all');
 }

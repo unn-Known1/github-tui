@@ -7,12 +7,13 @@ import { removeToken } from '../config.mjs';
 import { startInput, registerInputHandler } from '../input.mjs';
 import { shortNum, relTime, truncate } from '../utils.mjs';
 import { color } from '../theme.mjs';
-import { emptyState, scrollIndicators } from '../render.mjs';
+import { emptyState, scrollIndicators, errorState, getBreakpoint } from '../render.mjs';
 import { loadDashboardWidgets } from './dashboard.mjs';
 import { isBookmarked } from '../store.mjs';
 import { togglePin } from '../store.mjs';
 import { loadRepoDetails } from './analyze.mjs';
 import { sortRepos as _sortRepos, applyAllFilters as _applyAllFilters, floatPinsToTop as _floatPinsToTop } from '../repos-logic.mjs';
+import { showError } from '../error-recovery.mjs';
 
 const REPOS_PER_PAGE = 30;
 import { STALE_DAYS } from '../repos-logic.mjs';
@@ -91,7 +92,7 @@ export async function loadUserData() {
     appState.user = await getAuthenticatedUser(appState.token);
     if (isStale(gen, 'repos')) { appState.loading = false; return; }
     if (appState.user) {
-      appState.repos = await getUserRepositories(appState.token, 1, REPOS_PER_PAGE);
+      appState.repos = await getUserRepositories(appState.token, 1, REPOS_PER_PAGE, gen.signal);
       appState.reposPage = 1;
       appState.reposHasMore = appState.repos.length >= REPOS_PER_PAGE;
       if (isStale(gen, 'repos')) { appState.loading = false; return; }
@@ -99,7 +100,7 @@ export async function loadUserData() {
       loadDashboardWidgets().catch(() => {});
     }
   } catch (e) {
-    if (!isStale(gen)) {
+    if (!isStale(gen, 'repos')) {
       const msg = (e && e.message) || '';
       if (/401|Bad credentials|Unauthorized/i.test(msg)) {
         removeToken();
@@ -107,14 +108,14 @@ export async function loadUserData() {
         appState.user = null;
         appState.repos = [];
         setTab(5);
-        showMessage('Stored token rejected — please log in again', 'error');
+        showError('Token rejected', 'Authentication', { retry: loadUserData });
       } else {
-        showMessage('Failed to load user data: ' + (msg || 'unknown'), 'error');
+        showError(msg || 'Unknown error', 'Load repos', { retry: loadUserData });
       }
     }
   }
   appState.loading = false;
-  if (!isStale(gen)) render();
+  if (!isStale(gen, 'repos')) render();
 }
 
 async function loadAllReposBackground(gen) {
@@ -130,7 +131,7 @@ async function loadAllReposBackground(gen) {
       appState.reposHasMore = more.length >= REPOS_PER_PAGE;
       page++;
     } catch (e) {
-      if (!isStale(gen)) showMessage('Background repo loading failed: ' + ((e && e.message) || 'unknown'), 'error');
+      if (!isStale(gen, 'repos')) showError(((e && e.message) || 'unknown'), 'Background repo load', { retry: () => loadAllReposBackground(gen) });
       appState.loading = false;
       return;
     }
@@ -141,13 +142,13 @@ async function loadAllReposBackground(gen) {
     appState.reposHasMore = false;  // we won't keep paging silently
     appState._moreReposAvailable = true;
     capped = true;
-    if (!isStale(gen)) showMessage(
+    if (!isStale(gen, 'repos')) showMessage(
       'Loaded first ' + appState.repos.length + ' repos (' + MAX_PAGES + ' pages). ' +
       'Press [l] or run \":repos loadMore\" in palette to fetch more.',
       'info', 6000
     );
   }
-  if (!isStale(gen)) render();
+  if (!isStale(gen, 'repos')) render();
 }
 
 export async function loadMoreRepos() {
@@ -157,17 +158,17 @@ export async function loadMoreRepos() {
   render();
   try {
     const page = appState.reposPage + 1;
-    const more = await getUserRepositories(appState.token, page, REPOS_PER_PAGE);
+    const more = await getUserRepositories(appState.token, page, REPOS_PER_PAGE, gen.signal);
     if (isStale(gen, 'repos')) { appState.loading = false; return; }
     appState.repos = [...appState.repos, ...more];
     appState.reposPage = page;
     appState.reposHasMore = more.length >= REPOS_PER_PAGE;
     showMessage('Loaded ' + appState.repos.length + ' repos total', 'info');
   } catch (e) {
-    if (!isStale(gen)) showMessage('Failed to load more repos', 'error');
+    if (!isStale(gen, 'repos')) showMessage('Failed to load more repos', 'error');
   }
   appState.loading = false;
-  if (!isStale(gen)) render();
+  if (!isStale(gen, 'repos')) render();
 }
 
 registerInputHandler('filter', (value) => {
@@ -331,15 +332,18 @@ export function renderRepos(screen, y, h) {
     return;
   }
 
-  // Responsive column positions.
+  // Responsive column positions based on terminal width.
+  const bp = getBreakpoint(W);
   const badgeW = 2;
   const nameCol = 2 + badgeW + 1;
-  const nameW = Math.max(15, Math.floor(W * 0.30));
+  const nameW = bp === 'xs' ? Math.max(10, Math.floor(W * 0.25))
+    : bp === 'sm' ? Math.max(12, Math.floor(W * 0.28))
+    : Math.max(15, Math.floor(W * 0.30));
   const langCol = nameCol + nameW + 1;
-  const starsCol = langCol + 12;
-  const forksCol = starsCol + 7;
-  const issuesCol = forksCol + 7;
-  const pushedCol = issuesCol + 8;
+  const starsCol = langCol + (bp === 'xs' ? 8 : 12);
+  const forksCol = starsCol + (bp === 'xs' ? 5 : 7);
+  const issuesCol = forksCol + (bp === 'xs' ? 5 : 7);
+  const pushedCol = issuesCol + (bp === 'xs' ? 6 : 8);
 
   // Column headers.
   const headerY = y + 4;
@@ -524,10 +528,10 @@ async function loadStarredRepos() {
     appState.starredHasMore = appState.starred.length >= 100;
     showMessage('Loaded ' + appState.starred.length + ' starred repos', 'success');
   } catch (e) {
-    if (!isStale(gen)) showMessage('Failed to load starred repos: ' + e.message, 'error');
+    if (!isStale(gen, 'repos')) showMessage('Failed to load starred repos: ' + e.message, 'error');
   }
   appState.loading = false;
-  if (!isStale(gen)) render();
+  if (!isStale(gen, 'repos')) render();
 }
 
 export async function loadMoreStarred() {
@@ -550,10 +554,10 @@ export async function loadMoreStarred() {
       showMessage('All starred repos loaded', 'info');
     }
   } catch (e) {
-    if (!isStale(gen)) showMessage('Failed to load more starred repos', 'error');
+    if (!isStale(gen, 'repos')) showMessage('Failed to load more starred repos', 'error');
   }
   appState.loading = false;
-  if (!isStale(gen)) render();
+  if (!isStale(gen, 'repos')) render();
 }
 
 export function pageUp() {
@@ -574,9 +578,9 @@ export function pageUp() {
       appState.loading = false;
       render();
     }).catch((e) => {
-      if (!isStale(gen)) showMessage('Failed to load starred page: ' + ((e && e.message) || 'unknown'), 'error');
+      if (!isStale(gen, 'repos')) showMessage('Failed to load starred page: ' + ((e && e.message) || 'unknown'), 'error');
       appState.loading = false;
-      if (!isStale(gen)) render();
+      if (!isStale(gen, 'repos')) render();
     });
   }
 }
@@ -601,9 +605,9 @@ export function pageDown() {
       appState.loading = false;
       render();
     }).catch((e) => {
-      if (!isStale(gen)) showMessage('Failed to load starred page: ' + ((e && e.message) || 'unknown'), 'error');
+      if (!isStale(gen, 'repos')) showMessage('Failed to load starred page: ' + ((e && e.message) || 'unknown'), 'error');
       appState.loading = false;
-      if (!isStale(gen)) render();
+      if (!isStale(gen, 'repos')) render();
     });
   }
 }

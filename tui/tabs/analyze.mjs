@@ -283,8 +283,29 @@ export function handleBack() {
       render();
       return;
     }
+    // Reset all detail-related state to avoid stale data flash
     appState.repoDetails = null;
     appState._readmeText = null;
+    appState.repoLanguages = null;
+    appState.repoContributors = [];
+    appState.repoReleases = [];
+    appState.repoReleaseAssets = [];
+    appState.repoIssues = [];
+    appState.repoPullRequests = [];
+    appState.repoTraffic = null;
+    appState.repoTrafficClones = null;
+    appState.repoTrafficPopularPaths = [];
+    appState.repoTrafficPopularReferrers = [];
+    appState.repoMilestones = [];
+    appState.repoLabels = [];
+    appState.repoCheckRuns = [];
+    appState.repoCheckSuites = [];
+    appState.repoDependabotAlerts = [];
+    appState.secretScanningAlerts = [];
+    appState.codeScanningAlerts = [];
+    appState.securityAdvisories = [];
+    appState.branchProtection = null;
+    appState.dependencyManifests = [];
     appState.analyzeView = 'results';
     render();
   } else if (v === 'results') {

@@ -15,23 +15,65 @@ import { spawn } from 'child_process';
 
 let _bindings = null;
 
+// Valid contexts for custom keybindings.
+const VALID_CONTEXTS = new Set(['any', 'detail', 'repo', 'dashboard', 'files']);
+
+// Validate a single binding entry. Returns null if valid, or an error message.
+function validateBinding(binding, index) {
+  if (!binding || typeof binding !== 'object') return `Entry ${index}: must be an object`;
+  if (!binding.key || typeof binding.key !== 'string' || binding.key.length !== 1) {
+    return `Entry ${index}: "key" must be a single character string`;
+  }
+  if (!binding.command || typeof binding.command !== 'string') {
+    return `Entry ${index}: "command" is required and must be a string`;
+  }
+  if (binding.context && !VALID_CONTEXTS.has(binding.context)) {
+    return `Entry ${index}: "context" must be one of: ${[...VALID_CONTEXTS].join(', ')}`;
+  }
+  if (binding.label && typeof binding.label !== 'string') {
+    return `Entry ${index}: "label" must be a string if provided`;
+  }
+  return null;
+}
+
 function loadBindings() {
   if (_bindings === null) {
-    _bindings = readJson(KEYBINDINGS_FILE, []);
-    if (!Array.isArray(_bindings)) _bindings = [];
+    const raw = readJson(KEYBINDINGS_FILE, []);
+    if (!Array.isArray(raw)) {
+      _bindings = [];
+    } else {
+      // Validate and filter entries, warning about invalid ones.
+      const valid = [];
+      for (let i = 0; i < raw.length; i++) {
+        const err = validateBinding(raw[i], i);
+        if (err) {
+          showMessage('Keybindings: ' + err, 'warning');
+        } else {
+          valid.push(raw[i]);
+        }
+      }
+      _bindings = valid;
+    }
   }
   return _bindings;
 }
 
 /**
- * Shell-escape a single placeholder value for POSIX sh.
- * Wraps the value in single quotes and escapes embedded single quotes.
+ * Shell-escape a single placeholder value for the current platform.
+ * - POSIX sh: wraps in single quotes and escapes embedded single quotes.
+ * - Windows cmd.exe: wraps in double quotes and escapes special characters.
  * This prevents a malicious repo name like "foo; rm -rf ~" from being
  * executed as a shell command.
  */
 function shellEscape(value) {
   if (!value) return "''";
-  return "'" + String(value).replace(/'/g, "'\\''") + "'";
+  const str = String(value);
+  if (process.platform === 'win32') {
+    // Windows cmd.exe escaping: wrap in double quotes, escape special chars
+    return '"' + str.replace(/"/g, '""').replace(/%/g, '%%').replace(/!/g, '^!') + '"';
+  }
+  // POSIX sh escaping: wrap in single quotes, escape embedded single quotes
+  return "'" + str.replace(/'/g, "'\\''") + "'";
 }
 
 function resolvePlaceholders(cmd) {

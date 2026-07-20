@@ -6,8 +6,9 @@ import { appState, render, startAsync, isStale, showMessage, setTab } from '../s
 import { getWorkflowRuns, getWorkflowJobs, rerunWorkflow, cancelWorkflowRun } from '../github.mjs';
 import { openUrl, relTime, truncate } from '../utils.mjs';
 import { color } from '../theme.mjs';
-import { emptyState, loadingIndicator, scrollIndicators, collapsibleHeader } from '../render.mjs';
+import { emptyState, loadingIndicator, scrollIndicators, collapsibleHeader, errorState } from '../render.mjs';
 import { startInput, registerInputHandler } from '../input.mjs';
+import { showError } from '../error-recovery.mjs';
 
 const RUNS_PER_PAGE = 30;
 
@@ -82,7 +83,7 @@ export async function loadWorkflowRuns() {
     appState.actionsRuns = runs;
     appState.actionsView = 'runs';
   } catch (e) {
-    if (!isStale(gen)) showMessage('Failed to load runs: ' + e.message, 'error');
+    if (!isStale(gen)) showError(e.message, 'Load workflow runs', { retry: loadWorkflowRuns });
   }
   appState.actionsLoading = false;
   if (!isStale(gen)) render();
@@ -418,12 +419,11 @@ export function up() {
     const runs = appState.actionsRuns;
     if (runs.length === 0) return;
     appState.actionsSelected = Math.max(0, appState.actionsSelected - 1);
+    // Scroll up to keep selection visible
     if (appState.actionsSelected < appState.actionsScroll) {
-      appState.actionsScroll = Math.max(0, appState.actionsScroll - 1);
+      appState.actionsScroll = appState.actionsSelected;
     }
-    if (appState.actionsExpandedRun != null) {
-      appState.actionsExpandedRun = runs[appState.actionsSelected] && runs[appState.actionsSelected].id || null;
-    }
+    // Don't auto-collapse expanded run on arrow navigation
     render();
   }
 }
@@ -435,7 +435,7 @@ export function down() {
     if (repos.length === 0) return;
     appState.actionsRepoSelected = Math.min(repos.length - 1, appState.actionsRepoSelected + 1);
     if (appState.actionsRepoSelected >= appState.actionsRepoScroll + maxVisible) {
-      appState.actionsRepoScroll++;
+      appState.actionsRepoScroll = appState.actionsRepoSelected - maxVisible + 1;
     }
     render();
   } else {
@@ -444,11 +444,9 @@ export function down() {
     if (runs.length === 0) return;
     appState.actionsSelected = Math.min(runs.length - 1, appState.actionsSelected + 1);
     if (appState.actionsSelected >= appState.actionsScroll + maxVisible) {
-      appState.actionsScroll++;
+      appState.actionsScroll = appState.actionsSelected - maxVisible + 1;
     }
-    if (appState.actionsExpandedRun != null) {
-      appState.actionsExpandedRun = runs[appState.actionsSelected] && runs[appState.actionsSelected].id || null;
-    }
+    // Don't auto-collapse expanded run on arrow navigation
     render();
   }
 }

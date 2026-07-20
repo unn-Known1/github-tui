@@ -90,8 +90,8 @@ function sectionHeader(screen, x, y, text, maxW) {
   // Local extension of utils.sectionHeader that ALSO draws an underline row
   // at y+1 — used for the Settings tab's left-column dividers.
   screen.writeStr(x, y, text, { fg: 'cyan', bold: true });
-  const W = maxW || screen.width;
-  for (let i = x; i < x + (W - x); i++) {
+  const underlineEnd = Math.min(x + text.length + 4, maxW || screen.width);
+  for (let i = x; i < underlineEnd; i++) {
     screen.setCell(i, y + 1, '─', { dim: true });
   }
 }

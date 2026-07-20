@@ -1045,5 +1045,8 @@ export function loadTheme() {
 
 export function color(role) {
   if (NO_COLOR) return null;
-  return THEMES[active][role] ?? null;
+  const style = THEMES[active][role];
+  if (!style) return null;
+  // Return a shallow copy to prevent accidental mutation of theme objects
+  return { ...style };
 }

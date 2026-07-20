@@ -8,7 +8,8 @@
 // Existing plaintext tokens are silently migrated to the keychain on first save.
 
 import { homedir } from 'os';
-import { join } from 'path';
+import { join, dirname } from 'path';
+import { fileURLToPath } from 'url';
 import {
   existsSync, readFileSync, writeFileSync,
   mkdirSync, unlinkSync, chmodSync,
@@ -22,7 +23,10 @@ import {
 export const NO_COLOR   = !!process.env.NO_COLOR;
 export const FORCE_COLOR = process.env.FORCE_COLOR !== '0' && !!process.env.FORCE_COLOR;
 
-export const APP_VERSION = '0.6.2';
+// Read version dynamically from package.json — single source of truth.
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = dirname(__filename);
+export const APP_VERSION = JSON.parse(readFileSync(join(__dirname, '..', 'package.json'), 'utf8')).version;
 
 export const CONFIG_DIR = join(homedir(), '.github-tui');
 export const TOKEN_FILE = join(CONFIG_DIR, 'token');
@@ -79,7 +83,7 @@ export function saveToken(token) {
     tokenStorageBackend = detectBackend() || 'plaintext';
     // Remove legacy plaintext file if it exists (clean migration)
     try { if (existsSync(TOKEN_FILE)) unlinkSync(TOKEN_FILE); } catch {}
-    return;
+    return tokenStorageBackend;
   }
 
   // 2. Fall back to plaintext with strict permissions
@@ -94,6 +98,7 @@ export function saveToken(token) {
   } catch {
     // Best-effort; ignore on platforms that don't support POSIX modes.
   }
+  return tokenStorageBackend;
 }
 
 export function removeToken() {

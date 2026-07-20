@@ -331,6 +331,11 @@ export function request(path, opts) {
             msg += ' (' + errBody.errors.map(e => e.message || e.code).join(', ') + ')';
           }
         } catch (e) {}
+        // Invalidate ETag cache on 4xx errors (except 403 rate limit) to prevent stale data
+        if (res.statusCode >= 400 && res.statusCode < 500 && res.statusCode !== 403) {
+          const cacheKey = `${method}:${path}`;
+          etagCache.delete(cacheKey);
+        }
         reject(new GitHubApiError(msg, res.statusCode, path));
       });
     });

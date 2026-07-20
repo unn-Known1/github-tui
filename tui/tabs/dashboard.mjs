@@ -1,7 +1,7 @@
 // Dashboard tab — the home screen.
 // v0.5+ design: cleaner section cards, focus-aware stat cards, breadcrumb-aware.
 
-import { appState, render, startAsync, isStale, showMessage, setTab, confirm } from '../state.mjs';
+import { appState, render, startAsync, isStale, showMessage, setTab, confirm, setWidgetLoading } from '../state.mjs';
 import { STALE_DAYS } from '../repos-logic.mjs';
 import { startInput, registerInputHandler } from '../input.mjs';
 import {
@@ -11,39 +11,66 @@ import {
 } from '../github.mjs';
 import { relTime, eventGlyph, greeting, shortNum, truncate, openUrl } from '../utils.mjs';
 import { color } from '../theme.mjs';
-import { emptyState, collapsibleHeader, loadingIndicator, getScreen } from '../render.mjs';
+import { emptyState, collapsibleHeader, loadingIndicator, getScreen, errorState, getBreakpoint, getStatCardLayout } from '../render.mjs';
 import { loadRepoDetails } from './analyze.mjs';
+import { showError } from '../error-recovery.mjs';
 
 export async function loadDashboardWidgets(force = false) {
   if (!appState.token || !appState.user) return;
   if (appState.dashboardLoaded && !force) return;
   const gen = startAsync('dashboard-widgets');
   const username = appState.user.login;
+
+  // Mark individual widgets as loading.
+  setWidgetLoading('events', true);
+  setWidgetLoading('trending', true);
+  setWidgetLoading('starred', true);
+  setWidgetLoading('issues', true);
+  setWidgetLoading('prs', true);
+  setWidgetLoading('followers', true);
+  render();
+
   try {
-    const safe = (p) => p.catch(() => null);
     const days = appState.trendingPeriod || 7;
-    const [events, trending, starred, issues, prs, followers] = await Promise.all([
-      safe(getUserEvents(appState.token, username, 100, gen.signal)),
-      safe(getTrendingRepos(appState.token, days, 100, gen.signal)),
-      safe(getStarredRepos(appState.token, 1, 100, gen.signal)),
-      safe(getUserIssues(appState.token, 1, 10, gen.signal)),
-      safe(getUserPullRequests(appState.token, 1, 10, gen.signal)),
-      safe(getUserFollowers(appState.token, 1, 10, gen.signal)),
+    const results = await Promise.allSettled([
+      getUserEvents(appState.token, username, 100, gen.signal),
+      getTrendingRepos(appState.token, days, 100, gen.signal),
+      getStarredRepos(appState.token, 1, 100, gen.signal),
+      getUserIssues(appState.token, 1, 10, gen.signal),
+      getUserPullRequests(appState.token, 1, 10, gen.signal),
+      getUserFollowers(appState.token, 1, 10, gen.signal),
     ]);
-    if (isStale(gen, 'dashboard-widgets')) { appState.loading = false; return; }
+    const extract = (r) => r.status === 'fulfilled' ? r.value : null;
+    const [events, trending, starred, issues, prs, followers] = results.map(extract);
+    if (isStale(gen, 'dashboard-widgets')) {
+      setWidgetLoading('events', false);
+      setWidgetLoading('trending', false);
+      setWidgetLoading('starred', false);
+      setWidgetLoading('issues', false);
+      setWidgetLoading('prs', false);
+      setWidgetLoading('followers', false);
+      appState.loading = false;
+      return;
+    }
     appState.events = Array.isArray(events) ? events : [];
+    setWidgetLoading('events', false);
     appState.trending = Array.isArray(trending) ? trending : [];
     appState.trendingPage = 1;
     appState.trendingScroll = 0;
     appState.trendingSelected = 0;
     appState.trendingHasMore = appState.trending.length >= 100;
+    setWidgetLoading('trending', false);
     appState.starred = Array.isArray(starred) ? starred.map(s => ({
       ...(s.repo || s),
       starred_at: s.starred_at,
     })) : [];
+    setWidgetLoading('starred', false);
     appState.dashboardRecentIssues = Array.isArray(issues) ? issues : [];
+    setWidgetLoading('issues', false);
     appState.dashboardRecentPRs = Array.isArray(prs) ? (prs.items || prs) : [];
+    setWidgetLoading('prs', false);
     appState.userFollowers = Array.isArray(followers) ? followers : [];
+    setWidgetLoading('followers', false);
     appState.dashboardContributions = buildHeatmap(appState.events);
     const staleResult = findStaleRepos(appState.repos);
     appState.dashboardStaleCount = staleResult.count;
@@ -62,7 +89,7 @@ export async function loadDashboardWidgets(force = false) {
 
     render();
   } catch (e) {
-    if (!isStale(gen, 'dashboard-widgets')) showMessage('Dashboard widgets failed: ' + e.message, 'error');
+    if (!isStale(gen, 'dashboard-widgets')) showError(e.message, 'Dashboard widgets', { retry: () => loadDashboardWidgets(true) });
   }
 }
 
@@ -214,11 +241,12 @@ export function renderDashboard(screen, y, h) {
     ? ((Date.now() - new Date(user.created_at).getTime()) / (365.25 * 86400 * 1000)).toFixed(1)
     : '?';
 
-  const cardCount = 5;
-  const margin = 2;
-  const gap = 1;
-  const cardW = Math.max(14, Math.floor((W - margin * 2 - gap * (cardCount - 1)) / cardCount));
+  // Responsive card layout based on terminal width
+  const cardLayout = getStatCardLayout(W, 5);
+  const cardW = cardLayout.cardWidth;
+  const gap = cardLayout.gap;
   const cardH = 4;
+  const margin = 2;
   const cards = [
     { label: 'STARS',         value: shortNum(totalStars),                            style: { fg: 'yellow', bold: true } },
     { label: 'FORKS',         value: shortNum(totalForks),                            style: { fg: 'cyan', bold: true } },
@@ -673,7 +701,9 @@ export function pageUp() {
       if (Array.isArray(more)) {
         appState.trending = more;
         appState.trendingPage = page;
-        appState.trendingHasMore = true;
+        appState.trendingHasMore = more.length >= 10;
+        appState.trendingSelected = 0;
+        appState.trendingScroll = 0;
       }
       appState.loading = false;
       render();

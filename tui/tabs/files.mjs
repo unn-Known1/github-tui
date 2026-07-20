@@ -263,12 +263,17 @@ export async function saveCurrentFolder() {
     if (seenFiles.length > 0) {
       showMessage('Downloading ' + seenFiles.length + ' files…', 'info');
       render();
-      // Concurrency cap 4 — fetch + write each.
+      // Concurrency cap 4 — fetch + write each. Use mutex to protect cursor.
       let cursor = 0;
+      const nextFile = () => {
+        if (cursor >= seenFiles.length) return null;
+        return seenFiles[cursor++];
+      };
       const worker = async () => {
-        while (cursor < seenFiles.length) {
+        while (true) {
           if (isStale(gen) || gen.signal.aborted) { appState.loading = false; return; }
-          const e = seenFiles[cursor++];
+          const e = nextFile();
+          if (!e) break;
           try {
             const txt = await getRepoFile(
               appState.token, owner, name, e.path, appState.filesRef, gen.signal);
@@ -703,9 +708,17 @@ let _backInProgress = false;
 export async function backOrLeave() {
   if (_backInProgress) return true;
   if (appState.filesBranchPicker) { appState.filesBranchPicker = false; render(); return true; }
-  if (appState.fileViewing) { _backInProgress = true; await goUp(); _backInProgress = false; return true; }
-  if (appState.filesPath) { _backInProgress = true; await goUp(); _backInProgress = false; return true; }
-  return false; // let analyze.handleBack take over
+  if (appState.fileViewing) {
+    _backInProgress = true;
+    try { await goUp(); } finally { _backInProgress = false; }
+    return true;
+  }
+  if (appState.filesPath && appState.filesPath !== '' && appState.filesPath !== '/') {
+    _backInProgress = true;
+    try { await goUp(); } finally { _backInProgress = false; }
+    return true;
+  }
+  return false; // at files root — let analyze.handleBack take over
 }
 
 export const keys = {
@@ -719,6 +732,8 @@ export const keys = {
     if (appState.fileViewing) {
       if (copyToClipboard(appState.fileText)) showMessage('File contents copied', 'success');
       else showMessage('Too big for OSC-52 — use [s] save instead', 'warning');
+    } else {
+      showMessage('Open a file first with [Enter] to copy its contents', 'info');
     }
   },
   'g': jumpTop,

@@ -86,13 +86,64 @@ function rgbBg(r, g, b) { return TERM_CAPABILITIES.supportsTrueColor ? `${ESC}[4
 function hexFg(hex) { const [r, g, b] = hexParse(hex); return rgbFg(r, g, b); }
 function hexBg(hex) { const [r, g, b] = hexParse(hex); return rgbBg(r, g, b); }
 
-// 256-color index sequences
-function idx256Fg(n) { return TERM_CAPABILITIES.supports256 ? `${ESC}[38;5;${n}m` : ''; }
-function idx256Bg(n) { return TERM_CAPABILITIES.supports256 ? `${ESC}[48;5;${n}m` : ''; }
+// 256-color index sequences with fallback to 16-color ANSI
+function idx256Fg(n) {
+  if (TERM_CAPABILITIES.supports256) return `${ESC}[38;5;${n}m`;
+  // Fallback: map 256-color index to nearest 16-color ANSI
+  const ansi = idx256ToAnsi16(n);
+  if (ansi === null) return '';
+  // Bright colors (8-15) use 90-97 for foreground
+  return ansi >= 8 ? `${ESC}[9${ansi - 8}m` : `${ESC}[3${ansi}m`;
+}
+function idx256Bg(n) {
+  if (TERM_CAPABILITIES.supports256) return `${ESC}[48;5;${n}m`;
+  const ansi = idx256ToAnsi16(n);
+  if (ansi === null) return '';
+  // Bright colors (8-15) use 100-107 for background
+  return ansi >= 8 ? `${ESC}[10${ansi - 8}m` : `${ESC}[4${ansi}m`;
+}
+
+// Map a 256-color index to the nearest 16-color ANSI index (0-15).
+function idx256ToAnsi16(n) {
+  // Standard 16-color palette as RGB (approximate)
+  const palette16 = [
+    [0,0,0],[128,0,0],[0,128,0],[128,128,0],[0,0,128],[128,0,128],[0,128,128],[192,192,192],
+    [128,128,128],[255,0,0],[0,255,0],[255,255,0],[0,0,255],[255,0,255],[0,255,255],[255,255,255],
+  ];
+  // Convert 256-color index to RGB
+  let r, g, b;
+  if (n < 16) return n; // already in 16-color range
+  if (n >= 232) {
+    // Grayscale ramp (232-255)
+    const gray = 8 + (n - 232) * 10;
+    r = g = b = gray;
+  } else {
+    // 6x6x6 cube (16-231)
+    n -= 16;
+    r = Math.floor(n / 36) * 51;
+    g = Math.floor((n % 36) / 6) * 51;
+    b = (n % 6) * 51;
+  }
+  // Find nearest in 16-color palette
+  let best = 0, bestDist = Infinity;
+  for (let i = 0; i < 16; i++) {
+    const dr = r - palette16[i][0];
+    const dg = g - palette16[i][1];
+    const db = b - palette16[i][2];
+    const dist = dr * dr + dg * dg + db * db;
+    if (dist < bestDist) { bestDist = dist; best = i; }
+  }
+  return best;
+}
 
 function hexParse(hex) {
   const h = hex.replace('#', '');
-  return [parseInt(h.slice(0, 2), 16), parseInt(h.slice(2, 4), 16), parseInt(h.slice(4, 6), 16)];
+  // Validate hex string and provide safe defaults for malformed input
+  const parseHex = (s) => {
+    const n = parseInt(s, 16);
+    return isNaN(n) ? 0 : Math.max(0, Math.min(255, n));
+  };
+  return [parseHex(h.slice(0, 2)), parseHex(h.slice(2, 4)), parseHex(h.slice(4, 6))];
 }
 
 // Convert RGB to nearest xterm-256 color index (6x6x6 cube + grays)
@@ -135,17 +186,63 @@ function compileStyle(s) {
   return parts.length > 0 ? parts.join('') : null;
 }
 
-// Unicode safe cell width
+// Unicode safe cell width — handles CJK wide characters and ESC sequences.
+// CJK Compatibility Ideographs, Hiragana, Katakana, Hangul, etc. occupy 2 cells.
+function isWideCodePoint(cp) {
+  return (cp >= 0x1100 && cp <= 0x115F) || // Hangul Jamo
+    cp === 0x2329 || cp === 0x232A ||
+    (cp >= 0x2E80 && cp <= 0x303E) || // CJK Radicals, Kangxi, Ideographic
+    (cp >= 0x3040 && cp <= 0x33BF) || // Hiragana, Katakana, Bopomofo, Hangul
+    (cp >= 0x3400 && cp <= 0x4DBF) || // CJK Unified Ideographs Extension A
+    (cp >= 0x4E00 && cp <= 0xA4CF) || // CJK Unified, Yi
+    (cp >= 0xAC00 && cp <= 0xD7A3) || // Hangul Syllables
+    (cp >= 0xF900 && cp <= 0xFAFF) || // CJK Compatibility Ideographs
+    (cp >= 0xFE30 && cp <= 0xFE6F) || // CJK Compatibility Forms
+    (cp >= 0xFF01 && cp <= 0xFF60) || // Fullwidth Forms
+    (cp >= 0xFFE0 && cp <= 0xFFE6) ||
+    (cp >= 0x20000 && cp <= 0x2FFFD) || // CJK Unified Extension B-F
+    (cp >= 0x30000 && cp <= 0x3FFFD);
+}
+
 function strWidth(s) {
   let w = 0;
   for (let i = 0; i < s.length; i++) {
     const c = s.charCodeAt(i);
+    // Handle ESC sequences
     if (c === 0x1b) {
       i++;
-      while (i < s.length && !(s.charCodeAt(i) >= 0x40 && s.charCodeAt(i) <= 0x7e)) i++;
+      if (i < s.length) {
+        const next = s.charCodeAt(i);
+        if (next === 0x5B) {
+          // CSI sequence: ESC [ ... final_byte
+          while (i < s.length && s.charCodeAt(i) >= 0x20 && s.charCodeAt(i) <= 0x3F) i++;
+          if (i < s.length && s.charCodeAt(i) >= 0x40 && s.charCodeAt(i) <= 0x7E) i++;
+        } else if (next === 0x5D) {
+          // OSC sequence: ESC ] ... (BEL or ST)
+          while (i < s.length) {
+            const ch = s.charCodeAt(i);
+            if (ch === 0x07 || ch === 0x9C) { i++; break; } // BEL or ST
+            if (ch === 0x1b && i + 1 < s.length && s.charCodeAt(i + 1) === 0x5C) { i += 2; break; } // ESC \
+            i++;
+          }
+        } else {
+          // Other ESC sequences: skip intermediate + final byte
+          while (i < s.length && s.charCodeAt(i) >= 0x20 && s.charCodeAt(i) <= 0x2F) i++;
+          if (i < s.length && s.charCodeAt(i) >= 0x30 && s.charCodeAt(i) <= 0x7E) i++;
+        }
+      }
       continue;
     }
-    w++;
+    // Handle UTF-16 surrogate pairs
+    let cp = c;
+    if (c >= 0xD800 && c <= 0xDBFF && i + 1 < s.length) {
+      const low = s.charCodeAt(i + 1);
+      if (low >= 0xDC00 && low <= 0xDFFF) {
+        cp = 0x10000 + ((c - 0xD800) << 10) + (low - 0xDC00);
+        i++;
+      }
+    }
+    w += isWideCodePoint(cp) ? 2 : 1;
   }
   return w;
 }
@@ -181,6 +278,8 @@ export class Screen {
       this.height = h;
       this._init();
       // Diff-based renderer handles the full redraw — no explicit clear needed.
+      // Trigger scroll position recovery (imported lazily to avoid circular deps).
+      try { import('./render.mjs').then(m => m.recoverScrollPositions?.()); } catch {}
     }
   }
 
@@ -195,11 +294,21 @@ export class Screen {
 
   writeStr(x, y, str, style = null) {
     if (y < 0 || y >= this.height) return;
-    for (let i = 0; i < str.length; i++) {
-      const cx = x + i;
+    const chars = Array.from(str);
+    let cx = x;
+    for (let i = 0; i < chars.length; i++) {
+      const ch = chars[i];
+      const cp = ch.codePointAt(0);
+      const w = isWideCodePoint(cp) ? 2 : 1;
       if (cx < 0 || cx >= this.width) break;
-      this.charBuf[y][cx] = str[i];
+      this.charBuf[y][cx] = ch;
       this.styleBuf[y][cx] = style;
+      // For wide characters, fill the next cell with a continuation marker
+      if (w === 2 && cx + 1 < this.width) {
+        this.charBuf[y][cx + 1] = '\u200B'; // zero-width space as filler
+        this.styleBuf[y][cx + 1] = style;
+      }
+      cx += w;
     }
   }
 
@@ -207,10 +316,18 @@ export class Screen {
   // Useful for drawing characters over a previously-filled background.
   writeStrNoStyle(x, y, str) {
     if (y < 0 || y >= this.height) return;
-    for (let i = 0; i < str.length; i++) {
-      const cx = x + i;
+    const chars = Array.from(str);
+    let cx = x;
+    for (let i = 0; i < chars.length; i++) {
+      const ch = chars[i];
+      const cp = ch.codePointAt(0);
+      const w = isWideCodePoint(cp) ? 2 : 1;
       if (cx < 0 || cx >= this.width) break;
-      this.charBuf[y][cx] = str[i];
+      this.charBuf[y][cx] = ch;
+      if (w === 2 && cx + 1 < this.width) {
+        this.charBuf[y][cx + 1] = '\u200B';
+      }
+      cx += w;
     }
   }
 
@@ -249,9 +366,13 @@ export class Screen {
     if (h < 2 || w < 4 || y < 0 || y >= this.height) return;
 
     if (title) {
-      const pad = Math.max(0, Math.floor((w - title.length - 4) / 2));
-      const rightPad = Math.max(0, w - 2 - pad - title.length - 2);
-      const top = BOX.tl + BOX.h.repeat(pad) + ' ' + title + ' ' + BOX.h.repeat(rightPad) + BOX.tr;
+      // Truncate title to fit within box (accounting for borders + padding)
+      const maxTitleLen = Math.max(0, w - 4);
+      const truncatedTitle = maxTitleLen > 0 ? title.substring(0, maxTitleLen) : '';
+      const titleLen = truncatedTitle.length;
+      const pad = Math.max(0, Math.floor((w - titleLen - 4) / 2));
+      const rightPad = Math.max(0, w - 2 - pad - titleLen - 2);
+      const top = BOX.tl + BOX.h.repeat(pad) + ' ' + truncatedTitle + ' ' + BOX.h.repeat(rightPad) + BOX.tr;
       this.writeStr(x, y, top.substring(0, w), style);
     } else {
       this.writeStr(x, y, BOX.tl + BOX.h.repeat(w - 2) + BOX.tr, style);
@@ -330,7 +451,7 @@ export class Screen {
     let segs = segments.slice();
     if (totalLen > maxWidth) {
       // Truncate each non-first/non-last segment to fit.
-      const fixed = segs[0].length + sep.length + segs[last].length + 2 * sep.length + 2; // … marker
+      const fixed = strWidth(segs[0]) + sep.length + strWidth(segs[last]) + 2 * sep.length + 2; // … marker
       const remaining = maxWidth - fixed;
       if (remaining < 0) {
         // Path too long — just show last segment.
@@ -340,7 +461,7 @@ export class Screen {
         const midCount = segs.length - 2;
         const per = Math.max(1, Math.floor(remaining / midCount));
         for (let i = 1; i < last; i++) {
-          if (segs[i].length > per) segs[i] = segs[i].slice(0, Math.max(1, per - 1)) + '…';
+          if (strWidth(segs[i]) > per) segs[i] = segs[i].slice(0, Math.max(1, per - 1)) + '…';
         }
       }
     }

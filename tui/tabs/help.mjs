@@ -113,11 +113,13 @@ const CATEGORIES = [
   { id: 'settings',   name: 'SETTINGS',          shortcuts: [
     { key: '↑↓',        desc: 'Navigate menu items' },
     { key: 'Enter',     desc: 'Select / activate the highlighted item' },
-    { key: 's / S',       desc: 'Star the github-tui repo (show support!)' },
+    { key: 's / S',     desc: 'Star the github-tui repo (show support!)' },
     { key: 'o',         desc: 'Open github-tui repo in browser' },
     { key: 'r',         desc: 'Refresh user data' },
-    { key: 'y',         desc: 'Confirm a destructive action' },
-    { key: 'n / Esc',   desc: 'Cancel a destructive action' },
+  ]},
+  { id: 'confirm',    name: 'CONFIRM DIALOG',    shortcuts: [
+    { key: 'y / Y / Enter', desc: 'Confirm a destructive action' },
+    { key: 'n / N / Esc',   desc: 'Cancel a destructive action' },
   ]},
 ];
 

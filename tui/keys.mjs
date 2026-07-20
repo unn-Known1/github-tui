@@ -186,7 +186,18 @@ function quit() {
 // ──────────────────────────────────────────────────────────────────
 // Main entry — process.stdin pipes every keystroke through here.
 // ──────────────────────────────────────────────────────────────────
+
+// Key repeat debouncing — limit renders to ~60fps for held keys.
+let _lastKeyTime = 0;
+let _lastKeyStr = '';
+const KEY_REPEAT_DEBOUNCE_MS = 16; // ~60fps
+
 export function handleKey(key) {
+  // Debounce repeated keys (arrow keys held down).
+  const now = Date.now();
+  if (key === _lastKeyStr && now - _lastKeyTime < KEY_REPEAT_DEBOUNCE_MS) return;
+  _lastKeyTime = now;
+  _lastKeyStr = key;
   // 0. Ctrl+C always quits, no matter what overlay is open.
   if (key === '\x03') { quit(); return; }
 
@@ -267,14 +278,14 @@ export function handleKey(key) {
     return;
   }
 
-  // 2. Confirmation dialog — 'y' executes, anything else dismisses.
+  // 2. Confirmation dialog — 'y'/'Y'/Enter executes, 'n'/'N'/Esc cancels.
   if (appState.confirmAction) {
-    if (key === 'y' || key === 'Y') {
+    if (key === 'y' || key === 'Y' || key === '\r' || key === '\n') {
       const action = appState.confirmAction;
       appState.confirmAction = null;
       appState.confirmMessage = '';
       try { action(); } catch (e) { showMessage(e?.message || 'Action failed', 'error'); render(); }
-    } else {
+    } else if (key === 'n' || key === 'N' || key === '\x1b') {
       dismissConfirm();
     }
     return;
@@ -291,6 +302,7 @@ export function handleKey(key) {
       if (isSecurityPane) break; // let per-tab handler deal with it
       const i = parseInt(key, 10) - 1;
       setTab(i);
+      resetFocus(i);
       if (i === 4 && appState.notifications.length === 0 && appState.token) {
         inbox.loadNotifications();
       }
@@ -303,14 +315,28 @@ export function handleKey(key) {
       return;
     }
     case 'q': quit(); return;
-    case '\t':
-      // Tab always switches to next tab (consistent across all tabs).
-      setTab((tabState.current + 1) % TABS.length);
+    case '\t': {
+      // Tab: if overlays are open, cycle focus zones; otherwise switch tabs.
+      if (appState.showHelp || appState.showPalette || appState.showBookmarks || appState.showDetail) {
+        focusNext();
+      } else {
+        const target = (tabState.current + 1) % TABS.length;
+        setTab(target);
+        resetFocus(target);
+      }
       return;
-    case '\x1b[Z':
-      // Shift+Tab always switches to previous tab.
-      setTab((tabState.current - 1 + TABS.length) % TABS.length);
+    }
+    case '\x1b[Z': {
+      // Shift+Tab: if overlays are open, cycle focus zones backward; otherwise switch tabs.
+      if (appState.showHelp || appState.showPalette || appState.showBookmarks || appState.showDetail) {
+        focusPrev();
+      } else {
+        const target = (tabState.current - 1 + TABS.length) % TABS.length;
+        setTab(target);
+        resetFocus(target);
+      }
       return;
+    }
     case '?': appState.showHelp = true; render(); return;
     case '\x10':
     case ':': palette.open(); return;
@@ -357,6 +383,8 @@ export function handleKey(key) {
       handleExpandAll();
       return;
     }
+    case 'u': undo(); return;
+    case '\x19': redo(); return;  // Ctrl+Y
   }
 
   // 5. Global star toggle.
@@ -403,8 +431,8 @@ export function handleKey(key) {
     return;
   }
 
-  // 8. Custom user keybindings.
-  import('./custom-keys.mjs').then(m => m.runCustomKey(key)).catch(() => {});
+  // 8. Custom user keybindings (module loaded once, not per-keypress).
+  if (_customKeysModule) { _customKeysModule.runCustomKey(key); }
 }
 
 function handleSpace() {
@@ -728,3 +756,9 @@ export function registerCoreActions() {
 }
 
 import { submitSearch } from './tabs/analyze.mjs';
+import { focusNext, focusPrev, resetFocus, getFocusZone } from './focus.mjs';
+import { undo, redo } from './undo.mjs';
+
+// Lazy-loaded custom keybindings module — loaded once, not per-keypress.
+let _customKeysModule = null;
+import('./custom-keys.mjs').then(m => { _customKeysModule = m; }).catch(() => {});

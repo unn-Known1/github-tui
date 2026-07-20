@@ -29,6 +29,106 @@ let screen;
 export function getScreen() { return screen; }
 export function initScreen() { screen = new Screen(); return screen; }
 
+// Recover scroll positions and selection indices after terminal resize.
+// Ensures the selected item stays visible.
+export function recoverScrollPositions() {
+  if (!screen) return;
+  const H = screen.height;
+  const contentH = H - HEADER_HEIGHT - FOOTER_HEIGHT - 2;
+  if (contentH <= 0) return;
+
+  // Repos tab
+  const reposMaxVisible = Math.max(1, contentH - (appState.reposView === 'starred' ? 3 : 6));
+  if (appState.repoSelected >= appState.repos.length) {
+    appState.repoSelected = Math.max(0, appState.repos.length - 1);
+  }
+  if (appState.repoScroll > appState.repoSelected) {
+    appState.repoScroll = appState.repoSelected;
+  } else if (appState.repoScroll + reposMaxVisible <= appState.repoSelected) {
+    appState.repoScroll = Math.max(0, appState.repoSelected - reposMaxVisible + 1);
+  }
+
+  // Starred repos
+  if (appState.starredSelected >= appState.starred.length) {
+    appState.starredSelected = Math.max(0, appState.starred.length - 1);
+  }
+  if (appState.starredScroll > appState.starredSelected) {
+    appState.starredScroll = appState.starredSelected;
+  } else if (appState.starredScroll + reposMaxVisible <= appState.starredSelected) {
+    appState.starredScroll = Math.max(0, appState.starredSelected - reposMaxVisible + 1);
+  }
+
+  // Analyze tab
+  const analyzeMaxVisible = Math.max(1, Math.min(8, contentH - 4));
+  if (appState.selectedRepo >= appState.searchResults.length) {
+    appState.selectedRepo = Math.max(0, appState.searchResults.length - 1);
+  }
+  if (appState.searchScroll > appState.selectedRepo) {
+    appState.searchScroll = appState.selectedRepo;
+  } else if (appState.searchScroll + analyzeMaxVisible <= appState.selectedRepo) {
+    appState.searchScroll = Math.max(0, appState.selectedRepo - analyzeMaxVisible + 1);
+  }
+
+  // Actions tab
+  const actionsMaxVisible = Math.max(1, contentH - 2);
+  if (appState.actionsView === 'repos') {
+    if (appState.actionsRepoSelected >= appState.actionsRepos.length) {
+      appState.actionsRepoSelected = Math.max(0, appState.actionsRepos.length - 1);
+    }
+    if (appState.actionsRepoScroll > appState.actionsRepoSelected) {
+      appState.actionsRepoScroll = appState.actionsRepoSelected;
+    } else if (appState.actionsRepoScroll + actionsMaxVisible <= appState.actionsRepoSelected) {
+      appState.actionsRepoScroll = Math.max(0, appState.actionsRepoSelected - actionsMaxVisible + 1);
+    }
+  } else {
+    if (appState.actionsSelected >= appState.actionsRuns.length) {
+      appState.actionsSelected = Math.max(0, appState.actionsRuns.length - 1);
+    }
+    if (appState.actionsScroll > appState.actionsSelected) {
+      appState.actionsScroll = appState.actionsSelected;
+    } else if (appState.actionsScroll + actionsMaxVisible <= appState.actionsSelected) {
+      appState.actionsScroll = Math.max(0, appState.actionsSelected - actionsMaxVisible + 1);
+    }
+  }
+
+  // Inbox tab
+  if (appState.selectedNotification >= appState.notifications.length) {
+    appState.selectedNotification = Math.max(0, appState.notifications.length - 1);
+  }
+  if (appState.inboxScroll > appState.selectedNotification) {
+    appState.inboxScroll = appState.selectedNotification;
+  } else if (appState.inboxScroll + contentH <= appState.selectedNotification) {
+    appState.inboxScroll = Math.max(0, appState.selectedNotification - contentH + 1);
+  }
+
+  // Dashboard trending
+  const trendingMaxVisible = Math.max(3, Math.floor((H - 17) * 0.30));
+  if (appState.trendingSelected >= appState.trending.length) {
+    appState.trendingSelected = Math.max(0, appState.trending.length - 1);
+  }
+  if (appState.trendingScroll > appState.trendingSelected) {
+    appState.trendingScroll = appState.trendingSelected;
+  } else if (appState.trendingScroll + trendingMaxVisible <= appState.trendingSelected) {
+    appState.trendingScroll = Math.max(0, appState.trendingSelected - trendingMaxVisible + 1);
+  }
+
+  // Settings
+  if (appState.settingsCursor > appState._maxSettingsCursor) {
+    appState.settingsCursor = appState._maxSettingsCursor;
+  }
+
+  render();
+}
+
+// Check if a focus zone is currently active for rendering highlight.
+// Uses lazy import to avoid circular dependencies.
+let _focusModule = null;
+import('./focus.mjs').then(m => { _focusModule = m; }).catch(() => {});
+export function isFocusActive(tabIndex, zoneId) {
+  if (!_focusModule) return false;
+  return _focusModule.isFocused(tabIndex, zoneId);
+}
+
 // Animated spinner frames.
 const SPINNER = ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏'];
 let spinnerIdx = 0;
@@ -51,6 +151,20 @@ const MIN_H = 20;
 export const HEADER_HEIGHT = 4;     // 3-row header + 1 separator
 export const FOOTER_HEIGHT = 2;     // 1-row status + 1 separator above
 export const CONTENT_PADDING = 2;
+
+// Content area start positions per tab (used by mouse handlers).
+// These are the y-offsets where the scrollable content begins, relative to row 0.
+export const TAB_CONTENT_Y = {
+  0: HEADER_HEIGHT + 2,  // Dashboard
+  1: HEADER_HEIGHT + 2,  // Repos
+  2: HEADER_HEIGHT + 2,  // Analyze
+  3: HEADER_HEIGHT + 2,  // Actions
+  4: HEADER_HEIGHT + 2,  // Inbox
+  5: HEADER_HEIGHT + 2,  // Settings
+};
+
+// Responsive layout helpers (re-exported from layout.mjs).
+export { getBreakpoint, calculateColumns, splitLayout, getResponsiveConfig, getStatCardLayout, getDetailPopupLayout } from './layout.mjs';
 
 // Build the current breadcrumb trail based on tab + sub-view.
 export function buildBreadcrumb() {

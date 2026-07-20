@@ -2,7 +2,7 @@
 
 A fast, zero-dependency terminal user interface for GitHub — six tabs, a command palette, an in-terminal file explorer that can clone or save anything to your CWD, an inbox triage workflow, themes, persistent bookmarks & pins, OSC-52 clipboard, ETag-aware caching, mouse support, collapsible sections, and comprehensive repo analytics. All driven by your keyboard (and mouse).
 
-![status](https://img.shields.io/badge/status-active-success) ![node](https://img.shields.io/badge/node-%E2%89%A518-blue) ![deps](https://img.shields.io/badge/deps-0-green) [![Socket Badge](https://badge.socket.dev/npm/package/github-tui/0.6.2)](https://badge.socket.dev/npm/package/github-tui/0.6.2) ![license](https://img.shields.io/badge/license-MIT-blue)
+![status](https://img.shields.io/badge/status-active-success) ![node](https://img.shields.io/badge/node-%E2%89%A518-blue) ![deps](https://img.shields.io/badge/deps-0-green) [![Socket Badge](https://badge.socket.dev/npm/package/github-tui/0.6.3)](https://badge.socket.dev/npm/package/github-tui/0.6.3) ![license](https://img.shields.io/badge/license-MIT-blue)
 
 ![GitHub TUI Screenshot](https://raw.githubusercontent.com/unn-Known1/github-tui/main/Screenshot.png)
 
@@ -107,6 +107,8 @@ Your current token scopes are shown in the Settings → System panel so you can 
 | `B` | Browse all bookmarks |
 | `s` | Star / unstar the current repo on GitHub |
 | `r` | Refresh the current view |
+| `u` | Undo last destructive action |
+| `Ctrl-Y` | Redo last undone action |
 | `z` | Toggle collapsible section |
 | `Z` | Collapse all sections |
 | `X` | Expand all sections |
@@ -224,7 +226,7 @@ Your current token scopes are shown in the Settings → System panel so you can 
 
 ## 🗂️ Project Layout
 
-The app is split into 24 focused modules. Adding a new tab is: create one file, register it in `state.mjs`, import it in `render.mjs` and `keys.mjs`. The command palette picks up new actions automatically when you call `palette.register({ id, label, run })`.
+The app is split into 30 focused modules. Adding a new tab is: create one file, register it in `state.mjs`, import it in `render.mjs` and `keys.mjs`. The command palette picks up new actions automatically when you call `palette.register({ id, label, run })`.
 
 ```
 .
@@ -237,20 +239,26 @@ The app is split into 24 focused modules. Adding a new tab is: create one file, 
 │   ├── theme.test.mjs
 │   └── keychain.test.mjs
 └── tui/
-    ├── screen.mjs                   # Diff-based terminal renderer + buffer swap + FORCE_COLOR
+    ├── screen.mjs                   # Diff-based terminal renderer + buffer swap + FORCE_COLOR + CJK support
     ├── github.mjs                   # HTTPS client + ETag cache + 60+ endpoints + streaming downloader
     ├── config.mjs                   # Constants + token I/O (delegates to keychain.mjs) + JSON store helpers
     ├── keychain.mjs                 # OS keychain abstraction (macOS / Linux / Windows, zero deps)
     ├── utils.mjs                    # Pure helpers (time, format, OSC-52, openUrl, safeCwdJoin, runCommand)
     ├── state.mjs                    # Single appState + async-stale guard + message bus + collapsible state
-    ├── input.mjs                    # Modal text input + cursor movement + handler registry
-    ├── theme.mjs                    # 8 themes — persisted to ~/.github-tui/theme + NO_COLOR support
+    ├── input.mjs                    # Modal text input + cursor movement + handler registry + paste support
+    ├── theme.mjs                    # 10 themes — persisted to ~/.github-tui/theme + NO_COLOR support
     ├── store.mjs                    # Bookmarks + saved searches + pins (on-disk JSON)
     ├── palette.mjs                  # Command palette (Ctrl-P) with fuzzy match
     ├── render.mjs                   # Top-level render: chrome + dispatch to tabs + hover effects
     ├── keys.mjs                     # Global key router + per-tab dispatchers + collapse handlers
     ├── mouse.mjs                    # Mouse event parsing + click/scroll/hover handlers (all tabs)
     ├── repos-logic.mjs              # Pure business logic — testable without global state
+    ├── undo.mjs                     # Undo/redo system for destructive actions
+    ├── virtual-scroll.mjs           # Virtual scrolling helper for large lists
+    ├── error-recovery.mjs           # Error handling with contextual recovery hints
+    ├── layout.mjs                   # Responsive layout system with percentage-based sizing
+    ├── focus.mjs                    # Focus management with Tab/Shift+Tab navigation
+    ├── custom-keys.mjs              # Custom user keybindings with schema validation
     └── tabs/
         ├── dashboard.mjs            # Home screen with widgets + collapsible sections
         ├── repos.mjs                # Your repositories (selection, badges, filters, pins, density)
@@ -309,7 +317,7 @@ Every tab module exports `render(screen, y, h)`, an optional `keys` map for tab-
 
 ### 5 · Settings
 - **Actions:** Login, Logout, Refresh Dashboard, Refresh User Data, **Change Theme**, Clear Token File, Token display.
-- **System panel:** app version (`0.6.2`), config dir, token file path, Node version, platform/arch, terminal size, **API remaining / limit / reset-in minutes**, **token scopes**, active keychain backend.
+- **System panel:** app version (`0.6.3`), config dir, token file path, Node version, platform/arch, terminal size, **API remaining / limit / reset-in minutes**, **token scopes**, active keychain backend.
 
 ### 6 · Inbox
 - Per-row: ▶ selection, ● yellow unread dot, color-coded subject type (PR/cyan, Issue/yellow, Release/green, Discussion/magenta, Commit/blue, CheckSuite/red), repo·title, reason, relative time.
@@ -331,13 +339,20 @@ Every tab module exports `render(screen, y, h)`, an optional `keys` map for tab-
 - **ETag cache.** Every GET response with an `ETag` header is cached; subsequent identical GETs send `If-None-Match` and a 304 returns the cached body for free (no rate-limit cost).
 - **Streaming downloads.** Zipballs never buffer in memory — they pipe straight to disk via Node's `https`.
 - **CWD safety.** Every disk write goes through `safeCwdJoin` which refuses any path that would escape `process.cwd()`. Clones refuse to overwrite an existing directory.
-- **Diff-based renderer.** `tui/screen.mjs` uses buffer swapping (zero allocation after warm-up) and only emits cursor moves + characters that actually changed.
-- **Cross-platform rendering.** Box-drawing characters fall back to ASCII on Windows. `FORCE_COLOR`/`NO_COLOR` env vars respected.
+- **Diff-based renderer.** `tui/screen.mjs` uses buffer swapping (zero allocation after warm-up) and only emits cursor moves + characters that actually changed. CJK/wide character support for proper alignment.
+- **Cross-platform rendering.** Box-drawing characters fall back to ASCII on Windows. `FORCE_COLOR`/`NO_COLOR` env vars respected. 16-color fallback for terminals without 256-color support.
 - **Theme-aware rendering.** Tab renderers call `theme.color('star')` instead of hardcoding `'yellow'`, so new themes drop in without touching any tab.
 - **Command palette.** Actions register themselves; the palette is just a fuzzy filter over the registry. New features can expose actions without touching any UI code.
 - **Mouse support.** Full mouse tracking with click, scroll wheel, and hover effects on all list views.
 - **Collapsible sections.** All sections across Dashboard, Repos, Analyze, and Inbox can be collapsed/expanded. State persisted to disk.
 - **Graceful shutdown.** Single atomic handler restores raw mode, disables mouse, clears screen — no double-calls, no broken terminals.
+- **Undo/redo.** Destructive actions (bookmark removal, star/unstar, unsubscribe, issue close) are undoable with `u`/`Ctrl-Y`. Stack persists for the session.
+- **Error recovery.** Contextual error messages with recovery hints and retry support. Recognizes common error patterns (auth, rate limit, network, etc.).
+- **Responsive layout.** Terminal width breakpoints (xs/sm/md/lg/xl) adapt column widths, card layouts, and detail popups.
+- **Focus management.** Tab/Shift+Tab navigation between focus zones per tab.
+- **Paste handling.** Bracketed paste mode for proper multi-line text insertion.
+- **Render debouncing.** Microtask batching prevents render flooding during rapid state changes.
+- **Resize recovery.** Scroll positions and selection indices are automatically adjusted after terminal resize.
 
 ## ⚠️ Limitations
 
@@ -361,7 +376,27 @@ Every tab module exports `render(screen, y, h)`, an optional `keys` map for tab-
 
 **Shipped in v0.5:** Issue/PR detail popup with rendered body, labels, comments, and file diffs. Comment from TUI, emoji reactions, close/reopen, merge PRs with confirmation. PR diff viewer with unified diff and syntax coloring. Inbox notifications open detail popup for issues/PRs.
 
-**Shipped in v0.6.2 (this release):**
+**Shipped in v0.6.3 (this release):**
+- **Undo/Redo system** — destructive actions (bookmark removal, star/unstar, unsubscribe, issue close) are now undoable with `u`/`Ctrl-Y`. Full 20-entry undo stack with convenience functions.
+- **Virtual scrolling helper** — standardized module for efficient rendering of large lists with viewport calculation, scroll handling, and mouse wheel support.
+- **Error recovery system** — contextual error messages with recovery hints and retry support. Recognizes 8 error patterns (auth, rate limit, network, timeout, SSL) and suggests appropriate actions.
+- **Responsive layout system** — terminal width breakpoints adapt column widths, card layouts, and detail popups. Repos tab and dashboard stat cards now scale gracefully.
+- **Focus management** — Tab/Shift+Tab navigation between focus zones per tab with canFocus() guards.
+- **Paste handling** — bracketed paste mode for proper multi-line text insertion. Pasted content is inserted atomically.
+- **Per-widget loading states** — dashboard widgets track individual loading state for granular UI feedback.
+- **Custom keybindings validation** — invalid entries now show warnings with specific error messages.
+- **CJK/wide character support** — strWidth() now correctly counts CJK characters as width 2 with proper ESC sequence handling.
+- **16-color fallback** — terminals without 256-color support get nearest ANSI color mapping.
+- **Confirm dialog fix** — Enter now confirms, Escape/cancel works correctly.
+- **Render debouncing** — microtask batching prevents render flooding.
+- **Key repeat debouncing** — arrow keys held down are debounced at ~60fps.
+- **Resize recovery** — scroll positions and selection indices automatically adjusted after terminal resize.
+- **Dynamic import optimization** — custom keybindings module lazy-loaded once at startup.
+- **Mouse coordinate constants** — extracted TAB_CONTENT_Y for consistent layout.
+- **Removed _global scope fallback** — startAsync() now requires explicit scope string.
+- **30 modules** — codebase expanded from 24 to 30 focused modules.
+
+**Shipped in v0.6.2:**
 - **Actions tab overhaul** — fixed 8 bugs: stale loading flag, wrong repo shown under filter, Esc no-op in repos view, up/down moving wrong cursor when expanded, maxVisible capped at 10 rows, `r`/`X` keys shadowed by globals (rerun/cancel never fired), refresh always reset to repos list instead of reloading runs.
 - **Inbox tab overhaul** — fixed 8 bugs: Space was loading the next server page (replacing list) instead of appending; `inboxHasMore` initialized to `true` causing a spurious page-2 request; `unsubscribeNotification` was muting (PUT) instead of unsubscribing (DELETE); mouse hover and scroll used unfiltered count instead of filtered; click always jumped scroll even when item was visible; `down()` crashed without a screen object; `openCurrent` had no fallback URL for Discussion/CheckSuite notifications.
 - **Zero dependencies** — removed stray `@anthropic-ai/claude-code` entry from `package.json`; added `.gitignore` to exclude `package-lock.json`.
