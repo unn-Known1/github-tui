@@ -4,6 +4,14 @@ All notable changes to this project will be documented in this file.
 
 ## [0.6.3] - 2026-07-20
 
+### Added — GitHub CLI Login
+- New "Login (GitHub CLI)" option in Settings — uses `gh auth token` for zero-friction auth
+- No PAT creation needed if user already has `gh` CLI installed and authenticated
+- Graceful degradation: option is grayed out with hint if `gh` is not installed
+- Async availability check with caching — no repeated process spawns
+- Falls back to PAT login if `gh` is not available
+- Zero npm dependencies — `gh` is an optional system tool, same as `git`
+
 ### Added — Undo/Redo System
 - New `tui/undo.mjs` module with full undo/redo stack (20-entry limit)
 - Supports: bookmark removal, star/unstar, unsubscribe, issue/PR close

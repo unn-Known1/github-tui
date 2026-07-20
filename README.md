@@ -30,6 +30,7 @@ A fast, zero-dependency terminal user interface for GitHub — six tabs, a comma
 - 📡 **Last-synced timestamps** — every tab shows when data was last refreshed.
 - 📦 **Cache stats** — header shows cache size in KB; Settings → System shows full breakdown.
 - 🔐 **Secure local auth** — PAT stored in the **OS keychain** (macOS Keychain, Linux libsecret, Windows Credential Manager); falls back to `~/.github-tui/token` with `chmod 600` when no keychain is available. Existing plaintext tokens are auto-migrated on first run. Masked while typing; auto-cleared on first 401.
+- 🐙 **GitHub CLI login** — if `gh` CLI is installed, log in with one click (reads `gh auth token`). No PAT creation needed. Falls back to PAT login if `gh` is not available. Zero npm dependencies.
 - 🖥️ **Diff-based renderer** — only changed cells are redrawn; resizes adaptively.
 - 📝 **Issue/PR detail popup** — `Enter` on an issue or PR opens a full detail view with rendered body, labels, comments tab, **reviews tab**, and PR files tab. Comment (`c`), react (`r`), close/reopen (`x`), merge PR (`M`) — all from the TUI.
 - 🔀 **PR diff viewer** — Files tab in the detail popup shows changed files with `+/-` stats. Select a file to view its unified diff with syntax-colored additions/deletions.
@@ -316,7 +317,8 @@ Every tab module exports `render(screen, y, h)`, an optional `keys` map for tab-
 - `r` refreshes the current view (repo list or runs list).
 
 ### 5 · Settings
-- **Actions:** Login, Logout, Refresh Dashboard, Refresh User Data, **Change Theme**, Clear Token File, Token display.
+- **Authentication:** Login (GitHub CLI) — uses `gh auth token` if `gh` is installed; Login (PAT) — paste a Personal Access Token; Logout.
+- **Actions:** Refresh Dashboard, Refresh User Data, Auto-Refresh, **Change Theme**, Clear Token File, Token display.
 - **System panel:** app version (`0.6.3`), config dir, token file path, Node version, platform/arch, terminal size, **API remaining / limit / reset-in minutes**, **token scopes**, active keychain backend.
 
 ### 6 · Inbox
@@ -357,6 +359,7 @@ Every tab module exports `render(screen, y, h)`, an optional `keys` map for tab-
 ## ⚠️ Limitations
 
 - Token is stored in the OS keychain where available (macOS Keychain, Linux libsecret, Windows Credential Manager). On systems without a supported keychain tool, it falls back to plaintext with `chmod 600` file permissions.
+- **Optional system dependency:** GitHub CLI (`gh`) for one-click login. Not required — PAT login always works. Install from [cli.github.com](https://cli.github.com).
 - Mostly read-only client today — actions ship in waves:
   - ✅ **shipped:** star/unstar, bookmark, pin, save file, save folder, zipball, `git clone`, `gh clone`, notification mark/unsubscribe.
   - ✅ **shipped (v0.5):** commenting on issues/PRs, reactions, close/reopen, merge PRs, PR diff viewer, review comments.
@@ -377,6 +380,7 @@ Every tab module exports `render(screen, y, h)`, an optional `keys` map for tab-
 **Shipped in v0.5:** Issue/PR detail popup with rendered body, labels, comments, and file diffs. Comment from TUI, emoji reactions, close/reopen, merge PRs with confirmation. PR diff viewer with unified diff and syntax coloring. Inbox notifications open detail popup for issues/PRs.
 
 **Shipped in v0.6.3 (this release):**
+- **GitHub CLI login** — new "Login (GitHub CLI)" option in Settings. Uses `gh auth token` for zero-friction auth — no PAT creation needed if `gh` is installed. Graceful degradation: option grayed out if `gh` not available. Zero npm dependencies.
 - **Undo/Redo system** — destructive actions (bookmark removal, star/unstar, unsubscribe, issue close) are now undoable with `u`/`Ctrl-Y`. Full 20-entry undo stack with convenience functions.
 - **Virtual scrolling helper** — standardized module for efficient rendering of large lists with viewport calculation, scroll handling, and mouse wheel support.
 - **Error recovery system** — contextual error messages with recovery hints and retry support. Recognizes 8 error patterns (auth, rate limit, network, timeout, SSL) and suggests appropriate actions.
