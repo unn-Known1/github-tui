@@ -16,6 +16,72 @@ import { loadDashboardWidgets } from './dashboard.mjs';
 import { loadUserData } from './repos.mjs';
 import { openUrl } from '../utils.mjs';
 import { starRepo as apiStarRepo } from '../github.mjs';
+import { execFile } from 'child_process';
+import { promisify } from 'util';
+const execFileAsync = promisify(execFile);
+
+// ── GitHub CLI integration (optional system dependency) ──
+
+// Cache the gh availability check so we don't spawn processes repeatedly.
+let _ghAvailable = null;
+export async function isGhInstalled() {
+  if (_ghAvailable !== null) return _ghAvailable;
+  try {
+    await execFileAsync('gh', ['--version']);
+    _ghAvailable = true;
+  } catch {
+    _ghAvailable = false;
+  }
+  return _ghAvailable;
+}
+
+// Attempt to get a token from gh auth.
+// Returns the token string or null if gh isn't logged in.
+export async function getGhToken() {
+  try {
+    const { stdout } = await execFileAsync('gh', ['auth', 'token'], { timeout: 5000 });
+    const token = stdout.trim();
+    return token || null;
+  } catch {
+    return null;
+  }
+}
+
+// Login via GitHub CLI — reads the token from `gh auth token`.
+export async function loginWithGh() {
+  const gen = startAsync('login');
+  appState.loading = true;
+  render();
+  try {
+    const token = await getGhToken();
+    if (isStale(gen, 'login')) { appState.loading = false; return; }
+    if (!token) {
+      showMessage('GitHub CLI not logged in — run "gh auth login" first', 'warning', 6000);
+      appState.loading = false;
+      render();
+      return;
+    }
+    const user = await getAuthenticatedUser(token, gen.signal);
+    if (isStale(gen, 'login')) { appState.loading = false; return; }
+    if (user) {
+      saveToken(token);
+      appState.token = token;
+      appState.user = user;
+      appState.repos = await getUserRepositories(token, 1, REPOS_PER_PAGE, gen.signal);
+      appState.reposPage = 1;
+      appState.reposHasMore = appState.repos.length >= REPOS_PER_PAGE;
+      appState.dashboardLoaded = false;
+      loadDashboardWidgets().catch(() => {});
+      showMessage('✓ Logged in via GitHub CLI as ' + user.login, 'success');
+    } else {
+      showMessage('GitHub CLI token is invalid', 'error');
+    }
+  } catch (e) {
+    if (!isStale(gen, 'login')) showMessage(e.message || 'GitHub CLI login failed', 'error');
+  }
+  appState.loading = false;
+  if (!isStale(gen, 'login')) render();
+}
 
 const REPOS_PER_PAGE = 30;
 
@@ -119,6 +185,17 @@ export function renderSettings(screen, y, h) {
   const W = screen.width;
   const isLoggedIn = !!appState.token;
 
+  // Check gh CLI availability (async, cached after first check)
+  if (appState._ghAvailable === undefined) {
+    appState._ghAvailable = false; // assume not available until proven
+    isGhInstalled().then(available => {
+      if (appState._ghAvailable !== available) {
+        appState._ghAvailable = available;
+        render();
+      }
+    }).catch(() => {});
+  }
+
   screen.writeStr(2, y, 'SETTINGS', color('title') || { fg: 'white', bold: true });
   screen.hline(y + 1, '─', { dim: true });
 
@@ -134,9 +211,12 @@ export function renderSettings(screen, y, h) {
   // AUTHENTICATION
   sectionHeader(screen, 2, row, '◆ AUTHENTICATION', leftMaxW);
   row += 2;
+  // Check gh availability (cached after first call)
+  const ghReady = appState._ghAvailable === true;
   const authItems = [
-    { label: 'Login',    desc: isLoggedIn ? 'Already logged in' : 'Sign in with a token', enabled: !isLoggedIn, sel: appState.settingsCursor === 0 },
-    { label: 'Logout',   desc: isLoggedIn ? 'Sign out' : 'Not logged in',                  enabled: isLoggedIn,  sel: appState.settingsCursor === 1 },
+    { label: 'Login (GitHub CLI)', desc: isLoggedIn ? 'Already logged in' : (ghReady ? 'Use gh auth token' : 'Install gh CLI first'), enabled: !isLoggedIn && ghReady, sel: appState.settingsCursor === 0 },
+    { label: 'Login (PAT)',        desc: isLoggedIn ? 'Already logged in' : 'Paste a Personal Access Token', enabled: !isLoggedIn, sel: appState.settingsCursor === 1 },
+    { label: 'Logout',             desc: isLoggedIn ? 'Sign out' : 'Not logged in', enabled: isLoggedIn,  sel: appState.settingsCursor === 2 },
   ];
   for (const item of authItems) {
     if (row >= y + sectionH) break;
@@ -150,14 +230,14 @@ export function renderSettings(screen, y, h) {
   sectionHeader(screen, 2, row, '◆ DATA', leftMaxW);
   row += 2;
   const dataItems = [
-    { label: 'Refresh Dashboard', desc: 'Re-fetch events, trending',   enabled: isLoggedIn, sel: appState.settingsCursor === 2 },
-    { label: 'Refresh User Data', desc: 'Re-fetch profile and repos',  enabled: isLoggedIn, sel: appState.settingsCursor === 3 },
-    { label: 'Auto-Refresh', desc: appState.autoRefreshEnabled ? 'Every ' + Math.round(appState.autoRefreshIntervalMs / 60000) + ' min' : 'Off', enabled: true, sel: appState.settingsCursor === 4 },
+    { label: 'Refresh Dashboard', desc: 'Re-fetch events, trending',   enabled: isLoggedIn, sel: appState.settingsCursor === 3 },
+    { label: 'Refresh User Data', desc: 'Re-fetch profile and repos',  enabled: isLoggedIn, sel: appState.settingsCursor === 4 },
+    { label: 'Auto-Refresh', desc: appState.autoRefreshEnabled ? 'Every ' + Math.round(appState.autoRefreshIntervalMs / 60000) + ' min' : 'Off', enabled: true, sel: appState.settingsCursor === 5 },
   ];
   for (const item of dataItems) {
     if (row >= y + sectionH) break;
     renderRow(screen, row, leftMaxW, item.label, item.desc, item.enabled, item.sel);
-    rowBounds.push({ cursor: dataItems.indexOf(item) + 2, y: row });
+    rowBounds.push({ cursor: dataItems.indexOf(item) + 3, y: row });
     row++;
   }
   row += 2;
@@ -165,10 +245,10 @@ export function renderSettings(screen, y, h) {
   // APPEARANCE
   sectionHeader(screen, 2, row, '◆ APPEARANCE', leftMaxW);
   row += 2;
-  const themeItem = { label: 'Change Theme', desc: 'Current: ' + getThemeName(), enabled: true, sel: appState.settingsCursor === 5 };
+  const themeItem = { label: 'Change Theme', desc: 'Current: ' + getThemeName(), enabled: true, sel: appState.settingsCursor === 6 };
   if (row < y + sectionH) {
     renderRow(screen, row, leftMaxW, themeItem.label, themeItem.desc, true, themeItem.sel);
-    rowBounds.push({ cursor: 5, y: row });
+    rowBounds.push({ cursor: 6, y: row });
     row++;
   }
   // Show all available themes as reflowing chip rows — wraps to fit any width.
@@ -226,7 +306,7 @@ export function renderSettings(screen, y, h) {
   sectionHeader(screen, 2, row, '! DANGER ZONE', leftMaxW);
   row += 2;
   const dangerItems = [
-    { label: 'Clear Saved Token', desc: 'Wipe token from all storage',  enabled: isLoggedIn, sel: appState.settingsCursor === 6 },
+    { label: 'Clear Saved Token', desc: 'Wipe token from all storage',  enabled: isLoggedIn, sel: appState.settingsCursor === 7 },
   ];
   for (const item of dangerItems) {
     if (row >= y + sectionH) break;
@@ -260,7 +340,7 @@ export function renderSettings(screen, y, h) {
   }
   row++;
   if (row < y + sectionH) {
-    const starSel = appState.settingsCursor === 7;
+    const starSel = appState.settingsCursor === 8;
     const isStarred = !!appState._repoIsStarred;
     const isWorking = !!appState._starringInProgress;
     const starLabel = isWorking ? '  Starring...' : (isStarred ? '★ Starred!' : '★ Star this repo');
@@ -278,7 +358,7 @@ export function renderSettings(screen, y, h) {
     }
     renderRow(screen, row, leftMaxW, starLabel, starDesc, true, starSel, starRowStyle);
     appState._starRowBounds = { y: row, x1: 2, x2: leftMaxW - 2 };
-    rowBounds.push({ cursor: 7, y: row });
+    rowBounds.push({ cursor: 8, y: row });
     row++;
   }
 
@@ -306,7 +386,7 @@ export function renderSettings(screen, y, h) {
     screen.writeStr(21, creditY, '(https://github.com/unn-Known1)', { dim: true });
   }
 
-  appState._maxSettingsCursor = 7;
+  appState._maxSettingsCursor = 8;
 }
 
 function renderSystemPanel(screen, x, y, w, h, screenW) {
@@ -408,11 +488,11 @@ export const keys = {
   'S': () => starRepo(),
   'o': () => openUrl('https://github.com/unn-Known1/github-tui'),
 };
-const AUTH_ITEMS = [0, 1];  // Login, Logout
-const DATA_ITEMS = [2, 3, 4];  // Refresh Dashboard, Refresh User Data, Auto-Refresh
-const APPEARANCE_ITEMS = [5]; // Change Theme
-const DANGER_ITEMS = [6];  // Clear Token
-const ABOUT_ITEMS = [7];  // Star repo
+const AUTH_ITEMS = [0, 1, 2];  // Login (CLI), Login (PAT), Logout
+const DATA_ITEMS = [3, 4, 5];  // Refresh Dashboard, Refresh User Data, Auto-Refresh
+const APPEARANCE_ITEMS = [6]; // Change Theme
+const DANGER_ITEMS = [7];  // Clear Token
+const ABOUT_ITEMS = [8];  // Star repo
 
 function isCursorEnabled(cursor) {
   const isLoggedIn = !!appState.token;
@@ -458,14 +538,21 @@ export function enter() {
   const isLoggedIn = !!appState.token;
   switch (appState.settingsCursor) {
     case 0:
-      if (!isLoggedIn) startInput('PAT token: ', 'login', true);
+      // Login with GitHub CLI
+      if (!isLoggedIn) loginWithGh();
       else showMessage('Already logged in', 'info');
       break;
     case 1:
+      // Login with PAT
+      if (!isLoggedIn) startInput('PAT token: ', 'login', true);
+      else showMessage('Already logged in', 'info');
+      break;
+    case 2:
+      // Logout
       if (isLoggedIn) confirm('Log out of GitHub?', handleLogout, 'Log Out');
       else showMessage('Not logged in', 'warning');
       break;
-    case 2:
+    case 3:
       if (isLoggedIn) {
         appState.dashboardLoaded = false;
         appState.loading = true;
@@ -474,7 +561,7 @@ export function enter() {
         showMessage('Refreshing dashboard...', 'info');
       }
       break;
-    case 3:
+    case 4:
       if (isLoggedIn) {
         appState.loading = true;
         render();
@@ -482,7 +569,7 @@ export function enter() {
         showMessage('Refreshing user data...', 'info');
       }
       break;
-    case 4: {
+    case 5: {
       // Auto-refresh: cycle Off → 1 min → 5 min → 15 min → Off
       const intervals = [0, 60000, 300000, 900000];
       const labels = ['Off', '1 min', '5 min', '15 min'];
@@ -505,20 +592,20 @@ export function enter() {
       if (globalThis._startAutoRefresh) globalThis._startAutoRefresh();
       break;
     }
-    case 5: {
+    case 6: {
       const themes = listThemes();
       const curIdx = themes.indexOf(getThemeName());
       const nextIdx = (curIdx + 1) % themes.length;
       if (setTheme(themes[nextIdx])) showMessage('Theme: ' + themes[nextIdx], 'success');
       break;
     }
-    case 6:
+    case 7:
       if (isLoggedIn) confirm('Wipe token and log out?', () => {
         handleLogout();
         showMessage('Token wiped from all storage', 'success');
       }, 'Wipe Token');
       break;
-    case 7:
+    case 8:
       starRepo();
       break;
   }
