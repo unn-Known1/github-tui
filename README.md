@@ -2,7 +2,7 @@
 
 A fast, zero-dependency terminal user interface for GitHub — six tabs, a command palette, an in-terminal file explorer that can clone or save anything to your CWD, an inbox triage workflow, themes, persistent bookmarks & pins, OSC-52 clipboard, ETag-aware caching, mouse support, collapsible sections, and comprehensive repo analytics. All driven by your keyboard (and mouse).
 
-![status](https://img.shields.io/badge/status-active-success) ![node](https://img.shields.io/badge/node-%E2%89%A518-blue) ![deps](https://img.shields.io/badge/deps-0-green) [![Socket Badge](https://badge.socket.dev/npm/package/github-tui/0.6.4)](https://badge.socket.dev/npm/package/github-tui/0.6.4) ![license](https://img.shields.io/badge/license-MIT-blue)
+![status](https://img.shields.io/badge/status-active-success) ![node](https://img.shields.io/badge/node-%E2%89%A518-blue) ![deps](https://img.shields.io/badge/deps-0-green) [![Socket Badge](https://badge.socket.dev/npm/package/github-tui/0.6.5)](https://badge.socket.dev/npm/package/github-tui/0.6.5) ![license](https://img.shields.io/badge/license-MIT-blue)
 
 ![GitHub TUI Screenshot](https://raw.githubusercontent.com/unn-Known1/github-tui/main/Screenshot.png)
 
@@ -319,7 +319,7 @@ Every tab module exports `render(screen, y, h)`, an optional `keys` map for tab-
 ### 5 · Settings
 - **Authentication:** Login (GitHub CLI) — uses `gh auth token` if `gh` is installed; Login (PAT) — paste a Personal Access Token; Logout.
 - **Actions:** Refresh Dashboard, Refresh User Data, Auto-Refresh, **Change Theme**, Clear Token File, Token display.
-- **System panel:** app version (`0.6.4`), config dir, token file path, Node version, platform/arch, terminal size, **API remaining / limit / reset-in minutes**, **token scopes**, active keychain backend.
+- **System panel:** app version (`0.6.5`), config dir, token file path, Node version, platform/arch, terminal size, **API remaining / limit / reset-in minutes**, **token scopes**, active keychain backend.
 
 ### 6 · Inbox
 - Per-row: ▶ selection, ● yellow unread dot, color-coded subject type (PR/cyan, Issue/yellow, Release/green, Discussion/magenta, Commit/blue, CheckSuite/red), repo·title, reason, relative time.

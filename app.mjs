@@ -2,16 +2,24 @@
 // GitHub TUI — entrypoint.
 // All real logic lives in tui/*.mjs. This file just wires lifecycle events.
 
-import { appState, tabState, showMessage, loadCollapsed, loadSession } from './tui/state.mjs';
+// IMPORTANT: do NOT import `render` from state.mjs — render.mjs also exports
+// `render` (the actual screen-painter). Importing both with the same local
+// name triggers a SyntaxError. `render` is already imported from render.mjs
+// at line ~11.
+import {
+  appState, tabState, TABS, showMessage,
+  loadCollapsed, loadSession, registerShutdownCallback,
+} from './tui/state.mjs';
 import { enableMouse, disableMouse } from './tui/mouse.mjs';
 import { enableBracketedPaste, disableBracketedPaste } from './tui/input.mjs';
 import { loadToken } from './tui/config.mjs';
 import { loadTheme } from './tui/theme.mjs';
 import { initScreen, getScreen, render } from './tui/render.mjs';
 import { handleKey, registerCoreActions } from './tui/keys.mjs';
+import { registerInputHandler } from './tui/input.mjs';
 import { loadUserData } from './tui/tabs/repos.mjs';
 import { loadBookmarks, loadSavedSearches, loadPins, loadRepoPrefs, saveRepoPrefs } from './tui/store.mjs';
-import { getRateLimit } from './tui/github.mjs';
+import { getRateLimit, lastRateLimit } from './tui/github.mjs';
 
 import { readFileSync, appendFileSync } from 'fs';
 import { fileURLToPath } from 'url';
@@ -46,11 +54,12 @@ const TERM_ENV = process.env.TERM || '';
 const TERM_IS_TMUX = !!process.env.TMUX;
 const TERM_IS_SSH = !!(process.env.SSH_CLIENT || process.env.SSH_TTY);
 const TERM_IS_SCREEN = !!process.env.STY;
-const TERM_IS_WSL = !!process.env.WSLENV;
+// F011 fix: WSL detection previously used WSLENV, which git-bash on native
+// Windows can also set. Use WSL_DISTRO_NAME (only set inside actual WSL).
+const TERM_IS_WSL = !!process.env.WSL_DISTRO_NAME || /microsoft/i.test(process.env.WSL_INTEROP || '');
 
-import { loadDashboardWidgets } from './tui/tabs/dashboard.mjs';
-import { loadNotifications } from './tui/tabs/inbox.mjs';
-import { loadActionsRepos, loadWorkflowRuns } from './tui/tabs/actions.mjs';
+// TABS / showMessage / render / registerShutdownCallback are imported at the
+// top alongside appState. (Consolidated to a single state.mjs import.)
 
 function startAutoRefresh() {
   if (autoRefreshInterval) clearInterval(autoRefreshInterval);
@@ -58,31 +67,12 @@ function startAutoRefresh() {
   autoRefreshInterval = setInterval(async () => {
     if (!appState.token || appState.loading) return;
     const t = tabState.current;
+    // F001 fix: dispatch via TABS[t].refresh instead of `if (t === N) …`.
+    // Adding a new tab in state.mjs with `refresh:` is automatically picked up.
+    const fn = TABS[t] && TABS[t].refresh;
+    if (!fn) return;
     try {
-      if (t === 0) {
-        // Always refresh dashboard widgets, even if user has dived into
-        // the stat-card focus sub-view — that's part of the dashboard.
-        await loadDashboardWidgets(true);
-      } else if (t === 1) {
-        // Refresh the repo list so pushes/updates land idle. Skip when the
-        // user is mid-paginate (reposHasMore already shows them the hint).
-        await loadUserData();
-      } else if (t === 2) {
-        // Analyze tab is mostly user-driven (search/drill-in). Skip refresh
-        // to avoid clobbering in-progress loads. Users can press 'r'.
-      } else if (t === 3) {
-        // Actions tab: always refresh regardless of actionsView sub-state.
-        // Previously we only refreshed when sub-view was 'runs', which meant
-        // a user parked on 'repos' would never see new jobs land.
-        if (appState.actionsView === 'runs' && appState.actionsRepos.length > 0) {
-          await loadWorkflowRuns();
-        } else {
-          loadActionsRepos();
-        }
-      } else if (t === 4) {
-        await loadNotifications();
-      }
-      // Tab 5 (Settings): nothing to auto-refresh.
+      await fn();
     } catch (e) { debugAsync('auto-refresh error:', e.message); }
   }, appState.autoRefreshIntervalMs);
 }
@@ -90,13 +80,14 @@ function startAutoRefresh() {
 // Export for settings to restart after interval change.
 globalThis._startAutoRefresh = startAutoRefresh;
 
+// F012 fix: import lastRateLimit once at module load instead of doing a
+// dynamic import on every 60s poll.
 async function refreshRateLimit() {
   if (!appState.token) return;
   try {
     const data = await getRateLimit(appState.token);
     if (data && data.resources && data.resources.core) {
       const core = data.resources.core;
-      const { lastRateLimit } = await import('./tui/github.mjs');
       lastRateLimit.remaining = core.remaining;
       lastRateLimit.limit = core.limit;
       lastRateLimit.reset = core.reset;
@@ -129,10 +120,25 @@ async function main() {
     process.exit(1);
   }
 
+  // L001/L005: register shutdown-side message-timer cleanup so shutdown()
+  // doesn't call an undefined global. Also register uncaughtException path.
+  registerShutdownCallback(() => {
+    if (typeof appState.messageTimer === 'number') {
+      clearTimeout(appState.messageTimer);
+      appState.messageTimer = null;
+    }
+  });
+
   // Hide cursor; enable mouse; enable bracketed paste.
   process.stdout.write('\x1b[?25l');
   enableMouse();
   enableBracketedPaste();
+
+  // F009: wire the issue-create input modal contexts. Without this, pressing
+  // Enter on the title/body modal does nothing.
+  const issueCreate = await import('./tui/tabs/issue-create.mjs');
+  registerInputHandler('create-issue-title', (s) => issueCreate.submitTitle(s));
+  registerInputHandler('create-issue-body',  (s) => issueCreate.submitBody(s));
 
   // Load persisted state.
   loadTheme();
@@ -160,23 +166,35 @@ async function main() {
   process.stdin.resume();
   process.stdin.setEncoding('utf8');
   process.stdin.on('data', handleKey);
-  // Graceful shutdown on stdin close (SSH drop, tmux detach).
-  process.stdin.on('error', (err) => {
-    debug('stdin error:', err.message);
-    shutdown();
-  });
-  process.stdin.on('end', () => {
-    debug('stdin closed');
-    shutdown();
-  });
+// Graceful shutdown on stdin close (SSH drop, tmux detach).
+process.stdin.on('error', (err) => {
+  debug('stdin error:', err.message);
+  shutdown();
+  // F-LIFECYCLE: also exit so process doesn't linger after stdin closes
+  // (SIGINT/SIGTERM handlers are not invoked on stdin close).
+  setImmediate(() => process.exit(0));
+});
+process.stdin.on('end', () => {
+  debug('stdin closed');
+  shutdown();
+  setImmediate(() => process.exit(0));
+});
 
   // Resize listener — debounced to avoid render thrashing.
+// L003 fix: wrap the callback in try/catch + always null the timer ref so a
+// throw inside updateSize() doesn't leave a stale timer reference that
+// blocks future resizes.
   let resizeTimer = null;
   process.stdout.on('resize', () => {
     if (resizeTimer) clearTimeout(resizeTimer);
     resizeTimer = setTimeout(() => {
-      screen.updateSize();
-      render();
+      resizeTimer = null;
+      try {
+        screen.updateSize();
+        render();
+      } catch (e) {
+        debug('resize handler threw:', e && e.message);
+      }
     }, 50);
   });
   screen.updateSize();
@@ -192,23 +210,36 @@ async function main() {
     });
   }
 
-  // ── Atomic shutdown — single function, no double-calls ──
-  let _shuttingDown = false;
-  function shutdown() {
-    if (_shuttingDown) return;
-    _shuttingDown = true;
-    if (rateLimitInterval) clearInterval(rateLimitInterval);
-    if (autoRefreshInterval) clearInterval(autoRefreshInterval);
-    saveCurrentRepoPrefs();
-    try { process.stdin.setRawMode(false); } catch {}
-    disableMouse();
-    disableBracketedPaste();
-    process.stdout.write('\x1b[?25h\x1b[2J\x1b[H');
+// ── Atomic shutdown — single function, no double-calls ──
+let _shuttingDown = false;
+// Registered shutdown callbacks (state.mjs attaches the message-timer clear).
+const _shutdownCallbacks = [];
+function shutdown() {
+  if (_shuttingDown) return;
+  _shuttingDown = true;
+  // L001: each cleanup step wrapped in try/catch so one failure doesn't
+  // strand other cleanup (multiple modules register their own exit hooks).
+  try { if (rateLimitInterval) clearInterval(rateLimitInterval); } catch (e) { debug('shutdown rate-limit interval clear failed:', e.message); }
+  try { if (autoRefreshInterval) clearInterval(autoRefreshInterval); } catch (e) { debug('shutdown auto-refresh interval clear failed:', e.message); }
+  try { saveCurrentRepoPrefs(); } catch (e) { debug('shutdown saveRepoPrefs failed:', e.message); }
+  // L001/L002: run registered shutdown callbacks (clears pending toast timer,
+  // any other cleanup registered later). No reliance on an undefined global.
+  for (const cb of _shutdownCallbacks) {
+    try { cb(); } catch (e) { debug('shutdown callback failed:', e.message); }
   }
-  process.on('exit', shutdown);
-  process.on('SIGINT',  () => { shutdown(); process.exit(0); });
-  process.on('SIGTERM', () => { shutdown(); process.exit(0); });
-  process.on('SIGHUP',  () => { shutdown(); process.exit(0); });
+  try { process.stdin.setRawMode(false); } catch {}
+  try { disableMouse(); } catch (e) { debug('disableMouse failed:', e.message); }
+  try { disableBracketedPaste(); } catch (e) { debug('disableBracketedPaste failed:', e.message); }
+  try { process.stdout.write('\x1b[?25h\x1b[2J\x1b[H'); } catch {}
+}
+process.on('exit', shutdown);
+process.on('SIGINT',  () => { shutdown(); process.exit(0); });
+process.on('SIGTERM', () => { shutdown(); process.exit(0); });
+process.on('SIGHUP',  () => { shutdown(); process.exit(0); });
+// L004 fix: handle Windows Ctrl+Break (SIGBREAK) the same way as SIGINT.
+if (process.platform === 'win32') {
+  process.on('SIGBREAK', () => { shutdown(); process.exit(0); });
+}
 
   // Auto-load if we already have a saved token.
   if (appState.token) {
@@ -240,8 +271,15 @@ async function main() {
   render();
 }
 
+// L005 fix: on startup crash, also disable mouse + paste mode and clear
+// pending toast timer so the terminal isn't left in a weird state.
 main().catch(err => {
   debug('Fatal:', err.message, err.stack);
+  try {
+    for (const cb of _shutdownCallbacks) { cb(); }
+  } catch {}
+  try { disableMouse(); } catch {}
+  try { disableBracketedPaste(); } catch {}
   try {
     process.stdout.write('\x1b[?25h');
     process.stdout.write('\x1b[2J\x1b[H');

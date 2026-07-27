@@ -21,7 +21,7 @@ import {
 } from '../github.mjs';
 import {
   formatBytes, relTime, writeFileSafe, safeCwdJoin, runCommand,
-  ghCloneUrl, copyToClipboard, dirExists,
+  ghCloneUrl, copyToClipboard, dirExists, wrapTextWithMap, wrapText,
 } from '../utils.mjs';
 import { color } from '../theme.mjs';
 import { join, resolve } from 'path';
@@ -77,7 +77,7 @@ export async function loadTree() {
   try {
     const list = await getRepoContents(
       appState.token, owner, name, appState.filesPath, appState.filesRef, gen.signal);
-    if (isStale(gen)) { appState.loading = false; return; }
+    if (isStale(gen)) return;
     const arr = Array.isArray(list) ? list : [list];
     // Sort: directories first, then files; alpha within each group.
     arr.sort((a, b) => {
@@ -91,8 +91,10 @@ export async function loadTree() {
   } catch (e) {
     if (!isStale(gen)) showMessage('Failed to load: ' + e.message, 'error');
     appState.filesEntries = [];
+  } finally {
+    // F005 fix: always clear loading flag regardless of how we exit the try.
+    appState.loading = false;
   }
-  appState.loading = false;
   if (!isStale(gen)) render();
 }
 
@@ -129,25 +131,31 @@ export async function goUp() {
 export async function viewFile(ent) {
   const [owner, name] = repoOwnerName();
   if (!owner) return;
+  if (!ent || !ent.path) return;
   if (ent.size != null && ent.size > MAX_VIEW_BYTES) {
     showMessage('File too large to view (' + formatBytes(ent.size) +
       '). Use [s] to save instead.', 'warning');
     return;
   }
+  // F007 fix: capture path/size BEFORE await so a stale-result return can't
+  // overwrite fileViewing with the wrong path if the user navigated and the
+  // selection refilled with a different entry.
+  const targetPath = ent.path;
   const gen = startAsync('files-view');
   appState.loading = true;
   render();
   try {
     const text = await getRepoFile(
-      appState.token, owner, name, ent.path, appState.filesRef, gen.signal);
-    if (isStale(gen)) { appState.loading = false; return; }
-    appState.fileViewing = ent.path;
+      appState.token, owner, name, targetPath, appState.filesRef, gen.signal);
+    if (isStale(gen)) return;
+    appState.fileViewing = targetPath;
     appState.fileText = typeof text === 'string' ? text : String(text);
     appState.fileScroll = 0;
   } catch (e) {
     if (!isStale(gen)) showMessage('Failed to view: ' + e.message, 'error');
+  } finally {
+    appState.loading = false;
   }
-  appState.loading = false;
   if (!isStale(gen)) render();
 }
 
@@ -160,13 +168,14 @@ export async function openBranchPicker() {
     render();
     try {
       const list = await getBranches(appState.token, owner, name, 50, gen.signal);
-      if (isStale(gen)) { appState.loading = false; return; }
+      if (isStale(gen)) return;
       appState.filesBranches = Array.isArray(list) ? list : [];
     } catch (e) {
       if (!isStale(gen)) showMessage('Branches: ' + e.message, 'error');
       appState.filesBranches = [];
+    } finally {
+      appState.loading = false;  // F005: always clear
     }
-    appState.loading = false;
   }
   appState.filesBranchPicker = true;
   appState.filesBranchCursor = Math.max(0,
@@ -224,19 +233,19 @@ export async function saveCurrentFolder() {
   showMessage('Walking tree…', 'info');
   let count = 0;
   let bytes = 0;
-  let abortedAt = 0;  // how many files existed in the truncated folder
+  let abortedAt = 0;
   const stack = [root];
   const gen = startAsync('files-bulk');
   const seenFiles = [];
+  appState.loading = true;   // F005: set up-front so finally can clear it
   try {
     // BFS to enumerate files.
     while (stack.length) {
-      // Bail fast if superseded (e.g., user navigated away) or signal aborted
-      // — otherwise we keep firing getRepoContents calls until the next await.
-      if (isStale(gen) || gen.signal.aborted) { appState.loading = false; return; }
+      if (isStale(gen) || gen.signal.aborted) return;
       const cur = stack.shift();
       const list = await getRepoContents(
         appState.token, owner, name, cur, appState.filesRef, gen.signal);
+      if (isStale(gen) || gen.signal.aborted) return;
       const arr = Array.isArray(list) ? list : [list];
       for (const e of arr) {
         if (e.type === 'dir') stack.push(e.path);
@@ -251,8 +260,6 @@ export async function saveCurrentFolder() {
       if (abortedAt > 0) break;
     }
     if (abortedAt > 0) {
-      // Surface the truncation. We still save what we already enumerated
-      // (up to MAX_BULK_FILES) so the user gets *some* files.
       showMessage(
         'Folder has >' + MAX_BULK_FILES + ' files (found ' + abortedAt + '). ' +
         'Saving first ' + seenFiles.length + ' — use zipball [Z] for the rest.',
@@ -263,7 +270,6 @@ export async function saveCurrentFolder() {
     if (seenFiles.length > 0) {
       showMessage('Downloading ' + seenFiles.length + ' files…', 'info');
       render();
-      // Concurrency cap 4 — fetch + write each. Use mutex to protect cursor.
       let cursor = 0;
       const nextFile = () => {
         if (cursor >= seenFiles.length) return null;
@@ -271,35 +277,39 @@ export async function saveCurrentFolder() {
       };
       const worker = async () => {
         while (true) {
-          if (isStale(gen) || gen.signal.aborted) { appState.loading = false; return; }
+          if (isStale(gen) || gen.signal.aborted) return;
           const e = nextFile();
           if (!e) break;
           try {
             const txt = await getRepoFile(
               appState.token, owner, name, e.path, appState.filesRef, gen.signal);
-          const rel = repoName + '/' + e.path.replace(
-            new RegExp('^' + root.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '/?'), '');
-          writeFileSafe(rel, txt);
-          count++;
-          bytes += (typeof txt === 'string' ? Buffer.byteLength(txt) : txt.length || 0);
-          if (count % 5 === 0) {
-            showMessage('Saved ' + count + '/' + seenFiles.length + '…', 'info');
-            render();
-          }
-        } catch (e2) { /* skip files we can't fetch */ }
+            const rel = repoName + '/' + e.path.replace(
+              new RegExp('^' + root.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '/?'), '');
+            writeFileSafe(rel, txt);
+            count++;
+            bytes += (typeof txt === 'string' ? Buffer.byteLength(txt) : (txt.length || 0));
+            if (count % 5 === 0) {
+              if (isStale(gen)) return;
+              showMessage('Saved ' + count + '/' + seenFiles.length + '…', 'info');
+              render();
+            }
+          } catch (e2) { /* skip files we can't fetch */ }
+        }
+      };
+      await Promise.all([worker(), worker(), worker(), worker()]);
+      if (!isStale(gen)) {
+        const truncatedNote = abortedAt > 0
+          ? ' (truncated — folder had ' + abortedAt + ' files)'
+          : '';
+        showMessage('Saved ' + count + ' files (' + formatBytes(bytes) +
+          ') → ./' + repoName + '/' + truncatedNote, abortedAt > 0 ? 'warning' : 'success');
       }
-    };
-    await Promise.all([worker(), worker(), worker(), worker()]);
-    if (!isStale(gen)) {
-      const truncatedNote = abortedAt > 0
-        ? ' (truncated — folder had ' + abortedAt + ' files)'
-        : '';
-      showMessage('Saved ' + count + ' files (' + formatBytes(bytes) +
-        ') → ./' + repoName + '/' + truncatedNote, abortedAt > 0 ? 'warning' : 'success');
-    }
     }
   } catch (e) {
     if (!isStale(gen)) showMessage('Folder save failed: ' + e.message, 'error');
+  } finally {
+    appState.loading = false;   // F005: always clear
+    if (!isStale(gen)) render();
   }
 }
 
@@ -461,25 +471,43 @@ function renderFileViewer(screen, y, maxH) {
     formatBytes(Buffer.byteLength(appState.fileText || '')) + ']', color('dim'));
   screen.hline(y + 1, '─', color('dim'));
 
-  const lines = (appState.fileText || '').split(/\r?\n/);
+  const text = appState.fileText || '';
+  const logicalLines = text.split(/\r?\n/);
+  const lineNumW = String(logicalLines.length).length;
+  // Inner width: total pane width minus the gutter (4 left + lineNumW + '│ '
+  // + 4 right padding) so long source lines reflow instead of being hidden
+  // past the right edge.
+  const innerW = Math.max(10, W - 8 - lineNumW);
+
+  // Wrap so each visual row fits within innerW. visualToLogical maps each
+  // visual row back to its source line so we can show the right line number
+  // and apply the correct syntax-style on continuations.
+  const { lines: visualLines, visualToLogical } = wrapTextWithMap(text, innerW);
   const rows = Math.max(1, maxH - 4);
   const start = appState.fileScroll || 0;
-  const lineNumW = String(lines.length).length;
-  for (let i = 0; i < rows && start + i < lines.length; i++) {
+  for (let i = 0; i < rows && start + i < visualLines.length; i++) {
     const row = y + 2 + i;
-    const lnNum = String(start + i + 1).padStart(lineNumW, ' ');
-    screen.writeStr(4, row, lnNum, color('dim'));
+    const logicalIdx = visualToLogical[start + i];
+    const sourceLn = logicalLines[logicalIdx] || '';
+    // Line-number gutter: show the source line number on the FIRST visual
+    // row of that source line; blank the gutter on continuations.
+    const isFirst = (start + i) === 0
+      || visualToLogical[start + i - 1] !== logicalIdx;
+    const lnNumStr = isFirst
+      ? String(logicalIdx + 1).padStart(lineNumW, ' ')
+      : ' '.repeat(lineNumW);
+    screen.writeStr(4, row, lnNumStr, color('dim'));
     screen.writeStr(4 + lineNumW + 1, row, '│', color('dim'));
-    let ln = lines[start + i] || '';
-    const lineStyle = decorateLine(ln, appState.fileViewing);
-    screen.writeStr(4 + lineNumW + 3, row,
-      ln.substring(0, W - 8 - lineNumW), lineStyle);
+    // Apply syntax style based on the SOURCE line so wrapped keyword/
+    // string/etc. highlighting is preserved on continuations.
+    const lineStyle = decorateLine(sourceLn, appState.fileViewing);
+    screen.writeStr(4 + lineNumW + 3, row, visualLines[start + i], lineStyle);
   }
 
-  const footerY = y + 2 + Math.min(rows, lines.length) + 1;
+  const footerY = y + 2 + Math.min(rows, visualLines.length) + 1;
   if (footerY < y + maxH) {
-    const hints = 'Line ' + (start + 1) + '-' + Math.min(start + rows, lines.length) +
-      ' of ' + lines.length + '  [↑↓] scroll  [s] Save  [y] URL  [Esc] Back';
+    const hints = 'Line ' + (start + 1) + '-' + Math.min(start + rows, visualLines.length) +
+      ' of ' + visualLines.length + '  [↑↓] scroll  [s] Save  [y] URL  [Esc] Back';
     screen.writeStr(4, footerY, hints, color('dim'));
   }
 }
@@ -660,9 +688,14 @@ export function down(screen) {
     render(); return;
   }
   if (appState.fileViewing) {
-    const lines = (appState.fileText || '').split(/\r?\n/).length;
+    // fileScroll now indexes VISUAL rows (one logical line can wrap to many),
+    // so clamp using wrapText's row count rather than the logical-line count.
+    const W = screen ? screen.width : (process.stdout.columns || 80);
+    const logicalLines = (appState.fileText || '').split(/\r?\n/);
+    const innerW = Math.max(10, W - 8 - String(logicalLines.length).length);
+    const visualRows = wrapText(appState.fileText || '', innerW).length;
     appState.fileScroll = Math.min(
-      Math.max(0, lines - 1), appState.fileScroll + 1);
+      Math.max(0, visualRows - 1), appState.fileScroll + 1);
     render(); return;
   }
   const len = (appState.filesEntries || []).length + (appState.filesPath ? 1 : 0);
@@ -681,8 +714,14 @@ export function jumpTop() {
 }
 export function jumpBottom() {
   if (appState.fileViewing) {
-    const lines = (appState.fileText || '').split(/\r?\n/).length;
-    appState.fileScroll = Math.max(0, lines - 1);
+    // Visual-row clamp so a wrapped file lands at the LAST visual row,
+    // not at logical-line count - 1 (which would leave the bottom of the
+    // wrapped file unreachable).
+    const W = process.stdout.columns || 80;
+    const logicalLines = (appState.fileText || '').split(/\r?\n/);
+    const innerW = Math.max(10, W - 8 - String(logicalLines.length).length);
+    const visualRows = wrapText(appState.fileText || '', innerW).length;
+    appState.fileScroll = Math.max(0, visualRows - 1);
   } else {
     const len = (appState.filesEntries || []).length + (appState.filesPath ? 1 : 0);
     appState.filesSelected = Math.max(0, len - 1);

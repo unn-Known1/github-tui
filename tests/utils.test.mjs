@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import {
   relTime, clamp, truncate, padRight, shortNum, formatBytes,
   greeting, eventGlyph, notifTypeColor, notificationToHtmlUrl,
-  safeCwdJoin, ghCloneUrl,
+  safeCwdJoin, ghCloneUrl, wrapText, wrapTextWithMap,
 } from '../tui/utils.mjs';
 
 describe('relTime', () => {
@@ -165,5 +165,106 @@ describe('safeCwdJoin', () => {
 describe('ghCloneUrl', () => {
   it('builds HTTPS clone URL', () => {
     assert.equal(ghCloneUrl('owner', 'repo'), 'https://github.com/owner/repo.git');
+  });
+});
+
+describe('wrapText — soft-wrap so long lines reflow', () => {
+  it('returns short lines unchanged', () => {
+    assert.deepEqual(wrapText('hello', 10), ['hello']);
+  });
+
+  it('returns exact-fit lines unchanged', () => {
+    assert.deepEqual(wrapText('hello', 5), ['hello']);
+  });
+
+  it('wraps at the last whitespace within width', () => {
+    assert.deepEqual(wrapText('hello world', 5), ['hello', 'world']);
+  });
+
+  it('hard-breaks unbreakable tokens (URLs / long identifiers)', () => {
+    assert.deepEqual(wrapText('supercalifragilistic', 5),
+      ['super', 'calif', 'ragil', 'istic']);
+  });
+
+  it('preserves empty source lines as empty display lines', () => {
+    assert.deepEqual(wrapText('a\n\nb', 5), ['a', '', 'b']);
+  });
+
+  it('strips leading whitespace from continuation rows', () => {
+    assert.deepEqual(wrapText('hello     world', 5), ['hello', 'world']);
+  });
+
+  it('handles width shorter than any word (single-cell width)', () => {
+    assert.deepEqual(wrapText('a b c', 1), ['a', 'b', 'c']);
+  });
+
+  it('handles CRLF as a logical-line break', () => {
+    assert.deepEqual(wrapText('one two\r\nthree', 3),
+      ['one', 'two', 'thr', 'ee']);
+  });
+
+  it('handles null / undefined / empty input gracefully', () => {
+    assert.deepEqual(wrapText(null, 10), ['']);
+    assert.deepEqual(wrapText(undefined, 10), ['']);
+    assert.deepEqual(wrapText('', 10), ['']);
+  });
+
+  it('width <= 0 returns source lines without wrapping', () => {
+    assert.deepEqual(wrapText('hello world', 0), ['hello world']);
+    assert.deepEqual(wrapText('a\nb', -5), ['a', 'b']);
+  });
+
+  it('keeps leading indent visible (does not lose indented content)', () => {
+    // The exact wrap pattern depends on the algorithm's break-point
+    // selection; assert that the indent is preserved (first row contains
+    // some leading whitespace) AND every source word is present somewhere
+    // in the wrapped rows.
+    const result = wrapText('    indented line that wraps', 8);
+    assert.match(result[0], /^\s+$/);   // first row is just indent
+    assert.ok(result.length > 1);        // actually wrapped (multiple rows)
+    // No content was silently dropped: joining with single spaces reproduces
+    // the source words (modulo whitespace collapsing from continuation trim).
+    const joined = result.join(' ').replace(/\s+/g, ' ').trim();
+    assert.equal(joined, 'indented line that wraps');
+  });
+
+  it('keeps list-marker visible on the first visual row of a list item', () => {
+    const result = wrapText('  - a long list item text', 6);
+    // The dash (list marker) MUST appear on the first visual row so the
+    // user can still tell this is a list item once it wraps.
+    assert.match(result[0], /^.*-/);
+    // Every source word survives the wrap:
+    const joined = result.join(' ').replace(/\s+/g, ' ').trim();
+    assert.equal(joined, '- a long list item text');
+  });
+});
+
+describe('wrapTextWithMap — visual-row → source-line mapping', () => {
+  it('maps each visual row to its source-line index', () => {
+    const { lines, visualToLogical } = wrapTextWithMap(
+      'short\nthis is a long line that wraps\nlast', 10);
+    // First line: 1 visual row → source 0
+    assert.equal(lines[0], 'short');
+    assert.equal(visualToLogical[0], 0);
+    // Second source line wrapped into multiple rows → all map to source 1
+    const secondStart = 1;
+    assert.ok(lines[secondStart].length <= 10);
+    for (let i = secondStart; i < lines.length - 1; i++) {
+      assert.equal(visualToLogical[i], 1, 'row ' + i + ' should map to source 1');
+    }
+    // Last row → source 2
+    assert.equal(visualToLogical[visualToLogical.length - 1], 2);
+  });
+
+  it('width <= 0 returns one-to-one mapping', () => {
+    const { lines, visualToLogical } = wrapTextWithMap('a\nb\nc', 0);
+    assert.deepEqual(lines, ['a', 'b', 'c']);
+    assert.deepEqual(visualToLogical, [0, 1, 2]);
+  });
+
+  it('empty source lines each get one visual row mapping back to themselves', () => {
+    const { lines, visualToLogical } = wrapTextWithMap('a\n\nb', 5);
+    assert.deepEqual(lines, ['a', '', 'b']);
+    assert.deepEqual(visualToLogical, [0, 1, 2]);
   });
 });

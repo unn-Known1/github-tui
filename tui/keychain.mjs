@@ -42,10 +42,22 @@ export function detectBackend() {
   return null;
 }
 
-// Cache backend detection result so we don't shell out on every token read
+// Cache backend detection result so we don't shell out on every token read.
 let _cachedBackend = undefined;
 function _backend() {
   if (_cachedBackend === undefined) _cachedBackend = detectBackend();
+  return _cachedBackend;
+}
+
+// F015 fix: when saving, allow one re-detection in case the user installed
+// `secret-tool` (Linux) or signed into macOS Keychain AFTER the first read.
+// Read paths stick to the cached value (avoids per-call shell-outs).
+let _saveRetriedOnce = false;
+function _backendForSave() {
+  if (_cachedBackend !== null || _saveRetriedOnce) return _cachedBackend;
+  _saveRetriedOnce = true;
+  const fresh = detectBackend();
+  if (fresh) _cachedBackend = fresh;
   return _cachedBackend;
 }
 
@@ -57,7 +69,8 @@ function _backend() {
  */
 export function saveTokenSecure(token) {
   if (!token) return false;
-  const backend = _backend();
+  // F015: re-detect once on save in case a backend appeared after first read.
+  const backend = _backendForSave();
   try {
     if (backend === 'macos-keychain')     return _saveMacos(token);
     if (backend === 'secret-tool')        return _saveSecretTool(token);

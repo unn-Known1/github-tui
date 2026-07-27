@@ -96,16 +96,41 @@ export function isStale(handle, scope) {
 // will check. Reading the current controller via a scope string races with
 // bumps and produces the wrong signal after the first re-fetch.
 
+// SECURITY_SUB_PANES — canonical order for keystroke (1-6) dispatch into
+// the Analyze Security sub-pane (dependabot / secret / codescan / advisories
+// / branch / deps). Keys.mjs imports this rather than redeclaring the array
+// so adding/removing a sub-pane only requires editing state.mjs.
+export const SECURITY_SUB_PANES = ['dependabot', 'secret', 'codescan', 'advisories', 'branch', 'deps'];
+
 // ────────────────────────────────────────────────────────────────────────────
 // Current tab index. 0-based. Drives the top tab strip and render dispatch.
 // ────────────────────────────────────────────────────────────────────────────
+// F001 fix: each TABS entry carries its auto-refresh function so app.mjs
+// no longer magic-numbers tabs as `if (t === 0) ... else if (t === 1) ...`.
+// Adding a new tab means writing one entry here with its own refresh fn.
+// `refresh` is async — failure is logged, never thrown.
+//
+// LAZY dynamic imports: tab modules re-import state.mjs for appState/render,
+// so static imports here would create a circular dependency. Each refresh is
+// resolved only when invoked, after both module records have fully evaluated.
 export const TABS = [
-  { key: '1', label: 'Dash' },
-  { key: '2', label: 'Repos' },
-  { key: '3', label: 'Analyze' },
-  { key: '4', label: 'Actions' },
-  { key: '5', label: 'Inbox' },
-  { key: '6', label: 'Settings' },
+  { key: '1', label: 'Dash',
+    refresh: () => import('./tabs/dashboard.mjs').then(m => m.loadDashboardWidgets(true)) },
+  { key: '2', label: 'Repos',
+    refresh: () => import('./tabs/repos.mjs').then(m => m.loadUserData()) },
+  { key: '3', label: 'Analyze',
+    // Analyze is user-driven (search/drill-in). Skip refresh to avoid
+    // clobbering in-progress loads. Users can press 'r'.
+    refresh: null },
+  { key: '4', label: 'Actions',
+    refresh: () => appState.actionsView === 'runs' && appState.actionsRepos.length > 0
+      ? import('./tabs/actions.mjs').then(m => m.loadWorkflowRuns())
+      : import('./tabs/actions.mjs').then(m => m.loadActionsRepos()) },
+  { key: '5', label: 'Inbox',
+    refresh: () => import('./tabs/inbox.mjs').then(m => m.loadNotifications()) },
+  { key: '6', label: 'Settings',
+    // Settings has nothing to auto-refresh.
+    refresh: null },
 ];
 export const tabState = { current: 0 };
 
@@ -370,8 +395,12 @@ export function showMessage(text, type = 'info', durationMs = 3000) {
   appState.message = { text, type, icon: TOAST_ICONS[type] || 'ⓘ' };
   if (appState.messageTimer) clearTimeout(appState.messageTimer);
   appState.messageTimer = setTimeout(() => {
-    appState.message = null;
-    render();
+    // L002 fix: only null the message if it hasn't been replaced by a newer one.
+    if (appState.message && appState.message.text === text) {
+      appState.message = null;
+      appState.messageTimer = null;
+      render();
+    }
   }, durationMs);
   render();
 }
@@ -386,8 +415,12 @@ export function clearMessage() {
 // Confirmation dialog for destructive actions.
 // ────────────────────────────────────────────────────────────────────────────
 export function confirm(message, action, title = 'Confirm') {
-  // Guard: if a confirm is already showing, ignore the new one.
-  if (appState.confirmAction) return;
+  // F008 fix: instead of silently dropping, surface a warning so the user
+  // understands why their clicked action didn't fire.
+  if (appState.confirmAction) {
+    showMessage('A confirmation is already pending — press y or n', 'warning');
+    return;
+  }
   appState.confirmMessage = message;
   appState.confirmAction = action;
   appState.confirmTitle = title;
@@ -443,6 +476,20 @@ export function expandAll(sections) {
 import { readFileSync, writeFileSync, mkdirSync, existsSync } from 'fs';
 import { join } from 'path';
 import { homedir } from 'os';
+
+// L001/L005: shutdown-callback registry. app.mjs attaches a callback to
+// clear the pending toast timer; modules can register their own cleanup steps.
+// Idempotent registration (same fn twice is deduped).
+const _shutdownCallbacks = [];
+export function registerShutdownCallback(fn) {
+  if (typeof fn !== 'function') return;
+  if (_shutdownCallbacks.indexOf(fn) === -1) _shutdownCallbacks.push(fn);
+}
+export function runShutdownCallbacks() {
+  for (const cb of _shutdownCallbacks) {
+    try { cb(); } catch { /* swallow errors here — caller already handles */ }
+  }
+}
 
 const COLLAPSED_PATH = join(homedir(), '.github-tui', 'collapsed.json');
 

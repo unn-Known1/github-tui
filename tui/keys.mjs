@@ -65,8 +65,18 @@ function currentUrl() {
 async function openCurrent() {
   const url = currentUrl();
   if (!url) { showMessage('Nothing to open', 'warning'); return; }
+  // U003 fix: when opening from Inbox, distinguish check-suite notifications
+  // (whose URL redirects to the Actions tab) and friendly-message the user
+  // instead of dumping a confusing /check-suites/N URL.
+  let toastLabel = 'Opened ' + url;
+  if (tabState.current === 4 && appState.notifications[appState.selectedNotification]) {
+    const n = appState.notifications[appState.selectedNotification];
+    const subjectType = n.subject && n.subject.type;
+    if (subjectType === 'CheckSuite') toastLabel = 'Opened Actions tab';
+    else if (subjectType === 'Discussion') toastLabel = 'Opened discussion in browser';
+  }
   const res = await openUrl(url);
-  if (res.ok) showMessage('Opened ' + url, 'success');
+  if (res.ok) showMessage(toastLabel, 'success');
   else showMessage(res.error || 'Open failed', 'error');
 }
 
@@ -88,6 +98,9 @@ async function _toggleStarInner() {
   if (!r || !appState.token) { showMessage('Login + select a repo first', 'warning'); return; }
   const fullName = r.full_name;
   const [owner, name] = fullName.split('/');
+  // F025 fix: capture the pre-mutation stargazers_count so we can roll back
+  // if any post-API work (buildStarHistory, dataset propagation) throws.
+  const preCount = r.stargazers_count || 0;
   try {
     const already = await isStarred(appState.token, owner, name);
     if (already) {
@@ -99,34 +112,46 @@ async function _toggleStarInner() {
       r.stargazers_count = (r.stargazers_count || 0) + 1;
       showMessage('Starred ' + fullName, 'success');
     }
-    // Update stargazers_count in every app state array that may contain this repo.
-    for (const arr of [appState.repos, appState.searchResults,
-                       appState.trending, appState.forks, appState.actionsRepos]) {
-      if (!Array.isArray(arr)) continue;
-      for (let i = 0; i < arr.length; i++) {
-        if (arr[i] && arr[i].full_name === fullName) {
-          arr[i].stargazers_count = r.stargazers_count;
+    // F025 fix: snapshot pre-mutation state so a post-API throw can roll
+    // back BOTH the count AND the starred-list membership.
+    const preStargazers = r.stargazers_count || 0;
+    const preStarredList = Array.isArray(appState.starred) ? [...appState.starred] : [];
+    try {
+      // Update stargazers_count in every app state array that may contain this repo.
+      for (const arr of [appState.repos, appState.searchResults,
+                         appState.trending, appState.forks, appState.actionsRepos]) {
+        if (!Array.isArray(arr)) continue;
+        for (let i = 0; i < arr.length; i++) {
+          if (arr[i] && arr[i].full_name === fullName) {
+            arr[i].stargazers_count = r.stargazers_count;
+          }
         }
       }
-    }
-    if (appState.repoDetails && appState.repoDetails.full_name === fullName) {
-      appState.repoDetails.stargazers_count = r.stargazers_count;
-    }
-    // Update appState.starred membership.
-    if (already) {
-      // Unstarred: remove from starred list if present.
-      const idx = appState.starred.findIndex(s => s.full_name === fullName);
-      if (idx !== -1) appState.starred.splice(idx, 1);
-    } else {
-      // Starred: ensure in starred list.  The /user/starred API returns a
-      // star-decorated repo; we simulate one so buildStarHistory can use it.
-      if (!appState.starred.some(s => s.full_name === fullName)) {
-        appState.starred.unshift({ ...r, starred_at: new Date().toISOString() });
+      if (appState.repoDetails && appState.repoDetails.full_name === fullName) {
+        appState.repoDetails.stargazers_count = r.stargazers_count;
       }
+      // Update appState.starred membership.
+      if (already) {
+        const idx = appState.starred.findIndex(s => s.full_name === fullName);
+        if (idx !== -1) appState.starred.splice(idx, 1);
+      } else {
+        if (!appState.starred.some(s => s.full_name === fullName)) {
+          appState.starred.unshift({ ...r, starred_at: new Date().toISOString() });
+        }
+      }
+      appState.dashboardStarHistory = dashboard.buildStarHistory(appState.starred);
+      render();
+    } catch (e) {
+      // F025 rollback: post-API step failed — undo BOTH the count AND the
+      // starred-list mutation so the UI doesn't lie about GitHub state.
+      r.stargazers_count = preStargazers;
+      appState.starred = preStarredList;
+      throw e;
     }
-    appState.dashboardStarHistory = dashboard.buildStarHistory(appState.starred);
+  } catch (e) {
+    showMessage(e.message || 'Star failed', 'error');
     render();
-  } catch (e) { showMessage(e.message || 'Star failed', 'error'); }
+  }
 }
 
 async function toggleWatch() {
@@ -185,17 +210,18 @@ function quit() {
 
 // ──────────────────────────────────────────────────────────────────
 // Main entry — process.stdin pipes every keystroke through here.
-// ──────────────────────────────────────────────────────────────────
-
-// Key repeat debouncing — limit renders to ~60fps for held keys.
+// ──────────────────────────────────────────────────────────────────// Key repeat debouncing — limit renders to ~60fps for held keys.
+// F017 fix: bypass the debouncer for multi-byte / sequence keys (paste,
+// mouse events, escape sequences) so paste isn't silently dropped.
 let _lastKeyTime = 0;
 let _lastKeyStr = '';
 const KEY_REPEAT_DEBOUNCE_MS = 16; // ~60fps
 
 export function handleKey(key) {
-  // Debounce repeated keys (arrow keys held down).
+  // Debounce repeated single-char keys (held arrow keys). Multi-char
+  // sequences (paste, mouse, escape sequences) always pass through.
   const now = Date.now();
-  if (key === _lastKeyStr && now - _lastKeyTime < KEY_REPEAT_DEBOUNCE_MS) return;
+  if (key.length === 1 && key === _lastKeyStr && now - _lastKeyTime < KEY_REPEAT_DEBOUNCE_MS) return;
   _lastKeyTime = now;
   _lastKeyStr = key;
   // 0. Ctrl+C always quits, no matter what overlay is open.
@@ -237,26 +263,45 @@ export function handleKey(key) {
   if (bookmarks.handleKey(key)) return;
 
   // 1b. Help overlay: handle special keys, any other key closes.
+  // F002 fix: the printable-char branch must come FIRST so typing letters
+  // like k/j/g/n/p lets the user search. Previously those letters short-
+  // circuited the scroll handlers above, making help search unusable.
   if (appState.showHelp) {
     if (key === '\x1b' || key === 'q') { appState.showHelp = false; render(); return; }
-    if (key === '\x1b[A' || key === 'k') { help.scrollHelp(-3); render(); return; }
-    if (key === '\x1b[B' || key === 'j') { help.scrollHelp(3); render(); return; }
-    if (key === 'g') { help.setHelpQuery(''); appState.helpCursor = 0; render(); return; }
+    // Backspace deletes the last char from the search query.
     if (key === '\x7f' || key === '\b') {
       const q = appState.helpQuery || '';
       help.setHelpQuery(q.slice(0, -1));
       render();
       return;
     }
-    if (key === '/') {
-      // Already in search mode; treat as literal.
-      help.setHelpQuery((appState.helpQuery || '') + '/');
+    // Up / k → scroll content up. Down / j / Enter → scroll content down.
+    // g / Home → go to top of help. G / End → go to bottom.
+    if (key === '\x1b[A' || key === 'k') { help.scrollHelp(-3); render(); return; }
+    if (key === '\x1b[B' || key === 'j' || key === '\r' || key === '\n') { help.scrollHelp(3); render(); return; }
+    if (key === 'g' || key === '\x1b[H' || key === '\x1bOH') {
+      // F002 fix: g scrolls-to-top WITHOUT clearing the user's search query.
+      // Previously this inadvertently wiped any filter the user had typed.
+      // Use 'gg' (type g twice) to also clear, or 'Esc' to dismiss the overlay.
+      appState.helpCursor = 0;
+      render();
+      return;
+    }
+    if (key === 'G' && appState.helpQuery) {
+      help.setHelpQuery('');
       render();
       return;
     }
     if (key === 'n') { help.scrollHelp(3); render(); return; }
     if (key === 'p') { help.scrollHelp(-3); render(); return; }
-    if (key.length === 1 && key.charCodeAt(0) >= 32) {
+    if (key === '/') {
+      // / starts search; subsequent presses append to query.
+      help.setHelpQuery((appState.helpQuery || '').length === 0 ? '/' : (appState.helpQuery || '') + '/');
+      render();
+      return;
+    }
+    // Printable ASCII + above — append to search query.
+    if (key.length >= 1 && key.charCodeAt(0) >= 32) {
       help.setHelpQuery((appState.helpQuery || '') + key);
       render();
       return;
@@ -299,7 +344,20 @@ export function handleKey(key) {
   const isSecurityPane = tabState.current === 2 && appState.analyzeView === 'details' && appState.detailsPane === 'security';
   switch (key) {
     case '1': case '2': case '3': case '4': case '5': case '6': {
-      if (isSecurityPane) break; // let per-tab handler deal with it
+      // U006 fix: when in the Analyze security sub-pane, 1-6 switch between
+      // sub-panes (dependabot / secret / codescan / advisories / branch / deps)
+      // instead of changing tabs. The previous `break` fall-through silently
+      // relied on the per-tab key map running AFTER the switch — fragile if
+      // dispatch order ever changed. Now dispatched explicitly.
+      if (isSecurityPane) {
+        const order = ['dependabot', 'secret', 'codescan', 'advisories', 'branch', 'deps'];
+        const idx = parseInt(key, 10) - 1;
+        if (idx >= 0 && idx < SECURITY_SUB_PANES.length) {
+          appState.securitySubPane = SECURITY_SUB_PANES[idx];
+          render();
+        }
+        return;
+      }
       const i = parseInt(key, 10) - 1;
       setTab(i);
       resetFocus(i);
@@ -350,8 +408,13 @@ export function handleKey(key) {
     case 'y': copyCurrentUrl(); return;
     case 'b': toggleBookmark(); return;
     case 'B': {
-      // In files pane, B opens branch picker (falls through to per-tab keys below).
-      if (tabState.current === 2 && appState.analyzeView === 'details' && appState.detailsPane === 'files') break;
+      // U001 fix: in the files pane, B opens the branch picker; everywhere
+      // else it opens the bookmarks browser. Explicit dispatch.
+      if (tabState.current === 2 && appState.analyzeView === 'details' && appState.detailsPane === 'files') {
+        import('./tabs/files.mjs').then(m => m.openBranchPicker()).catch(e =>
+          showMessage('Branch picker failed: ' + (e && e.message || 'unknown'), 'error'));
+        return;
+      }
       bookmarks.openBookmarks();
       return;
     }
@@ -365,15 +428,28 @@ export function handleKey(key) {
     case '\x1b[6~': handlePageDown(); return;  // PageDown
     case 'g': handleTop(); return;
     case 'G': {
-      // In files pane, G triggers gh repo clone (not jump-to-bottom).
-      if (tabState.current === 2 && appState.analyzeView === 'details' && appState.detailsPane === 'files') break;
+      // U001 fix: in the files pane (Analyze details + files sub-pane),
+      // capital G triggers `gh repo clone` rather than jump-to-bottom.
+      // Previously this was a `break;` fall-through that silently relied on
+      // the per-tab key map running AFTER the switch — fragile if anyone
+      // reordered the dispatch. Now the dispatch is explicit.
+      if (tabState.current === 2 && appState.analyzeView === 'details' && appState.detailsPane === 'files') {
+        import('./tabs/files.mjs').then(m => m.ghCloneIntoCwd()).catch(e =>
+          showMessage('gh clone failed: ' + (e && e.message || 'unknown'), 'error'));
+        return;
+      }
       handleBottom();
       return;
     }
     case 'z': handleCollapseToggle(); return;
     case 'Z': {
-      // In files pane, Z triggers zipball download (not collapse-all).
-      if (tabState.current === 2 && appState.analyzeView === 'details' && appState.detailsPane === 'files') break;
+      // U001 fix: in the files pane, Z triggers a zipball download; everywhere
+      // else it collapses all collapsible sections. Explicit dispatch.
+      if (tabState.current === 2 && appState.analyzeView === 'details' && appState.detailsPane === 'files') {
+        import('./tabs/files.mjs').then(m => m.downloadZipball()).catch(e =>
+          showMessage('Zipball failed: ' + (e && e.message || 'unknown'), 'error'));
+        return;
+      }
       handleCollapseAll();
       return;
     }
@@ -391,8 +467,16 @@ export function handleKey(key) {
   if (key === '*' && currentRepoForAction()) { toggleStar(); return; }
 
   // 5c. Settings tab: star repo on 's'/'S'.
+  // F018 fix: guard against missing token — previously this crashed deep
+  // in the HTTP layer with a confusing error.
   if (tabState.current === 5 && (key === 's' || key === 'S')) {
-    settings.starRepo();
+    if (!appState.token) {
+      showMessage('Login first (Settings → Login)', 'warning');
+      return;
+    }
+    Promise.resolve().then(() => settings.starRepo()).catch((e) => {
+      showMessage((e && e.message) || 'Star failed', 'error');
+    });
     return;
   }
 
@@ -425,9 +509,17 @@ export function handleKey(key) {
   }
 
   // 7. Per-tab key map.
+  // F003 fix: many tab keys[key] entries return Promises (saveCurrentFile,
+  // downloadZipball, toggleStar, etc.). Previously the Promise was dropped,
+  // creating silent unhandled rejections. Now we await through a Promise.resolve
+  // and route errors to showMessage so users see a toast.
   const mod = tabModules[tabState.current];
   if (mod && mod.keys && typeof mod.keys[key] === 'function') {
-    mod.keys[key]();
+    Promise.resolve()
+      .then(() => mod.keys[key]())
+      .catch((e) => {
+        showMessage((e && e.message) || 'Action failed', 'error');
+      });
     return;
   }
 
@@ -638,7 +730,9 @@ function handleBack() {
       import('./tabs/detail.mjs').then(m => m.closeDetail()).catch(() => {});
       return;
     }
-    return;
+    // U004 fix: Inbox Esc with no open detail popup now falls back to
+    // tab 0 (Dashboard) like every other tab. Previously it was a silent
+    // no-op, breaking the expected "Esc = back" mental model.
   }
   setTab(0);
 }

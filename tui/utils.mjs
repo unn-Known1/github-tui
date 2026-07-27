@@ -25,6 +25,73 @@ export function truncate(s, n) {
   return str.length <= n ? str : str.slice(0, Math.max(0, n - 1)) + '…';
 }
 
+// Word-wrap `text` so each visual line fits within `width` display cells.
+//
+// Behavior:
+//   - Splits on `\r?\n` first so source-line semantics are preserved
+//     (each `\n` produces a logical-line boundary).
+//   - Greedy fit: for each source line, break at the LAST whitespace
+//     position within the next `width` cells so words stay intact when
+//     possible.
+//   - For unbreakable tokens (URLs, long identifiers, code with no
+//     whitespace) that exceed `width` on their own, hard-breaks at `width`.
+//   - Strips leading whitespace from continuation rows so wrapped lines
+//     start flush against the gutter.
+//   - Empty source lines produce one empty display line (preserves blank
+//     rows in READMEs / blank-line spacing in code files).
+//   - `width <= 0` returns the source lines unchanged (graceful
+//     degradation when the caller has no usable width).
+//
+// Used by the README pane and the file viewer so long horizontal lines
+// reflow instead of being hidden past the right edge.
+export function wrapTextWithMap(text, width) {
+  const t = text == null ? '' : String(text);
+  const logicalLines = t.split(/\r?\n/);
+  if (width == null || width <= 0) {
+    return { lines: logicalLines, visualToLogical: logicalLines.map((_, i) => i) };
+  }
+  const visualLines = [];
+  const visualToLogical = [];
+  for (let i = 0; i < logicalLines.length; i++) {
+    let ln = logicalLines[i];
+    if (ln.length === 0) {
+      visualLines.push('');
+      visualToLogical.push(i);
+      continue;
+    }
+    let isContinuation = false;
+    // eslint-disable-next-line no-constant-condition
+    while (true) {
+      if (isContinuation) ln = ln.trimStart();
+      if (ln.length === 0) break;
+      const chars = Array.from(ln);
+      if (chars.length <= width) {
+        visualLines.push(ln);
+        visualToLogical.push(i);
+        break;
+      }
+      // Find the last whitespace index within the next `width` cells.
+      let breakIdx = -1;
+      for (let j = width; j >= 0; j--) {
+        if (j < chars.length && /\s/.test(chars[j])) { breakIdx = j; break; }
+      }
+      if (breakIdx <= 0) breakIdx = width; // unbreakable token — hard-break
+      visualLines.push(chars.slice(0, breakIdx).join(''));
+      visualToLogical.push(i);
+      ln = chars.slice(breakIdx).join('');
+      isContinuation = true;
+    }
+  }
+  return { lines: visualLines, visualToLogical };
+}
+
+// Convenience: just the visual lines (no source-line mapping). Most callers
+// only need the wrapped array; `wrapTextWithMap` is for footer text and
+// per-source-line styling on continuation rows.
+export function wrapText(text, width) {
+  return wrapTextWithMap(text, width).lines;
+}
+
 // Pad-right to width (no truncation).
 export function padRight(s, n) {
   const str = String(s ?? '');
@@ -134,7 +201,9 @@ export function notificationToHtmlUrl(apiUrl) {
   let url = apiUrl.replace('api.github.com/repos', 'github.com');
   // Only convert /pulls/ to /pull/ for actual PR URLs.
   if (url.includes('/pulls/')) {
-    url = url.replace('/pulls/', '/pull/');
+    // F021 fix: only rewrite /pulls/<digits> → /pull/<digits>; never
+    // touch URLs that merely contain the substring `/pulls/` mid-path.
+    url = url.replace(/\/pulls\/(\d+)(?=#|\?|$)/, '/pull/$1');
   }
   return url;
 }
@@ -146,14 +215,25 @@ import { mkdirSync, existsSync, writeFileSync, statSync } from 'fs';
 
 // Refuse paths that escape CWD via .. — used before writing any user-named
 // file to disk so a malicious repo can't overwrite ~/.ssh/authorized_keys etc.
+//
+// SECURITY: the prefix check MUST use a path-separator on CWD so a
+// same-prefix sibling directory (CWD=/a/b, target=/a/b-other) is rejected.
+// F022 regression — added regression test in tests/safe-cwd.test.mjs.
 export function safeCwdJoin(relPath) {
+  if (relPath == null) throw new Error('safeCwdJoin: relPath is required');
   const cwd = process.cwd();
-  const target = resolve(cwd, normalize(relPath));
+  const target = resolve(cwd, normalize(String(relPath)));
   // Normalize both paths to forward slashes for cross-platform comparison.
-  const normCwd = cwd.replace(/\\/g, '/');
-  const normTarget = target.replace(/\\/g, '/');
-  const suffix = normCwd.endsWith('/') ? '' : '/';
-  if (!normTarget.startsWith(normCwd + suffix) && normTarget !== normCwd) {
+  const normCwd = process.platform === 'win32' ? cwd.toLowerCase().replace(/\\/g, '/') : cwd.replace(/\\/g, '/');
+  const normTarget = process.platform === 'win32' ? target.toLowerCase().replace(/\\/g, '/') : target.replace(/\\/g, '/');
+  // Refuse root-walking ambiguity: if CWD is itself "/", every absolute
+  // path "starts with" it; require explicit equality in that case.
+  if (normCwd === '/' || normCwd === '') {
+    if (normTarget !== normCwd) throw new Error('Path escapes CWD: ' + relPath);
+    return target;
+  }
+  const sep = normCwd.endsWith('/') ? '' : '/';
+  if (normTarget !== normCwd && !normTarget.startsWith(normCwd + sep)) {
     throw new Error('Path escapes CWD: ' + relPath);
   }
   return target;

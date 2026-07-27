@@ -34,6 +34,10 @@ export function startInput(prompt, context, mask = false) {
   appState.inputContext = context;
   appState.inputMask = mask;
   appState.inputCursor = 0;
+  // Reset paste state so a half-finished paste from a previous modal
+  // can't leak into the new one.
+  _pasting = false;
+  _pasteBuffer = '';
   render();
 }
 
@@ -45,6 +49,9 @@ export function cancelInput() {
   appState.inputContext = null;
   appState.inputMask = false;
   appState.inputCursor = 0;
+  // Clear paste state so a cancelled paste can't bleed into the next modal.
+  _pasting = false;
+  _pasteBuffer = '';
   if (wasActive) showMessage('Cancelled', 'info');
   else render();
 }
@@ -54,23 +61,101 @@ export function handleInputKey(key) {
   if (appState.inputMode !== 'input') return false;
 
   // Handle bracketed paste mode.
-  if (key === '\x1b[200~') { _pasting = true; _pasteBuffer = ''; return true; }
+  //
+  // The start/end sequences can arrive ANYWHERE in a `data` chunk — modern
+  // terminals (xterm ≥370, iTerm2, kitty, wezterm, modern GNOME Terminal)
+  // deliver a paste as ONE big chunk \x1b[200~<content>\x1b[201~. Older
+  // terminals split each piece across `data` events. The previous exact-
+  // equality test (`key === '\x1b[200~'`) silently dropped combined chunks.
+  // Parse for the sequences anywhere in the chunk, recursively process any
+  // prefix (key that came BEFORE the paste) and any suffix (key that came
+  // AFTER the paste).
+  const PASTE_START = '\x1b[200~';
+  const PASTE_END   = '\x1b[201~';
+
+  // ── Shared helpers for the paste paths ──
+  //
+  // Strip control bytes (<32) and DEL (127) from a string and return the
+  // remaining codepoints as an array (codepoint-array form keeps the
+  // splice call correct for surrogate pairs and combining marks).
+  function filterPrintableChars(str) {
+    let out = '';
+    for (let i = 0; i < str.length; i++) {
+      const c = str.charCodeAt(i);
+      if (c >= 32 && c !== 127) out += str[i];
+    }
+    return Array.from(out);
+  }
+
+  // Splice an array of codepoints into the input buffer at the cursor,
+  // advance the cursor by the inserted count, and re-render. Used by both
+  // the bracketed-paste flush and the bulk-raw-paste fallback.
+  function insertCharsAtCursor(chars) {
+    if (chars.length === 0) return;
+    const buf = Array.from(appState.inputBuffer);
+    const cur = appState.inputCursor != null ? appState.inputCursor : buf.length;
+    buf.splice(cur, 0, ...chars);
+    appState.inputBuffer = buf.join('');
+    appState.inputCursor = cur + chars.length;
+    render();
+  }
+
+  // Flush the in-flight bracketed paste into the input buffer, clearing
+  // module-local paste state.
+  const flushPasteIntoInput = () => {
+    _pasting = false;
+    insertCharsAtCursor(filterPrintableChars(_pasteBuffer));
+    _pasteBuffer = '';
+  };
+
+  // 1) Already mid-paste: keep buffering until we see the END sequence,
+  //    even if the same chunk also contains trailing key bytes.
   if (_pasting) {
-    if (key === '\x1b[201~') {
-      // End of paste — insert all buffered content at once.
-      _pasting = false;
-      const buf = Array.from(appState.inputBuffer);
-      const cur = appState.inputCursor != null ? appState.inputCursor : buf.length;
-      const pasted = Array.from(_pasteBuffer);
-      buf.splice(cur, 0, ...pasted);
-      appState.inputBuffer = buf.join('');
-      appState.inputCursor = cur + pasted.length;
-      _pasteBuffer = '';
-      render();
+    const endIdx = key.indexOf(PASTE_END);
+    if (endIdx === -1) {
+      _pasteBuffer += key;
       return true;
     }
-    _pasteBuffer += key;
+    _pasteBuffer += key.slice(0, endIdx);
+    flushPasteIntoInput();
+    const remainder = key.slice(endIdx + PASTE_END.length);
+    if (remainder.length > 0) return handleInputKey(remainder);
     return true;
+  }
+
+  // 2) Paste START anywhere in chunk: recursively handle any prefix as a
+  //    normal key first, then arm the paste state and recursively process
+  //    the suffix (which may contain the END sequence and any trailing key).
+  const startIdx = key.indexOf(PASTE_START);
+  if (startIdx !== -1) {
+    const before = key.slice(0, startIdx);
+    if (before.length > 0) handleInputKey(before);
+    _pasting = true;
+    _pasteBuffer = '';
+    const after = key.slice(startIdx + PASTE_START.length);
+    if (after.length > 0) handleInputKey(after);
+    return true;
+  }
+
+  // 3) Bulk-raw-paste fallback for terminals that IGNORE bracketed paste
+  //    mode (\x1b[?2004h). In that case the paste arrives as raw printable
+  //    chars (often with stray \n / \r / \t inserted by the host). The
+  //    previous behavior would submit on the very first \n and lose most
+  //    of the paste. Instead: if a chunk has both printable AND control
+  //    bytes (≥3 chars total, no escape sequences at all), bulk-insert
+  //    the printable chars and drop the control chars. Single-character
+  //    chunks and all-printable chunks fall through to the normal
+  //    per-key branches below.
+  if (key.length >= 3 && !key.includes('\x1b')) {
+    let hasControl = false;
+    for (let i = 0; i < key.length; i++) {
+      const c = key.charCodeAt(i);
+      if (c < 32 || c === 127) { hasControl = true; break; }
+    }
+    if (hasControl) {
+      insertCharsAtCursor(filterPrintableChars(key));
+      return true;
+    }
   }
 
   if (key === '\r' || key === '\n') {

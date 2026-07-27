@@ -95,10 +95,10 @@ function evictLRU() {
   for (const [k, v] of etagCache) {
     if (now - v.ts >= ETAG_TTL) etagCache.delete(k);
   }
-  // If still over limit, evict by lastAccess.
+  // If still over limit, evict by lastAccess down to the limit (F013 fix).
   if (etagCache.size > ETAG_CACHE_MAX) {
     const entries = [...etagCache.entries()].sort((a, b) => a[1].lastAccess - b[1].lastAccess);
-    const toRemove = entries.slice(0, etagCache.size - ETAG_CACHE_MAX + 50);
+    const toRemove = entries.slice(0, etagCache.size - ETAG_CACHE_MAX);
     for (const [k] of toRemove) etagCache.delete(k);
   }
   _cacheDirty = true;
@@ -128,8 +128,10 @@ function saveLastSynced() {
   } catch { /* non-fatal */ }
 }
 
-function recordSync(path) {
-  lastSynced[path] = Date.now();
+function recordSync(path, ts) {
+  // F014 fix: allow caller to pass an explicit timestamp (used by cache-
+  // serve paths so the sync stamp reflects data age, not "now").
+  lastSynced[path] = (typeof ts === 'number') ? ts : Date.now();
   _syncedDirty = true;
 }
 
@@ -205,13 +207,15 @@ export function request(path, opts) {
   const raw = !!o.raw;
   const bodyStr = body == null ? null : JSON.stringify(body);
 
+  const cacheKey = `${method}:${path}`;
+
   // Offline mode: return cached data for GETs when offline.
   if (method === 'GET' && offlineState.isOffline) {
-    const key = `${method}:${path}`;
-    const cached = etagCache.get(key);
+    const cached = etagCache.get(cacheKey);
     if (cached) {
       cached.lastAccess = Date.now();
       _cacheDirty = true;
+      recordSync(path);   // F014: keep last-synced fresh even when serving from cache
       return Promise.resolve(cached.body);
     }
     return Promise.reject(new Error('Offline — no cached data available'));
@@ -219,11 +223,11 @@ export function request(path, opts) {
 
   // Rate-limit-conservative mode: when budget is low, try cache before hitting the wire.
   if (method === 'GET' && lastRateLimit.remaining !== null && lastRateLimit.remaining < LOW_RATE_WARN) {
-    const key = `${method}:${path}`;
-    const cached = etagCache.get(key);
+    const cached = etagCache.get(cacheKey);
     if (cached && Date.now() - cached.ts < ETAG_TTL) {
       cached.lastAccess = Date.now();
       _cacheDirty = true;
+      recordSync(path);   // F014: same as offline path — refresh sync stamp
       return Promise.resolve(cached.body);
     }
   }
@@ -348,11 +352,11 @@ export function request(path, opts) {
       offlineState.isOffline = true;
       // Try to return cached data for GETs.
       if (method === 'GET') {
-        const key = `${method}:${path}`;
-        const cached = etagCache.get(key);
+        const cached = etagCache.get(cacheKey);
         if (cached) {
           cached.lastAccess = Date.now();
           _cacheDirty = true;
+          recordSync(path);   // F014: refresh sync stamp even on network-error recovery
           return resolve(cached.body);
         }
       }
@@ -495,11 +499,18 @@ export const getFileCommits = (token, owner, repo, path, perPage) =>
 // Returns the *redirect URL* to the zipball without following it. Used by the
 // file-tree pane to hand the URL to a streaming download routine that writes
 // straight to disk (so we don't buffer a 200 MB zip in memory).
+//
+// SECURITY: We use GitHub's universal archive URL
+// (`/repos/{owner}/{repo}/archive/{ref}.zip`) which works for BOTH branches
+// AND tags — the previous codeload.github.com heuristic
+// (refs/tags vs refs/heads) mis-classified tags like `v1.10.0`, `release-2024`,
+// `feature/foo`, or `v1.0.0-alpha` (F004 regression).
 export function getZipballUrl(owner, repo, ref) {
   const r = ref || 'main';
-  const prefix = r.match(/^v?\d+\.\d+/) ? 'refs/tags' : 'refs/heads';
-  return 'https://codeload.github.com/' + owner + '/' + repo +
-    '/zip/' + prefix + '/' + r;
+  // Use the API archive endpoint — the codeload redirect heuristic was
+  // unreliable for tag/branch names that don't start with "v?digits.digits".
+  return 'https://api.github.com/repos/' + owner + '/' + repo +
+    '/zipball/' + encodeURIComponent(r);
 }
 
 // Download an arbitrary URL straight to a local file path, streaming.

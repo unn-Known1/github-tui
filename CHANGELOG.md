@@ -2,6 +2,28 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.6.5] - 2026-07-27
+
+### Fixed — Warranty + UX cleanup
+- **App startup crash** — fixed `ReferenceError: registerShutdownCallback is not defined` at app.mjs:117. Consolidated the duplicated `state.mjs` import block into a single top-level import that now pulls in `TABS, showMessage, loadCollapsed, loadSession, registerShutdownCallback`.
+- **Boot-time `SyntaxError: Identifier 'render' has already been declared`** — both `state.mjs` and `render.mjs` export `render`. Removed the redundant import from `state.mjs` while keeping the screen-painter import from `render.mjs`. A defensive inline comment now warns future contributors not to re-import `render` from `state.mjs`.
+- **Stale `_TABS` reference in `startAutoRefresh`** — once the second `import { TABS as _TABS }` line was dropped, auto-refresh would have thrown on its first tick. Renamed two call sites to plain `TABS` so the consolidated top-level import is the single source of truth.
+- **Inbox detail-popup `Esc` fallback** (U004) — `openDetail(...).Esc` and bare `Esc` on a non-detail row are no longer silent no-ops; both fall through to `setTab(0)` (Dashboard) for a consistent keyboard feel across every tab.
+- **Fragile `break;` fall-through in keymap switch** (U001, U006) — replaced the silent dispatch-after-switch pattern for `G`/`B`/`Z` (files-pane actions: `ghCloneIntoCwd`, `openBranchPicker`, `downloadZipball`) and `1`–`6` (Analyze security sub-pane: dependabot / secret / codescan / advisories / branch / deps) with explicit in-switch dispatch. Future tab reorderings or refactors can't silently break these shortcuts anymore.
+- **Inbox `o` toast on CheckSuite / Discussion subjects** (U003) — pressing `o` on a CheckSuite notification no longer dumps the raw `/check-suites/N` URL into the success toast; the toast now reads "Opened Actions tab". Discussions say "Opened discussion in browser" instead.
+
+### Changed — Source-of-truth hoist
+- New `SECURITY_SUB_PANES` constant exported from `tui/state.mjs` (next to `TABS`). The sub-pane enum `['dependabot', 'secret', 'codescan', 'advisories', 'branch', 'deps']` was previously inlined in `keys.mjs`; now keys.mjs imports it from one place so adding/removing a sub-pane is a single-file edit and the two files can't drift.
+
+### Internal
+- **Duplicate-import shadow audit** — cross-referenced every `export X` declaration across `tui/*.mjs`, `tui/tabs/*.mjs`, and `app.mjs` against every `import { ... } from ...` block. The only live collision in the codebase was the `render` import in `app.mjs` (state.mjs + render.mjs); it is now fixed. Every other shared-looking name (`handleKey`, `up`/`down`/`enter`, `pageUp`/`pageDown`, `bottom`, `jumpTop`, `jumpBottom`, `keys`, `getSections`, `getCurrentSection`) is either single-source or accessed via a namespace import (`tabModules`, `bookmarks`, `palette`), so no further fixes were needed.
+
+### Docs
+- README: version bumped to 0.6.5 (Socket badge + System panel)
+- VISION: "Current version" bumped to v0.6.5
+
+---
+
 ## [0.6.4] - 2026-07-20
 
 ### Fixed
