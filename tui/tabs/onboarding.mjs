@@ -1,130 +1,268 @@
 // Onboarding / "What's new" overlay — first-time welcome + version tour.
-// Triggered when there's no saved token, or manually from Settings/Help.
+// P0-1 fix: the STEPS array is now dynamic. Step 1 offers GitHub CLI login
+// first when `gh` is detected and falls back to PAT paste otherwise. Step 4
+// pulls bullets from CHANGELOG.md so the "what's new" message stops going
+// stale on every release.
 
-import { appState, render, showMessage, setTab, confirm } from '../state.mjs';
+import { appState, render, showMessage, setTab, compareVersions } from '../state.mjs';
+// Re-export compareVersions so callers (notably the app.mjs version-gate
+// and tests/onboarding.test.mjs) can import it from this module — the
+// onboarding flow is the canonical consumer of "is the user's APP_VERSION
+// newer than what they last saw?".
+export { compareVersions };
 import { color } from '../theme.mjs';
 import { APP_VERSION, CONFIG_DIR, TOKEN_FILE } from '../config.mjs';
 import { listThemes } from '../theme.mjs';
 import { startInput } from '../input.mjs';
-import { writeFileSync, existsSync, mkdirSync } from 'fs';
-import { join } from 'path';
+import { writeFileSync, existsSync, mkdirSync, readFileSync } from 'fs';
+import { join, dirname } from 'path';
+import { fileURLToPath } from 'url';
 import { submitLogin } from './settings.mjs';
 
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = dirname(__filename);
+const CHANGELOG_PATH = join(__dirname, '..', '..', 'CHANGELOG.md');
 const WELCOME_SEEN_FILE = join(CONFIG_DIR, '.welcome-seen');
 
-// Steps for the first-time wizard. Each step is rendered in turn.
-const STEPS = [
-  {
-    icon: '●',
-    title: 'Welcome to GitHub TUI',
-    body: [
-      'A zero-dependency terminal client for GitHub — read, triage, and act',
-      'on your repos without leaving the keyboard.',
-      '',
-      'Created by @unn-Known1 (https://github.com/unn-Known1)'
-    ],
-    hint: 'Press [Enter] to continue  ·  [Esc] to skip',
-  },
-  {
-    icon: '★',
-    title: 'Sign in with a Personal Access Token',
-    body: [
-      'You\'ll need a GitHub PAT to access your repos and notifications.',
-      '',
-      'To create one:',
-      '  1. Open GitHub → Settings → Developer settings',
-      '  2. Personal access tokens → Tokens (classic) → Generate new',
-      '  3. Select scopes: repo, read:user, notifications',
-      '  4. Copy the token and paste it in the next step',
-    ],
-    hint: 'Press [Enter] to set up your token now',
-    onEnter: () => startInput('Paste your GitHub PAT: ', 'login', true),
-  },
-  {
-    icon: '■',
-    title: 'The keyboard is your friend',
-    body: [
-      'Six tabs at the top:',
-      '  [1] Dashboard  · greeting, activity, stats, trending',
-      '  [2] Repos     · your repos with filters, sort, pins',
-      '  [3] Analyze   · search any public repo, view details',
-      '  [4] Actions   · CI / workflow runs',
-      '  [5] Inbox     · triage notifications',
-      '  [6] Settings  · theme, login, system info',
-      '',
-      'Power keys (work everywhere):',
-      '  [Ctrl-P]  open the command palette',
-      '  [?]       show this help',
-      '  [q]       quit',
-    ],
-    hint: 'Press [Enter] for tips  ·  [Esc] to finish',
-  },
-  {
-    icon: '◆',
-    title: 'New in v0.5.8',
-    body: [
-      '  • Windows compatibility fixes (CMD / PowerShell safety)',
-      '  • Terminal icon compatibility (replaced double-width emojis)',
-      '  • File Explorer off-by-one selection fixes',
-      '  • Help overlay search scroll clamping',
-      '  • Bookmarks auto-scrolling row limits',
-      '',
-      'Created by @unn-Known1 (https://github.com/unn-Known1)'
-    ],
-    hint: 'Press [Enter] to choose theme  ·  [Esc] to finish',
-  },
-  {
-    icon: '◆',
-    title: 'Pick a theme',
-    body: 'GitHub TUI ships with several themes. Try one that matches your terminal:',
-    showThemes: true,
-    hint: 'Press [Enter] to start using GitHub TUI',
-    onEnter: () => {
-      appState.dismissedOnboarding = true;
-      markWelcomeSeen();
-      appState.showOnboarding = false;
-      setTab(0);
-      showMessage('✓ You\'re all set. Have fun!', 'success');
-      render();
-    },
-  },
-];
+// ── Pure helpers (exported for tests) ──
 
-let stepIdx = 0;
+// Parse a CHANGELOG.md (keep-a-changelog style) into sections.
+// Each section: { version, date, bullets: string[] }.
+// Lines starting with `### ` are captured as a subheader (first one only).
+export function parseReleaseNotes(text) {
+  if (!text || typeof text !== 'string') return [];
+  const sections = [];
+  let cur = null;
+  for (const ln of text.split('\n')) {
+    const m = /^##\s*\[([^\]]+)\]\s*-?\s*(.*)$/.exec(ln);
+    if (m) {
+      if (cur) sections.push(cur);
+      cur = { version: m[1].trim(), date: m[2].trim(), bullets: [] };
+    } else if (cur && /^\s*-\s+/.test(ln)) {
+      cur.bullets.push(ln.replace(/^\s*-\s+/, '').trim());
+    } else if (cur && /^\s*###\s+/.test(ln) && !cur.subheader) {
+      cur.subheader = ln.replace(/^\s*###\s+/, '').trim();
+    }
+  }
+  if (cur) sections.push(cur);
+  return sections;
+}
+
+// Cached changelog content (loaded lazily on first read).
+let _changelogCache = null;
+function readChangelogSync() {
+  if (_changelogCache !== null) return _changelogCache;
+  try {
+    _changelogCache = readFileSync(CHANGELOG_PATH, 'utf8');
+  } catch {
+    _changelogCache = '';
+  }
+  return _changelogCache;
+}
+
+// Build the "What's new in vX" body — picks the section matching
+// `currentVersion` if present, otherwise falls back to the first (newest)
+// section. Caps to 7 bullets so the box doesn't overflow on tiny terminals.
+export function buildWhatsNewBody(changelogText, currentVersion) {
+  const sections = parseReleaseNotes(changelogText);
+  let target = sections.find(s => s.version === currentVersion);
+  if (!target) target = sections[0];
+  const header = target
+    ? ['  Current version: v' + currentVersion, '']
+    : ['  Current version: v' + currentVersion];
+  if (!target) return [...header, '', '  No release notes bundled.'];
+  const bullets = target.bullets.slice(0, 7).map(b => '  • ' + b);
+  let body = [...header, ...bullets];
+  if (target.bullets.length > 7) body.push('  …and more in CHANGELOG.md');
+  return body;
+}
+
+// ── Steps cache (rebuilds when invalidated) ──
+let _cachedSteps = null;
+let _stepsDirty = true;
+export function invalidateOnboarding() { _stepsDirty = true; }
+
+// Async helper: probe gh CLI, set appState._ghAvailable, invalidate steps.
+export async function probeGhAndInvalidate() {
+  try {
+    const settings = await import('./settings.mjs');
+    const ok = await settings.isGhInstalled();
+    appState._ghAvailable = ok === true;
+  } catch {
+    appState._ghAvailable = false;
+  }
+  _stepsDirty = true;
+  render();
+}
+
+function buildLoginStep() {
+  const ghAvail = appState._ghAvailable;
+  let body, hint, onEnter;
+  if (ghAvail === true) {
+    body = [
+      'Press [Enter] to log in via the GitHub CLI — no token needed.',
+      '',
+      '  Requires: `gh auth login` was run in your shell.',
+      '  Works for private repos too (auth handled by gh).'
+    ];
+    hint = 'Press [Enter] to log in  ·  [Esc] to skip';
+    onEnter = () => import('./settings.mjs').then(m => m.loginWithGh());
+  } else if (ghAvail === false) {
+    body = [
+      'GitHub CLI was not detected on this machine.',
+      '',
+      '  Option A — install gh (https://cli.github.com), then `gh auth login`,',
+      '            then restart this app.',
+      '',
+      '  Option B — paste a Personal Access Token below.',
+      '            GitHub → Settings → Developer settings →',
+      '            Personal access tokens → Tokens (classic).',
+      '            Required scopes: repo, read:user, notifications.'
+    ];
+    hint = 'Press [Enter] to paste a PAT  ·  [Esc] to skip';
+    onEnter = () => startInput('Paste your GitHub PAT: ', 'login', true);
+  } else {
+    body = [
+      'Detecting GitHub CLI…',
+      '',
+      '  If `gh` is installed and authenticated, you can use it here without',
+      '  setting up a Personal Access Token. Press [Enter] to check.',
+    ];
+    hint = 'Press [Enter] to detect  ·  [Esc] to skip';
+    // CRITICAL: returning `false` here prevents the step counter from
+    // advancing so the user stays on this step until the async probe
+    // completes and `_stepsDirty` triggers a rebuild of STEPS. Without
+    // this, pressing Enter on "Detecting…" would race the probe and could
+    // show an empty Step 2 (or skip past login entirely).
+    onEnter = () => { probeGhAndInvalidate(); return false; };
+  }
+  return { icon: '★', title: 'Sign in', body, hint, onEnter };
+}
+
+function buildSteps() {
+  return [
+    {
+      icon: '●',
+      title: 'Welcome to GitHub TUI',
+      body: [
+        'A zero-dependency terminal client for GitHub — read, triage, and act',
+        'on your repos without leaving the keyboard.',
+        '',
+        'Current version: v' + APP_VERSION,
+        '',
+        'Created by @unn-Known1 (https://github.com/unn-Known1)'
+      ],
+      hint: 'Press [Enter] to continue  ·  [Esc] to skip',
+    },
+    buildLoginStep(),
+    {
+      icon: '■',
+      title: 'The keyboard is your friend',
+      body: [
+        'Six numbered tabs at the top:',
+        '  [1] Dashboard · greeting, activity, stats, trending',
+        '  [2] Repos     · your repos with filters, sort, pins',
+        '  [3] Explore   · search any public repo, view details',
+        '  [4] Actions   · CI / workflow runs',
+        '  [5] Inbox     · triage notifications',
+        '  [6] Settings  · theme, login, system info',
+        '',
+        'Power keys (work everywhere):',
+        '  [Ctrl-P]  open the command palette',
+        '  [Ctrl-S]  save the current Explore search (Explore tab only)',
+        '  [Ctrl-K]  edit ~/.github-tui/keybindings.json for custom bindings',
+        '  [?]       show this help',
+        '  [q]       quit',
+        '  [r]       retry the last failed operation (when toast shows [r])',
+      ],
+      hint: 'Press [Enter] for tips  ·  [Esc] to finish',
+    },
+    {
+      icon: '◆',
+      title: 'New in v' + APP_VERSION,
+      body: buildWhatsNewBody(readChangelogSync(), APP_VERSION),
+      hint: 'Press [Enter] to choose theme  ·  [Esc] to finish',
+    },
+    {
+      icon: '◆',
+      title: 'Pick a theme',
+      body: 'GitHub TUI ships with several themes. Try one that matches your terminal:',
+      showThemes: true,
+      hint: 'Press [Enter] to start using GitHub TUI',
+      onEnter: () => {
+        appState.dismissedOnboarding = true;
+        markVersionSeen();
+        appState.showOnboarding = false;
+        setTab(0);
+        showMessage('✓ You\'re all set. Have fun!', 'success');
+        render();
+      },
+    },
+  ];
+}
+
+export function getSteps() {
+  if (_stepsDirty || !_cachedSteps) {
+    _cachedSteps = buildSteps();
+    _stepsDirty = false;
+  }
+  return _cachedSteps;
+}
+
+// Mark the current APP_VERSION as "seen" by the user. Updates appState
+// AND writes the legacy WELCOME_SEEN_FILE so existing first-run detection
+// still works. saveSession() picks up appState.lastSeenVersion on the
+// next navigation and persists it to session.json.
+export function markVersionSeen() {
+  appState.lastSeenVersion = APP_VERSION;
+  markWelcomeSeen();
+}
 
 export function startOnboarding() {
   stepIdx = 0;
   appState.showOnboarding = true;
   appState.dismissedOnboarding = false;
+  _stepsDirty = true;
   render();
 }
 
 export function startWelcome() {
   stepIdx = 0;
   appState.showWelcome = true;
+  _stepsDirty = true;
   render();
 }
 
 export function isFirstRun() {
-  // First run = no token AND no welcome-seen flag.
   if (!appState.token && !existsSync(WELCOME_SEEN_FILE)) return true;
   return false;
 }
 
 export function markWelcomeSeen() {
   try {
+    const dir = dirname(WELCOME_SEEN_FILE);
+    if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
     writeFileSync(WELCOME_SEEN_FILE, '1');
   } catch {}
 }
 
+// Should the "what's new" overlay auto-launch on this boot?
+// True when the user has previously dismissed onboarding (lastSeenVersion
+// is set) AND APP_VERSION is strictly newer.
+export function shouldAutoLaunchWelcome() {
+  if (!appState.lastSeenVersion) return false;
+  return compareVersions(APP_VERSION, appState.lastSeenVersion) > 0;
+}
+
+let stepIdx = 0;
+
 export function handleOnboardingKey(key) {
   if (!appState.showOnboarding && !appState.showWelcome) return false;
+  const STEPS = getSteps();
   if (key === '\x1b' || key === 'q') {
-    if (appState.showOnboarding) {
-      appState.showOnboarding = false;
-      markWelcomeSeen();
-    }
+    if (appState.showOnboarding) appState.showOnboarding = false;
     if (appState.showWelcome) appState.showWelcome = false;
+    markVersionSeen();
     render();
     return true;
   }
@@ -132,7 +270,6 @@ export function handleOnboardingKey(key) {
     const step = STEPS[stepIdx];
     if (step && step.onEnter) {
       const r = step.onEnter();
-      // Move to next step unless handler returned false.
       if (r !== false) stepIdx++;
     } else {
       stepIdx++;
@@ -140,7 +277,7 @@ export function handleOnboardingKey(key) {
     if (stepIdx >= STEPS.length) {
       appState.showOnboarding = false;
       appState.showWelcome = false;
-      markWelcomeSeen();
+      markVersionSeen();
     }
     render();
     return true;
@@ -169,8 +306,8 @@ export function renderOnboarding(screen, opts = {}) {
     for (let xx = 0; xx < W; xx++) screen.styleBuf[yy][xx] = backdropStyle;
   }
 
+  const STEPS = getSteps();
   const step = STEPS[Math.min(stepIdx, STEPS.length - 1)];
-  const isLast = stepIdx >= STEPS.length - 1;
 
   const boxW = Math.min(78, W - 4);
   const boxH = Math.min(22, H - 4);
@@ -184,21 +321,17 @@ export function renderOnboarding(screen, opts = {}) {
     welcomeMode ? "What's new in v" + APP_VERSION : 'Welcome',
     { fg: 'cyan', bold: true });
 
-  // Step counter.
   if (!welcomeMode) {
     const stepText = 'Step ' + (stepIdx + 1) + ' / ' + STEPS.length;
     screen.writeStr(x0 + boxW - stepText.length - 3, y0 + 1, stepText, { dim: true });
   }
 
-  // Icon (large).
   const iconY = y0 + 2;
   const iconText = step.icon;
   screen.writeStr(x0 + 3, iconY, iconText, { fg: 'cyan', bold: true });
-
-  // Title.
   screen.writeStr(x0 + 7, iconY, step.title, color('title') || { fg: 'white', bold: true });
 
-  // Body — supports either string or string[] for line-by-line.
+  // Body.
   const body = Array.isArray(step.body) ? step.body : step.body.split('\n');
   let bodyY = y0 + 4;
   const innerW = boxW - 6;
@@ -214,7 +347,6 @@ export function renderOnboarding(screen, opts = {}) {
     bodyY++;
   }
 
-  // Theme picker (optional).
   if (step.showThemes) {
     const themes = listThemes();
     bodyY++;
@@ -233,12 +365,10 @@ export function renderOnboarding(screen, opts = {}) {
     screen.writeStr(x0 + 3, bodyY, 'Change theme later with [6] Settings → Appearance.', { dim: true });
   }
 
-  // Hint.
   const hintY = y0 + boxH - 3;
   const hint = step.hint || '[Enter] Next   [Esc] Skip';
   screen.writeStr(x0 + 3, hintY, hint.substring(0, boxW - 6), { fg: 'cyan' });
 
-  // Progress dots.
   if (!welcomeMode) {
     let dx = x0 + 3;
     const dotY = y0 + boxH - 2;

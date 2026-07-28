@@ -1,4 +1,4 @@
-// Analyze tab — search any public repo, drill into rich details,
+// Explore tab — search any public repo, drill into rich details,
 // toggle Issues/PRs sub-panes, view README, hop to Forks sub-view.
 // v0.5+ polish: pushes to recent-repos list, cleaner section headings.
 
@@ -245,7 +245,7 @@ function renderRepoDetails(screen, y, maxH) {
 }
 
 export function renderAnalyze(screen, y, h) {
-  screen.writeStr(2, y, 'ANALYZE REPOSITORY', color('title') || { fg: 'white', bold: true });
+  screen.writeStr(2, y, 'EXPLORE REPOSITORY', color('title') || { fg: 'white', bold: true });
   screen.hline(y + 1, '─', { dim: true });
   const v = appState.analyzeView;
   if (v === 'search')   { renderSearchInput(screen, y, h); return; }

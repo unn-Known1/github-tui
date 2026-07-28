@@ -5,6 +5,7 @@ import { getScreen, HEADER_HEIGHT, TAB_CONTENT_Y } from './render.mjs';
 import { setTheme } from './theme.mjs';
 import { startInput } from './input.mjs';
 import { openUrl } from './utils.mjs';
+import { dismissConfirm } from './state.mjs';
 import * as analyze from './tabs/analyze.mjs';
 import * as detail from './tabs/detail.mjs';
 import * as repos from './tabs/repos.mjs';
@@ -155,6 +156,82 @@ export function handleMouseEvent(event) {
   }
 }
 
+// P0-4: route clicks to the active overlay before they fall through to
+// the underlying tab handler. Clicks outside any open overlay → handleClick's
+// normal dispatch. Clicks inside an overlay → consumed (or worse, leak
+// through to the tab rendering underneath — a real bug pre-fix).
+function _dispatchOverlayClick(sx, sy) {
+  if (appState.showPalette)   { _clickPalette(sx, sy);   return true; }
+  if (appState.showHelp)      { _clickHelp(sx, sy);      return true; }
+  if (appState.showBookmarks) { _clickBookmarks(sx, sy); return true; }
+  if (appState.confirmAction) { _clickConfirm(sx, sy);   return true; }
+  if (appState.showOnboarding || appState.showWelcome) { return true; } // swallow
+  return false;
+}
+
+function _clickPalette(sx, sy) {
+  // Click on a row → select + exec. Click outside the box → close.
+  const W = getScreen() ? getScreen().width : 80;
+  const H = getScreen() ? getScreen().height : 24;
+  const boxW = Math.min(80, W - 4);
+  const boxH = Math.min(18, H - 4);
+  const x0 = Math.floor((W - boxW) / 2);
+  const y0 = Math.floor((H - boxH) / 2);
+  const inside = sx >= x0 && sx < x0 + boxW && sy >= y0 && sy < y0 + boxH;
+  if (!inside) {
+    import('./palette.mjs').then(m => m.close()).catch(() => {});
+    return;
+  }
+  // Compute the row index from sy. Items list starts at y0+3; first row
+  // has scroll offset 0. Picking the row matching sy aligns the click
+  // with what the user actually clicked rather than the cursor row.
+  const itemY = sy - (y0 + 3);
+  const maxVisible = boxH - 5;
+  let scrollOff = 0;
+  if (typeof appState.paletteCursor === 'number' && appState.paletteCursor >= maxVisible) {
+    scrollOff = appState.paletteCursor - maxVisible + 1;
+  }
+  const rowIdx = itemY + scrollOff;
+  if (itemY >= 0 && itemY < maxVisible) {
+    appState.paletteCursor = rowIdx;
+    render();
+  }
+  import('./palette.mjs').then(m => m.execSelected()).catch(() => {});
+}
+
+function _clickHelp(sx, sy) {
+  const W = getScreen() ? getScreen().width : 80;
+  const H = getScreen() ? getScreen().height : 24;
+  const boxW = Math.min(78, W - 4);
+  const boxH = Math.min(H - 4, 28);
+  const x0 = Math.floor((W - boxW) / 2);
+  const y0 = Math.floor((H - boxH) / 2);
+  const inside = sx >= x0 && sx < x0 + boxW && sy >= y0 && sy < y0 + boxH;
+  if (!inside) {
+    appState.showHelp = false;
+    render();
+  }
+}
+
+function _clickBookmarks(sx, sy) {
+  const W = getScreen() ? getScreen().width : 80;
+  const H = getScreen() ? getScreen().height : 24;
+  const boxW = Math.min(72, W - 4);
+  const boxH = Math.min(20, H - 4);
+  const x0 = Math.floor((W - boxW) / 2);
+  const y0 = Math.floor((H - boxH) / 2);
+  const inside = sx >= x0 && sx < x0 + boxW && sy >= y0 && sy < y0 + boxH;
+  if (!inside) {
+    import('./bookmarks.mjs').then(m => m.closeBookmarks()).catch(() => {});
+  }
+}
+
+function _clickConfirm(sx, sy) {
+  // Confirm has only y/n — clicks anywhere dismiss.
+  // (Esc-outside / click-outside dismissal is the user-friendly default.)
+  if (typeof dismissConfirm === 'function') dismissConfirm();
+}
+
 // ── Coordinate conversion ────────────────────────────────────
 // Terminal sends 1-based col/row.  Convert to 0-based screen
 // coordinates (sx, sy) at the top of handleClick, then every
@@ -163,6 +240,10 @@ export function handleMouseEvent(event) {
 function handleClick(col, row) {
   const sx = col - 1;
   const sy = row - 1;
+
+  // P0-4: route clicks to active overlays FIRST so they don't leak through
+  // to the underlying tab handler.
+  if (_dispatchOverlayClick(sx, sy)) return;
 
   // Detail popup is open — handle interactive elements or close on outside click.
   if (appState.showDetail) {
@@ -528,9 +609,14 @@ function dispatchDashboardClick(sx, sy) {
   }
 
   render();
-}
-
-// ── Repos tab ─────────────────────────────────────────────────
+}  // ── Repos tab ─────────────────────────────────────────────────
+  // P1-8: also seed the entityCache when loadStarred assigns to
+  // appState.starred so cross-tab viewers see updates.
+  if (typeof upsertEntity === 'function') {
+    for (const r of list) {
+      upsertEntity(r, { isStarred: true, starredAt: r.starred_at, isOwner: false });
+    }
+  }
 
 function dispatchReposClick(sx, sy) {
   if (repos.tryDismissChipAt(sx, sy)) { render(); return; }

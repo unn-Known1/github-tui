@@ -118,8 +118,8 @@ export const TABS = [
     refresh: () => import('./tabs/dashboard.mjs').then(m => m.loadDashboardWidgets(true)) },
   { key: '2', label: 'Repos',
     refresh: () => import('./tabs/repos.mjs').then(m => m.loadUserData()) },
-  { key: '3', label: 'Analyze',
-    // Analyze is user-driven (search/drill-in). Skip refresh to avoid
+  { key: '3', label: 'Explore',
+    // Explore is user-driven (search/drill-in). Skip refresh to avoid
     // clobbering in-progress loads. Users can press 'r'.
     refresh: null },
   { key: '4', label: 'Actions',
@@ -166,6 +166,13 @@ export const appState = {
   repoPins: [],                     // [full_name] — sticky at top of list
   reposShowLangFacet: false,        // toggle the language facet sidebar
   reposLangFilter: null,            // null = no language filter
+
+  // P1-8: entityCache — single source of truth for repo entities.
+  // Keyed by full_name. Each value carries { repo, isStarred, isBookmarked,
+  // isPinned, isOwner, starredAt }. Derived views (appState.starred,
+  // appState.repos) continue to work; mutations to starred membership
+  // should call upsertEntity() so the cache and visible lists agree.
+  entityCache: {},
 
   // ── File explorer (analyze details → Files pane) ──
   filesPath: '',
@@ -313,6 +320,16 @@ export const appState = {
   loading: false,
   message: null,         // { text, type, icon? } | null
   messageTimer: null,
+  // ── P0-6: retry handler. Set by error-recovery.mjs after a failed op;
+  // the footer renders "[r] to retry" while this is live, and pressing
+  // `r` invokes it. Auto-expires after `durationMs` so a stale retry
+  // doesn't survive into a later session. ──
+  _retryFn: null,
+  _retryExpiresAt: 0,
+  // ── P0-1: persisted lastSeenVersion (in session.json) used to gate the
+  // "what's new" overlay so users see release notes when they upgrade,
+  // not just on first install. ──
+  lastSeenVersion: null,
   showHelp: false,
   helpQuery: '',         // search filter inside help overlay
   helpCursor: 0,
@@ -414,6 +431,140 @@ export function clearMessage() {
 // ────────────────────────────────────────────────────────────────────────────
 // Confirmation dialog for destructive actions.
 // ────────────────────────────────────────────────────────────────────────────
+// ── Retry handler API (P0-6). Set by error-recovery.mjs after a failed
+// async op. `consumeRetryHandler()` is called by `keys.mjs` on `r` (before
+// falling through to the per-tab refresh / Actions rerun). The footer reads
+// appState._retryFn / _retryExpiresAt to render the "[r] to retry" hint.
+// Calling setRetryHandler twice replaces the prior handler (no stacking).
+// Calling clearRetryHandler drops any pending retry so a fresh error toast
+// without a retry doesn't allow re-running an old operation. ──
+export function setRetryHandler(fn, durationMs = 8000) {
+  appState._retryFn = typeof fn === 'function' ? fn : null;
+  appState._retryExpiresAt = Date.now() + Math.max(0, durationMs | 0);
+  render();
+}
+
+export function clearRetryHandler() {
+  appState._retryFn = null;
+  appState._retryExpiresAt = 0;
+  render();
+}
+
+// Atomically returns the current retry handler (if any) and clears it.
+export function consumeRetryHandler() {
+  if (!appState._retryFn || typeof appState._retryFn !== 'function') return null;
+  if (Date.now() >= appState._retryExpiresAt) {
+    appState._retryFn = null;
+    appState._retryExpiresAt = 0;
+    return null;
+  }
+  const fn = appState._retryFn;
+  appState._retryFn = null;
+  appState._retryExpiresAt = 0;
+  return fn;
+}
+
+// P1-8: insert/update an entity in the entityCache. Side-effect: keeps
+// derived starred list membership in sync so viewers see the change
+// without waiting for a server round-trip.
+export function upsertEntity(repo, opts = {}) {
+  if (!repo || !repo.full_name) return;
+  const full = repo.full_name;
+  const cur = appState.entityCache[full] || {};
+  const next = {
+    repo: { ...cur.repo, ...repo },
+    isStarred: opts.isStarred !== undefined ? !!opts.isStarred : (cur.isStarred || false),
+    isBookmarked: opts.isBookmarked !== undefined ? !!opts.isBookmarked : (cur.isBookmarked || false),
+    isPinned: opts.isPinned !== undefined ? !!opts.isPinned : (cur.isPinned || false),
+    isOwner: opts.isOwner !== undefined ? !!opts.isOwner : (cur.isOwner || false),
+    starredAt: opts.starredAt || cur.starredAt || null,
+  };
+  appState.entityCache[full] = next;
+  // Keep appState.starred synced.
+  if (Array.isArray(appState.starred)) {
+    const idx = appState.starred.findIndex(s => s.full_name === full);
+    if (next.isStarred && idx === -1) {
+      appState.starred.unshift({ ...next.repo, starred_at: next.starredAt || new Date().toISOString() });
+    } else if (!next.isStarred && idx !== -1) {
+      appState.starred.splice(idx, 1);
+    } else if (idx !== -1) {
+      appState.starred[idx] = { ...appState.starred[idx], ...next.repo, starred_at: next.starredAt || appState.starred[idx].starred_at };
+    }
+  }
+}
+
+// P1-8: derived starred list — returns entities flagged isStarred, sorted
+// by starredAt desc. Falls back to appState.starred when cache is empty.
+export function getStarredList() {
+  const cache = appState.entityCache;
+  const fromCache = Object.keys(cache)
+    .filter(k => cache[k] && cache[k].isStarred)
+    .map(k => ({ ...cache[k].repo, starred_at: cache[k].starredAt }));
+  if (fromCache.length > 0) {
+    return fromCache.sort((a, b) => (b.starred_at || '').localeCompare(a.starred_at || ''));
+  }
+  return Array.isArray(appState.starred) ? appState.starred.slice() : [];
+}
+
+// P1-2: derived unread count. Pure helper — bind to render() once per state
+// mutation so callers don't need to recompute on every render call.
+export function getUnreadCount() {
+  const list = appState.notifications;
+  if (!Array.isArray(list)) return 0;
+  let n = 0;
+  for (let i = 0; i < list.length; i++) if (list[i] && list[i].unread) n++;
+  return n;
+}
+
+// P1-3: watchdog timestamp — tracked via an Object.defineProperty setter
+// on appState.loading so EVERY direct write (160+ sites) arms the
+// watchdog for free, no manual sweep needed. checkLoadingWatchdog() is
+// called from the render prologue and force-clears + surfaces a toast
+// when an operation has been loading for >30s.
+let _loadingStartedAt = 0;
+export function setLoading(flag) {
+  appState.loading = !!flag;
+}
+export function checkLoadingWatchdog(now = Date.now()) {
+  if (!appState.loading || _loadingStartedAt === 0) return;
+  // 30s stuck — force-clear and toast the user.
+  if (now - _loadingStartedAt > 30000) {
+    appState.loading = false;
+    _loadingStartedAt = 0;
+    // Abort every in-flight controller registered by startAsync() so the
+    // late-arriving response doesn't silently clobber the cleared state.
+    // Loop is idempotent — controllers that already completed are no-ops.
+    for (const scope of Object.keys(asyncControllers)) {
+      const ctl = asyncControllers[scope];
+      if (ctl && typeof ctl.abort === 'function') {
+        try { ctl.abort(); } catch { /* ignore */ }
+      }
+    }
+    showMessage('Loading was taking too long — automatically cancelled. Press [r] to retry.', 'warning', 6000);
+  }
+}
+
+// Install the setter shim AFTER setLoading is defined so re-entrant
+// callers (setLoading itself) don't double-render and don't recurse.
+// We replace the field-level `loading: false` with an accessor that
+// stores to a hidden `_loading` while updating the watchdog timestamp.
+// This preserves all existing direct-write call sites unchanged
+// (assignments via `appState.loading = X` continue to work).
+// Initialize `_loading` so the first read returns the original `false`
+// value rather than undefined (which would still be falsy in conditions
+// but is brittle under `=== false` strict comparisons).
+appState._loading = false;
+Object.defineProperty(appState, 'loading', {
+  configurable: true,
+  enumerable: true,
+  get() { return this._loading === true; },
+  set(v) {
+    if (this._loading === !!v) return; // no-op when value didn't change
+    this._loading = !!v;
+    _loadingStartedAt = v ? Date.now() : 0;
+  },
+});
+
 export function confirm(message, action, title = 'Confirm') {
   // F008 fix: instead of silently dropping, surface a warning so the user
   // understands why their clicked action didn't fire.
@@ -476,6 +627,38 @@ export function expandAll(sections) {
 import { readFileSync, writeFileSync, mkdirSync, existsSync } from 'fs';
 import { join } from 'path';
 import { homedir } from 'os';
+import { APP_VERSION } from './config.mjs';
+
+// ── Pure semver-like comparison. Exported for tests + onboarding version gate.
+// Parses "0.6.5", "v1.0.0", "0.6.5-beta" etc. Returns -1 / 0 / 1.
+// Pre-release tags sort BEFORE the matching released version ("1.0.0-rc1" < "1.0.0").
+export function compareVersions(a, b) {
+  function parse(v) {
+    if (typeof v !== 'string') return { parts: [0, 0, 0], pre: '' };
+    const cleaned = v.trim().replace(/^v/i, '');
+    const [main, pre = ''] = cleaned.split('-');
+    const parts = main.split('.').map(p => {
+      const n = parseInt(p, 10);
+      return isNaN(n) ? 0 : n;
+    });
+    while (parts.length < 3) parts.push(0);
+    return { parts, pre };
+  }
+  const pa = parse(a);
+  const pb = parse(b);
+  const len = Math.max(pa.parts.length, pb.parts.length);
+  for (let i = 0; i < len; i++) {
+    const av = pa.parts[i] || 0;
+    const bv = pb.parts[i] || 0;
+    if (av < bv) return -1;
+    if (av > bv) return 1;
+  }
+  if (pa.pre && !pb.pre) return -1;
+  if (!pa.pre && pb.pre) return 1;
+  if (pa.pre < pb.pre) return -1;
+  if (pa.pre > pb.pre) return 1;
+  return 0;
+}
 
 // L001/L005: shutdown-callback registry. app.mjs attaches a callback to
 // clear the pending toast timer; modules can register their own cleanup steps.
@@ -534,6 +717,12 @@ export function saveSession() {
       // Persist filter text too (Fix #9): without this the user comes back
       // and silently sees filtered results with no visual chip indicator.
       inboxTextFilter: appState.inboxTextFilter,
+      // P0-1: persist `lastSeenVersion` so the "what's new" overlay can be
+      // auto-launched on upgrades (not just on first install). Falls back
+      // to APP_VERSION when not set — this means an existing user whose
+      // session.json predates the field will see "what's new" exactly once
+      // on the next launch (currentVersion === APP_VERSION → not triggered).
+      lastSeenVersion: appState.lastSeenVersion || null,
     };
     const dir = join(homedir(), '.github-tui');
     if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
@@ -555,6 +744,7 @@ export function loadSession() {
     if (s.searchType) appState.searchType = s.searchType;
     if (s.reposView) appState.reposView = s.reposView;
     if (typeof s.inboxTextFilter === 'string') appState.inboxTextFilter = s.inboxTextFilter;
+    if (typeof s.lastSeenVersion === 'string') appState.lastSeenVersion = s.lastSeenVersion;
   } catch {}
 }
 

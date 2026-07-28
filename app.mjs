@@ -11,6 +11,7 @@ import {
   loadCollapsed, loadSession, registerShutdownCallback,
 } from './tui/state.mjs';
 import { enableMouse, disableMouse } from './tui/mouse.mjs';
+import { checkLoadingWatchdog } from './tui/state.mjs';
 import { enableBracketedPaste, disableBracketedPaste } from './tui/input.mjs';
 import { loadToken } from './tui/config.mjs';
 import { loadTheme } from './tui/theme.mjs';
@@ -102,6 +103,12 @@ async function main() {
     console.log('github-tui ' + pkg.version);
     process.exit(0);
   }
+  // P0-2: --accessible flag — turn on a11y mode for screen readers / high-
+  // contrast safe rendering. Color is disabled, unicode glyphs replaced
+  // with bracketed ASCII labels.
+  if (process.argv.includes('--accessible') || process.argv.includes('--a11y')) {
+    appState.accessible = true;
+  }
   if (process.argv.includes('--help') || process.argv.includes('-h')) {
     console.log('github-tui ' + pkg.version);
     console.log('A fast, zero-dependency terminal user interface for GitHub.');
@@ -111,6 +118,7 @@ async function main() {
     console.log('Options:');
     console.log('  -h, --help       Show this help message');
     console.log('  -v, --version    Show version number');
+    console.log('      --accessible Enable screen-reader friendly mode (text-only glyphs, no color)');
     process.exit(0);
   }
 
@@ -266,6 +274,14 @@ if (process.platform === 'win32') {
     const onboarding = await import('./tui/tabs/onboarding.mjs');
     if (onboarding.isFirstRun()) {
       onboarding.startOnboarding();
+    }
+    // P0-1: auto-launch "what's new" overlay on version upgrade. Reuses the
+    // dynamic-imported `onboarding` handle above (the second `import` would
+    // be wasted work). Only runs if there's a token AND we've previously
+    // completed first-run onboarding (`lastSeenVersion` is set).
+    if (appState.lastSeenVersion) {
+      const { shouldAutoLaunchWelcome, startWelcome } = onboarding;
+      if (shouldAutoLaunchWelcome()) startWelcome();
     }
   }
   render();

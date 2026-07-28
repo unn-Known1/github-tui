@@ -263,7 +263,7 @@ function renderStarredList(screen, y, h) {
     const range = (start + 1) + '-' + Math.min(start + rowsToShow, list.length) + ' of ' + list.length;
     const pageInfo = appState.starredHasMore || appState.starredPage > 1
       ? '   Page ' + appState.starredPage + '   [PgUp/PgDn]' : '';
-    screen.writeStr(2, footerY, range + pageInfo + '   [V] Back to own repos   [Enter] Analyze', { dim: true });
+    screen.writeStr(2, footerY, range + pageInfo + '   [V] Back to own repos   [Enter] Explore', { dim: true });
   }
 }
 

@@ -8,7 +8,7 @@ import { truncate } from '../utils.mjs';
 // All shortcuts organized by category for the searchable help overlay.
 const CATEGORIES = [
   { id: 'global',     name: 'GLOBAL',            shortcuts: [
-    { key: '1-6',       desc: 'Switch tabs (Dashboard/Repos/Analyze/Actions/Inbox/Settings)' },
+    { key: '1-6',       desc: 'Switch tabs (Dashboard/Repos/Explore/Actions/Inbox/Settings)' },
     { key: 'Tab',       desc: 'Next tab (or focus stat cards on Dashboard)' },
     { key: 'Shift+Tab', desc: 'Previous tab' },
     { key: 'Ctrl-P / :', desc: 'Open command palette' },
@@ -52,7 +52,7 @@ const CATEGORIES = [
     { key: 'g / G',     desc: 'Jump to top / bottom' },
     { key: 'PgUp / PgDn', desc: 'Navigate pages (starred repos)' },
   ]},
-  { id: 'analyze',    name: 'ANALYZE',           shortcuts: [
+  { id: 'analyze',    name: 'EXPLORE',           shortcuts: [
     { key: 'i',         desc: 'Search prompt (or toggle Issues pane on details)' },
     { key: 'Enter',     desc: 'Open details (or open Forks / Issue-PR detail)' },
     { key: 'O',         desc: 'Overview pane' },
@@ -120,6 +120,14 @@ const CATEGORIES = [
   { id: 'confirm',    name: 'CONFIRM DIALOG',    shortcuts: [
     { key: 'y / Y / Enter', desc: 'Confirm a destructive action' },
     { key: 'n / N / Esc',   desc: 'Cancel a destructive action' },
+  ]},
+  { id: 'power',      name: 'POWER USER',        shortcuts: [
+    { key: 'Ctrl-P',         desc: 'Open command palette (every action)' },
+    { key: 'Ctrl-S (Explore)', desc: 'Save current Explore search' },
+    { key: 'Ctrl-K',         desc: 'Edit custom keybindings (~/.github-tui/keybindings.json)' },
+    { key: 'Ctrl-Y',         desc: 'Redo last undo' },
+    { key: '/ (help)',       desc: 'Search the help overlay' },
+    { key: 'gg (help)',      desc: 'Clear help search filter' },
   ]},
 ];
 

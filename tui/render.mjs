@@ -148,6 +148,26 @@ export function loadingIndicator(screen, x, y, label = 'loading', style) {
 const MIN_W = 60;
 const MIN_H = 20;
 
+// P0-2: --accessible mode flag. When set, color() returns null and any
+// unicode glyphs are replaced with bracketed ASCII labels so screen
+// readers and high-contrast displays get a clear text-only picture.
+// Settable via appState.accessible (set by app.mjs from --accessible arg).
+function a11ySymbol(unicode, label, accessible) {
+  return accessible ? label : unicode;
+}
+// P0-2 a11y heatmap char set: 5 buckets (none/light/medium/heavy/full)
+// vs the unicode ░▒▓█ + space. Falls back to bracketed labels.
+export function a11yHeatChar(level, accessible) {
+  if (accessible) {
+    return ['[ ]', '[.]', '[o]', '[O]', '[#]'][Math.max(0, Math.min(4, level))];
+  }
+  return [' ', '░', '▒', '▓', '█'][Math.max(0, Math.min(4, level))];
+}
+
+// recordModalBounds / readModalBounds were P0-4 helpers that became dead
+// code once _dispatchOverlayClick in mouse.mjs used inline bounds. Removed
+// to keep the surface area minimal.
+
 // Layout constants — single source of truth for the chrome heights.
 export const HEADER_HEIGHT = 4;     // 3-row header + 1 separator
 export const FOOTER_HEIGHT = 2;     // 1-row status + 1 separator above
@@ -177,7 +197,7 @@ export function buildBreadcrumb() {
       if (appState.reposView === 'starred') segments.push('Starred');
       break;
     case 2:
-      segments.push('Analyze');
+      segments.push('Explore');
       if (appState.analyzeView === 'search') segments.push('Search');
       else if (appState.analyzeView === 'results') {
         segments.push('Results');
@@ -275,9 +295,12 @@ export function scrollIndicators(screen, topY, botY, scroll, total, pageSize) {
 export function skeletonBars(screen, y, h, count = 5, barWidth = 0.4) {
   const W = screen.width;
   const bw = Math.floor(W * barWidth);
+  // P0-2 a11y: skeleton placeholder bars use a plain `=` stripe in
+  // accessible mode (linear, no shadow look).
+  const fillChar = appState.accessible ? '=' : '░';
   for (let i = 0; i < count && y + i * 2 < y + h; i++) {
     const row = y + i * 2;
-    screen.writeStr(CONTENT_PADDING, row, '░'.repeat(bw), color('dim'));
+    screen.writeStr(CONTENT_PADDING, row, fillChar.repeat(bw), color('dim'));
   }
 }
 
@@ -311,16 +334,25 @@ function renderHeader(W) {
   const titleStyle = color('title') || { fg: 'white', bold: true };
   const subtitleStyle = { dim: true };
 
+  // P1-3: check the loading watchdog BEFORE rendering the spinner so a
+  // stuck operation collapses into a banner toast before painting.
+  checkLoadingWatchdog();
+
+  // P0-2 a11y swap: replace unicode glyphs with bracketed ASCII labels.
+  const a11y = !!appState.accessible;
+  const titleBullet = a11y ? '*' : '◈';
+  const offlineBanner = a11y ? '[OFFLINE]' : '⚠ OFFLINE';
+  const starBanner = a11y ? '[NOT SIGNED IN]' : '⚠  not signed in';
+
   // Row 0: app title + version (left)  |  user (right)
-  screen.writeStr(2, 0, '◈', { fg: 'cyan', bold: true });
+  screen.writeStr(2, 0, titleBullet, { fg: 'cyan', bold: true });
   screen.writeStr(4, 0, 'GitHub TUI', titleStyle);
   const version = 'v' + VERSION;
   screen.writeStr(15, 0, version, { fg: 'gray', dim: true });
 
   // Offline banner — shows when offline.
   if (offlineState.isOffline) {
-    const banner = '⚠ OFFLINE';
-    screen.writeStr(22, 0, banner, { fg: 'yellow', bold: true });
+    screen.writeStr(22, 0, offlineBanner, { fg: 'yellow', bold: true });
   }
 
   // User greeting on the right of the top line.
@@ -345,8 +377,15 @@ function renderHeader(W) {
     const r = lastRateLimit.remaining, lim = lastRateLimit.limit;
     const pct = lim > 0 ? r / lim : 0;
     const barWidth = 10;
-    const filled = Math.round(pct * barWidth);
-    const bar = '█'.repeat(filled) + '░'.repeat(barWidth - filled);
+    // P0-2 a11y: rate-limit bar uses unicode block chars by default;
+    // in --accessible mode it's a plain `[######....]` bracketed bar.
+    let bar;
+    if (appState.accessible) {
+      bar = '[' + '#'.repeat(Math.round(pct * barWidth)) + '.'.repeat(barWidth - Math.round(pct * barWidth)) + ']';
+    } else {
+      const filled = Math.round(pct * barWidth);
+      bar = '█'.repeat(filled) + '░'.repeat(barWidth - filled);
+    }
     const style = r === 0 ? { fg: 'red', bold: true }
       : pct < 0.1 ? { fg: 'yellow', bold: true }
       : pct < 0.3 ? { fg: 'yellow' }
@@ -357,8 +396,8 @@ function renderHeader(W) {
     const x = Math.max(2, W - txt.length - cacheW - 3);
     screen.writeStr(x, 1, txt, style);
   } else if (!appState.user) {
-    const x = Math.max(2, W - 18);
-    screen.writeStr(x, 1, '⚠  not signed in', { fg: 'yellow', bold: true });
+    const x = Math.max(2, W - starBanner.length - 2);
+    screen.writeStr(x, 1, starBanner, { fg: 'yellow', bold: true });
   }
 
   // Row 2: breadcrumb + quick hint (left)  |  loading (right)
@@ -388,11 +427,16 @@ function renderHeader(W) {
 function renderTabStrip(y, W) {
   const tabRowY = y;
   const sepY = y + 1;
-  // Count unread inbox for badge.
-  const unreadCount = appState.notifications.filter(n => n.unread).length;
+  // P1-2: derived unread count via helper (still computed here for the
+  // tab badge — keep the same call site so other code paths update too).
+  const unreadCount = getUnreadCount();
 
   // Pre-compute each tab's width (proportional to label, but min-width).
-  const tabW = Math.max(8, Math.floor((W - 2) / TABS.length));
+  const    // P1-10: render a small ⟳ chip on row 2 (right-aligned) when
+    // auto-refresh is on. Replaces a stale white "loading" blink when the
+    // interval is silent, giving the user a passive "data is fresh" cue.
+    // (The loading text itself is already rendered from appState.loading.)
+    tabW = Math.max(8, Math.floor((W - 2) / TABS.length));
   const tabXs = [];
   let cx = 1;
   for (let i = 0; i < TABS.length; i++) {
@@ -465,14 +509,19 @@ function renderFooter(W, H) {
     // Insert cursor character at the correct position.
     const before = shown.slice(0, cursor);
     const after = shown.slice(cursor);
-    const line = appState.inputPrompt + before + '█' + after;
+    // P0-2 a11y: input cursor uses a plain '_' in --accessible mode.
+    const cursorChar = appState.accessible ? '_' : '█';
+    const line = appState.inputPrompt + before + cursorChar + after;
     screen.writeStr(1, statusY, line.substring(0, W - 2), color('inputBox'));
     return;
   }
 
   // Toast message — prominent with icon.
   if (appState.message) {
-    const icon = appState.message.icon || 'ⓘ';
+    const a11y = !!appState.accessible;
+    const icon = a11y ? {
+      info: '[i]', success: '[OK]', error: '[ERR]', warning: '[!]',
+    }[appState.message.type] || '[i]' : (appState.message.icon || 'ⓘ');
     const typeStyles = {
       info:    color('toastInfo'),
       success: color('toastSuccess'),
@@ -480,8 +529,17 @@ function renderFooter(W, H) {
       warning: color('toastWarning'),
     };
     const style = typeStyles[appState.message.type] || statusStyle;
-    const txt = ' ' + icon + '  ' + appState.message.text;
-    screen.writeStr(1, statusY, txt.substring(0, W - 2), style);
+    let txt = ' ' + icon + '  ' + appState.message.text;
+    // P0-6: reserve the trailing "[r] to retry" affordance BEFORE truncating
+    // the message body, so the keyboard hint is never visually clipped at
+    // narrow terminal widths. Without this, W-2 truncation shortens the
+    // message text instead of dropping the affordance — defeating discoverability.
+    const hasRetry = appState._retryFn && typeof appState._retryFn === 'function'
+        && Date.now() < appState._retryExpiresAt;
+    const retrySuffix = hasRetry ? '   [r] to retry' : '';
+    const reserve = retrySuffix.length;
+    screen.writeStr(1, statusY,
+      txt.substring(0, Math.max(0, W - 2 - reserve)) + retrySuffix, style);
     return;
   }
 
@@ -528,7 +586,7 @@ function statusLine() {
     }
     case 1: {
       if (appState.reposView === 'starred') {
-        return ' [Esc] Back   [↑↓jk] Nav   [Enter] Analyze   [V] Own repos   [?] Help';
+        return ' [Esc] Back   [↑↓jk] Nav   [Enter] Explore   [V] Own repos   [?] Help';
       }
       return ' [/] Filter' + sep + '[t] Type' + sep + '[L] Language' + sep + '[x] Stale' + sep + '[D] Density' + sep + '[P] Pin' + sep + '[V] Starred' + sep + '[c] Clear';
     }

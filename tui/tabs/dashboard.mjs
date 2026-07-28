@@ -184,6 +184,13 @@ function sparkline(data, width) {
   }).join('');
 }
 
+// P0-2 a11y: when --accessible is on, swap the sparkline unicode
+// gradient for bracketed text so screen readers receive a linear
+// density signal instead of opaque glyphs.
+function sparkCharsAccessible(level) {
+  return [' ', '.', ':', 'o', 'O', '#', '#', '@'][Math.max(0, Math.min(7, level))];
+}
+
 // Section header: title + optional key hint on the right.
 // When `section` is supplied, route to collapsibleHeader (which handles
 // collapse/expand) — that's a different signature from utils.sectionHeader,
@@ -387,7 +394,10 @@ export function renderDashboard(screen, y, h) {
     return color('heatmapHigh');
   };
 
-        const heatChars = [' ', '░', '▒', '▓', '█'];
+        // P0-2 a11y: heatmap char gradients differ in --accessible mode.
+        const heatChars = appState.accessible
+          ? [' ', '.', 'o', 'O', '#']
+          : [' ', '░', '▒', '▓', '█'];
         for (let row = 0; row < 7; row++) {
           if (ly >= y + h - 1) break;
           screen.writeStr(leftX, ly, dayLabels[row], { dim: true });
@@ -402,7 +412,11 @@ export function renderDashboard(screen, y, h) {
           }
           ly++;
         }
-        screen.writeStr(leftX, ly, 'Less ░▒▓█ More', { dim: true });
+        if (appState.accessible) {
+          screen.writeStr(leftX, ly, 'Less . : : # More', { dim: true });
+        } else {
+          screen.writeStr(leftX, ly, 'Less ░▒▓█ More', { dim: true });
+        }
         ly++;
       }
       } // activityVisible

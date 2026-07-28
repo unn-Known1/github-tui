@@ -1,5 +1,5 @@
 // File explorer — file tree + viewer + save/clone/zipball.
-// New in W1. Rendered as a sub-pane of Analyze details when detailsPane === 'files'.
+// New in W1. Rendered as a sub-pane of Explore details when detailsPane === 'files'.
 //
 // State (lives on appState):
 //   filesPath     : current dir path inside the repo (empty = root)
@@ -14,7 +14,7 @@
 //   filesBranchPicker : boolean — branch picker overlay open?
 //   filesBranchCursor : index inside branches
 
-import { appState, render, startAsync, isStale, showMessage } from '../state.mjs';
+import { appState, render, startAsync, isStale, showMessage, confirm } from '../state.mjs';
 import {
   getRepoContents, getRepoFile, getBranches, getZipballUrl,
   getFileCommits, downloadToFile,
@@ -29,6 +29,19 @@ import { join, resolve } from 'path';
 // Limit how big a single file we'll fetch into memory (the API caps at 1MB).
 const MAX_VIEW_BYTES = 1_000_000;
 const MAX_BULK_FILES = 500;
+
+// P0-5: wrap a destructive I/O op behind state.confirm() so pressing `Z`,
+// `G`, `C`, or `S` in the files pane never dumps a zipball / clones over
+// an existing directory / walks a 500-file folder without an explicit
+// yes. Re-entry is naturally rejected by confirm() ("a confirmation is
+// already pending" toast) so a stray double-press is harmless.
+function runWithConfirm(message, op, title) {
+  confirm(message, () => {
+    Promise.resolve().then(op).catch(e => {
+      showMessage((e && e.message) || 'Operation failed', 'error');
+    });
+  }, title || 'Confirm destructive operation');
+}
 
 function repoOwnerName() {
   const r = appState.repoDetails;
@@ -50,7 +63,7 @@ export function getSelectedEntry() {
 
 export async function openFilesPane() {
   if (!appState.repoDetails) {
-    showMessage('Open a repo on Analyze first', 'warning');
+    showMessage('Open a repo on Explore first', 'warning');
     return;
   }
   appState.detailsPane = 'files';
@@ -225,7 +238,20 @@ export async function saveCurrentFile() {
 
 // Save current directory (and everything in it, recursively) into CWD.
 // Walks tree with a small concurrency cap so we don't hammer the API.
-export async function saveCurrentFolder() {
+export function saveCurrentFolder() {
+  const [owner, name] = repoOwnerName();
+  if (!owner) return;
+  const root = appState.filesPath || '';
+  const repoName = name + (root ? '-' + root.replace(/\//g, '_') : '');
+  runWithConfirm(
+    'Save folder recursively into ./' + repoName + '/? (up to ' +
+      MAX_BULK_FILES + ' files)',
+    _saveCurrentFolderImpl,
+    'Save Folder'
+  );
+}
+
+async function _saveCurrentFolderImpl() {
   const [owner, name] = repoOwnerName();
   if (!owner) return;
   const root = appState.filesPath || '';
@@ -314,7 +340,18 @@ export async function saveCurrentFolder() {
 }
 
 // Download repo zipball into CWD via streaming https.
-export async function downloadZipball() {
+export function downloadZipball() {
+  const [owner, name] = repoOwnerName();
+  if (!owner) return;
+  const ref = appState.filesRef || 'main';
+  runWithConfirm(
+    'Download ' + name + '-' + ref + '.zip into CWD?',
+    _downloadZipballImpl,
+    'Download Zipball'
+  );
+}
+
+async function _downloadZipballImpl() {
   const [owner, name] = repoOwnerName();
   if (!owner) return;
   const ref = appState.filesRef || 'main';
@@ -332,7 +369,19 @@ export async function downloadZipball() {
 
 // git clone into CWD. Shells out to the user's `git` binary so
 // history, hooks, submodules etc. all behave correctly.
-export async function cloneIntoCwd(opts = {}) {
+export function cloneIntoCwd(opts = {}) {
+  const [owner, name] = repoOwnerName();
+  if (!owner) return;
+  const isShallow = !!opts.shallow;
+  runWithConfirm(
+    'git clone ' + owner + '/' + name + ' into ./' + name +
+      (isShallow ? ' (shallow)?' : '?'),
+    () => _cloneIntoCwdImpl(opts),
+    'Clone Repo'
+  );
+}
+
+async function _cloneIntoCwdImpl(opts = {}) {
   const [owner, name] = repoOwnerName();
   if (!owner) return;
   const dest = join(process.cwd(), name);
@@ -354,7 +403,17 @@ export async function cloneIntoCwd(opts = {}) {
 }
 
 // gh CLI variant for private repos (auth handled by gh).
-export async function ghCloneIntoCwd() {
+export function ghCloneIntoCwd() {
+  const [owner, name] = repoOwnerName();
+  if (!owner) return;
+  runWithConfirm(
+    'gh repo clone ' + owner + '/' + name + ' into ./' + name + '?',
+    _ghCloneIntoCwdImpl,
+    'Clone via gh'
+  );
+}
+
+async function _ghCloneIntoCwdImpl() {
   const [owner, name] = repoOwnerName();
   if (!owner) return;
   const dest = join(process.cwd(), name);

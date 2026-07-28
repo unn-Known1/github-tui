@@ -20,7 +20,7 @@ export async function startCreateIssue() {
     return;
   }
   if (!appState.repoDetails || !appState.repoDetails.full_name) {
-    showMessage('Open a repo on Analyze first', 'warning');
+    showMessage('Open a repo on Explore first', 'warning');
     return;
   }
   _pendingBody = null;

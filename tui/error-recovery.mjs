@@ -1,6 +1,6 @@
 // Error recovery helper — provides consistent error handling with recovery hints.
 
-import { showMessage } from './state.mjs';
+import { showMessage, setRetryHandler, clearRetryHandler } from './state.mjs';
 
 // Error recovery patterns with suggested actions.
 const RECOVERY_PATTERNS = [
@@ -68,8 +68,14 @@ export function showError(message, context, options = {}) {
   }
 
   // Show with retry hint if available
-  const displayDuration = duration || (retry ? 5000 : 3000);
+  const displayDuration = duration || (retry ? 8000 : 3000);
   showMessage(fullMessage, 'error', displayDuration);
+  // P0-6: surface the retry handler so the footer can render "[r] to retry"
+  // and `keys.mjs` can invoke it on the user's next `r` keystroke.
+  // Calls without retry clear any stale handler so an old op can't be
+  // re-triggered after a fresh, unrecoverable error.
+  if (typeof retry === 'function') setRetryHandler(retry, displayDuration);
+  else clearRetryHandler();
 }
 
 /**

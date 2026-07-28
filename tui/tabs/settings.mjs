@@ -600,10 +600,17 @@ export function enter() {
       break;
     }
     case 7:
-      if (isLoggedIn) confirm('Wipe token and log out?', () => {
-        handleLogout();
-        showMessage('Token wiped from all storage', 'success');
-      }, 'Wipe Token');
+      if (isLoggedIn) confirm(
+        'Wipe token and log out?\n\n' +
+        'Current storage backend: ' + (tokenStorageBackend || 'plaintext') + '\n' +
+        'This will remove the token from OS keychain (if available) ' +
+        'and the plaintext fallback file.',
+        () => {
+          handleLogout();
+          showMessage('Token wiped from all storage', 'success');
+        },
+        'Wipe Token'
+      );
       break;
     case 8:
       starRepo();

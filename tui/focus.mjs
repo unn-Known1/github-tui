@@ -15,7 +15,7 @@ const FOCUS_ZONES = {
   1: [ // Repos
     { id: 'list', label: 'Repo List', canFocus: () => appState.repos?.length > 0 },
   ],
-  2: [ // Analyze
+  2: [ // Explore
     { id: 'results', label: 'Search Results', canFocus: () => appState.searchResults?.length > 0 || appState.userSearchResults?.length > 0 },
     { id: 'panes', label: 'Detail Panes', canFocus: () => appState.analyzeView === 'details' },
   ],

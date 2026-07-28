@@ -1,5 +1,5 @@
 // Detail popup — Issue/PR detail view with rendered body, comments, and actions.
-// Opens as an overlay on top of the Analyze tab.
+// Opens as an overlay on top of the Explore tab.
 
 import { appState, render, startAsync, isStale, showMessage, confirm } from '../state.mjs';
 import {

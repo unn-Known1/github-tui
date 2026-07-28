@@ -9,7 +9,10 @@
 //   7. Per-tab key handlers from tab modules' keys map.
 //   8. Per-tab arrow / enter / space dispatchers.
 
-import { appState, tabState, setTab, showMessage, render, TABS, dismissConfirm, confirm } from './state.mjs';
+import {
+  appState, tabState, setTab, showMessage, render, TABS, dismissConfirm, confirm,
+  consumeRetryHandler,
+} from './state.mjs';
 import * as palette from './palette.mjs';
 import * as onboarding from './tabs/onboarding.mjs';
 import { handleInputKey } from './input.mjs';
@@ -29,6 +32,10 @@ import { addBookmark, removeBookmark, isBookmarked, addSavedSearch, removeSavedS
 import { starRepo, unstarRepo, isStarred, createIssue, getSubscription, setSubscription, deleteSubscription } from './github.mjs';
 import { getScreen } from './render.mjs';
 import { parseMouseEvent, handleMouseEvent } from './mouse.mjs';
+import { getUndoInfo } from './undo.mjs';
+import { upsertEntity as _upsertEntity, getStarredList as _getStarredList } from './state.mjs';
+const upsertEntity = _upsertEntity;
+const getStarredList = _getStarredList;
 
 const tabModules = [dashboard, repos, analyze, actions, inbox, settings];
 
@@ -130,24 +137,26 @@ async function _toggleStarInner() {
       if (appState.repoDetails && appState.repoDetails.full_name === fullName) {
         appState.repoDetails.stargazers_count = r.stargazers_count;
       }
-      // Update appState.starred membership.
-      if (already) {
-        const idx = appState.starred.findIndex(s => s.full_name === fullName);
-        if (idx !== -1) appState.starred.splice(idx, 1);
-      } else {
-        if (!appState.starred.some(s => s.full_name === fullName)) {
-          appState.starred.unshift({ ...r, starred_at: new Date().toISOString() });
-        }
-      }
-      appState.dashboardStarHistory = dashboard.buildStarHistory(appState.starred);
+      // P1-8: single source of truth. upsertEntity() keeps
+      // appState.starred membership in sync internally via unshift/splice
+      // so no inline splice/unshift is needed here. Single source of
+      // truth avoids the previous double-bookkeeping divergence between
+      // the cache and the visible starred list.
+      const starredAt = already ? null : new Date().toISOString();
+      upsertEntity(r, { isStarred: !already, starredAt, isOwner: false });
+      appState.dashboardStarHistory = dashboard.buildStarHistory(getStarredList());
       render();
-    } catch (e) {
-      // F025 rollback: post-API step failed — undo BOTH the count AND the
-      // starred-list mutation so the UI doesn't lie about GitHub state.
-      r.stargazers_count = preStargazers;
-      appState.starred = preStarredList;
-      throw e;
-    }
+  } catch (e) {
+    // F025 rollback: post-API step failed — undo BOTH the count AND the
+    // starred-list mutation so the UI doesn't lie about GitHub state. Note
+    // P1-8: rollback restores BOTH the count and the cache entry. The
+    // upsertEntity call below re-mirrors the original `isStarred: already`
+    // state so cache and starred list agree.
+    r.stargazers_count = preStargazers;
+    appState.starred = preStarredList;
+    upsertEntity(r, { isStarred: already, starredAt: null, isOwner: false });
+    throw e;
+  }
   } catch (e) {
     showMessage(e.message || 'Star failed', 'error');
     render();
@@ -372,6 +381,20 @@ export function handleKey(key) {
       }
       return;
     }
+    case '\x13': {
+      // P1-13: Ctrl-S — save the current Explore search query (palette
+      // already advertises this; pressing the actual key does it now).
+      if (!appState.searchQuery) { showMessage('No search query to save', 'warning'); return; }
+      startInput('Label for this search: ', 'save-search');
+      return;
+    }
+    case '\x0b': {
+      // P1-13: Ctrl-K — hint about custom keybindings (we don't auto-open
+      // an editor to avoid spawning child processes; users can configure
+      // $EDITOR in their own time). Toast for 6s is enough discoverability.
+      showMessage('Edit ~/.github-tui/keybindings.json for custom key bindings — format: [{key, command, label, context}]', 'info', 6000);
+      return;
+    }
     case 'q': quit(); return;
     case '\t': {
       // Tab: if overlays are open, cycle focus zones; otherwise switch tabs.
@@ -399,9 +422,29 @@ export function handleKey(key) {
     case '\x10':
     case ':': palette.open(); return;
     case 'r': {
+      // P0-6: a retry handler attached by error-recovery.mjs takes priority
+      // over the per-tab refresh / Actions workflow rerun. Users in an error
+      // state expect `r` to fix the failure, not re-fire a workflow.
+      const retryFn = consumeRetryHandler();
+      if (retryFn) {
+        showMessage('Retrying…', 'info');
+        render();
+        Promise.resolve().then(() => {
+          try { retryFn(); } catch (e) {
+            showMessage((e && e.message) || 'Retry failed', 'error');
+          }
+        });
+        return;
+      }
       // Actions runs view: 'r' re-runs selected workflow, not a generic refresh.
       if (tabState.current === 3 && appState.actionsView === 'runs') { actions.rerunSelected(); return; }
       refreshCurrent();
+      // P1-1: surface undo affordance in toast when an undo stack exists.
+      // Append only once to avoid noisy double-suffix in chained messages.
+      const undoInfo = getUndoInfo ? getUndoInfo() : null;
+      if (undoInfo && undoInfo.canUndo) {
+        showMessage('Refreshed   [u] undo last action', 'info');
+      }
       return;
     }
     case 'o': openCurrent(); return;
@@ -466,22 +509,41 @@ export function handleKey(key) {
   // 5. Global star toggle.
   if (key === '*' && currentRepoForAction()) { toggleStar(); return; }
 
-  // 5c. Settings tab: star repo on 's'/'S'.
-  // F018 fix: guard against missing token — previously this crashed deep
-  // in the HTTP layer with a confusing error.
-  if (tabState.current === 5 && (key === 's' || key === 'S')) {
-    if (!appState.token) {
-      showMessage('Login first (Settings → Login)', 'warning');
+  // P1-6: lowercase 's' on repo-bearing tabs (1=Repos / 3=Explore details,
+  // NOT inside Files sub-pane where 's' means saveCurrentFile) toggles star
+  // for the current repo. 'S' on Settings still stars the github-tui repo.
+  // Critical: Files sub-pane (analyzeView === 'details' && detailsPane === 'files')
+  // binds 's' → saveCurrentFile in files.mjs. Catch that binding to ship the
+  // per-tab handler so we don't break the save shortcut.
+  const inFilesSubPane = tabState.current === 2
+    && appState.analyzeView === 'details'
+    && appState.detailsPane === 'files';
+  if (key === 's' && !inFilesSubPane) {
+    if (tabState.current === 5) {
+      if (!appState.token) { showMessage('Login first (Settings → Login)', 'warning'); return; }
+      Promise.resolve().then(() => settings.starRepo()).catch((e) => {
+        showMessage((e && e.message) || 'Star failed', 'error');
+      });
       return;
     }
+    if (currentRepoForAction()) { toggleStar(); return; }
+  }
+  // P0-7 fallback: 'S' in file-pane contexts (Files sub-view of Explore)
+  // still acts on the file (save), not the globally-bound star.
+  if (key === 'S' && tabState.current === 5 && !appState.showDetail) {
+    if (!appState.token) { showMessage('Login first (Settings → Login)', 'warning'); return; }
     Promise.resolve().then(() => settings.starRepo()).catch((e) => {
       showMessage((e && e.message) || 'Star failed', 'error');
     });
     return;
   }
 
-  // 5a. Global watch toggle.
-  if (key === 'W' && currentRepoForAction()) { toggleWatch(); return; }
+  // P1-7: keep `w` as the canonical "what's new" toggle (canonical doc key);
+  // the global capital `W` watch toggle is now palette-only (Ctrl-P → "Watch
+  // current repo"). This avoids the long-standing `W` vs `w` key collision
+  // that new users reported when both "Watch toggle" and "What's new"
+  // appeared in the bindings help.
+  // 5a. Global watch toggle removed from hotkey scope — palette only.
 
   // 6. Dashboard stat-card focus — ←/→ arrows and H/L move between cards.
   if (tabState.current === 0) {
@@ -697,7 +759,19 @@ function handleUp() {
   const screen = getScreen();
   if (t === 0) { dashboard.dashboardUp(); return; }
   if (t === 1) repos.up(screen);
-  else if (t === 2) analyze.up(screen);
+  else if (t === 2) {
+    // P1-11: keyboard nav for recent repos when Explore is in search mode.
+    // The list is visible only when appState.recentRepos.length > 0;
+    // j/k/Enter mirror the mouse _recentReposBounds dispatch.
+    if (appState.analyzeView === 'search' && appState.recentRepos.length > 0) {
+      const cur = appState._recentReposCursor || 0;
+      appState._recentReposCursor = Math.max(0, cur - 1);
+      render();
+      return;
+    }
+    analyze.up(screen);
+    return;
+  }
   else if (t === 3) actions.up();
   else if (t === 4) inbox.up();
   else if (t === 5) settings.up();
@@ -707,7 +781,18 @@ function handleDown() {
   const screen = getScreen();
   if (t === 0) { dashboard.dashboardDown(); return; }
   if (t === 1) repos.down(screen);
-  else if (t === 2) analyze.down(screen);
+  else if (t === 2) {
+    // P1-11: keyboard nav for recent repos when Explore is in search mode.
+    if (appState.analyzeView === 'search' && appState.recentRepos.length > 0) {
+      const max = Math.max(0, appState.recentRepos.length - 1);
+      const cur = appState._recentReposCursor || 0;
+      appState._recentReposCursor = Math.min(max, cur + 1);
+      render();
+      return;
+    }
+    analyze.down(screen);
+    return;
+  }
   else if (t === 3) actions.down();
   else if (t === 4) inbox.down(screen);
   else if (t === 5) settings.down();
@@ -715,9 +800,18 @@ function handleDown() {
 function handleBack() {
   const t = tabState.current;
   if (t === 0) {
-    // Esc/h on Dashboard — show quit confirmation.
-    if (appState.confirmAction) return;
-    confirm('Quit GitHub TUI?', () => process.exit(0), 'Quit');
+    // P0-3 fix: `Esc` / `h` / `Backspace` on Dashboard MUST NOT trigger a
+    // quit confirmation — one stray `Enter` would silently exit the app.
+    // It's a muscle-memory trap. Quit is bound to `q` and `Ctrl-C` directly.
+    // On Dashboard these keys instead (a) unfocus the stat cards if they're
+    // focused, or (b) surface a one-shot hint telling the user where quit
+    // actually lives.
+    if (appState.dashboardCardsFocus) {
+      dashboard.unfocusCards();
+      return;
+    }
+    if (appState.confirmAction) return; // don't stack confirms
+    showMessage('Quit: press [q] or [Ctrl-C]', 'info', 2400);
     return;
   }
   if (t === 2) { analyze.handleBack(); return; }
@@ -759,7 +853,7 @@ export function registerCoreActions() {
   reg({ id: 'quit',    label: 'Quit application',             hint: 'q', run: quit });
 
   reg({ id: 'star.toggle',     label: 'Star / unstar current repo',         hint: '*', run: toggleStar });
-  reg({ id: 'watch.toggle',    label: 'Watch / unwatch current repo',       hint: 'W', run: toggleWatch });
+  reg({ id: 'watch.toggle',    label: 'Watch / unwatch current repo',       hint: 'palette', run: toggleWatch });
   reg({ id: 'bookmark.toggle', label: 'Bookmark / unbookmark current repo', hint: 'b', run: toggleBookmark });
 
   reg({ id: 'repos.sort.name',    label: 'Sort repos by name',    hint: 'n', run: () => { setTab(1); repos.keys.n(); } });
@@ -784,7 +878,7 @@ export function registerCoreActions() {
   reg({ id: 'analyze.files', label: 'Open File explorer for current repo',
         hint: 'F',
         run: () => {
-          if (!appState.repoDetails) { showMessage('Open a repo on Analyze first', 'warning'); return; }
+          if (!appState.repoDetails) { showMessage('Open a repo on Explore first', 'warning'); return; }
           setTab(2);
           analyze.keys.F();
         }});

@@ -4,7 +4,10 @@
 
 import { describe, it, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
-import { startAsync, isStale } from '../tui/state.mjs';
+import {
+  startAsync, isStale,
+  setRetryHandler, clearRetryHandler, consumeRetryHandler, appState,
+} from '../tui/state.mjs';
 
 describe('state.mjs — async generation guard', () => {
   describe('startAsync(scope) returns a handle', () => {
@@ -105,5 +108,73 @@ describe('state.mjs — async generation guard', () => {
       assert.equal(isStale(fastB), false);
       assert.equal(isStale(fastA), true); // Bumped 5 times since.
     });
+  });
+});
+
+describe('state.mjs — retry handler (P0-6)', () => {
+  beforeEach(() => {
+    clearRetryHandler();
+    appState._retryFn = null;
+    appState._retryExpiresAt = 0;
+  });
+
+  it('setRetryHandler stores the function and an expiry timestamp in the future', () => {
+    let called = false;
+    setRetryHandler(() => { called = true; }, 5000);
+    assert.equal(typeof appState._retryFn, 'function');
+    assert.ok(appState._retryExpiresAt > Date.now());
+    assert.ok(appState._retryExpiresAt <= Date.now() + 5000 + 5);
+    // fired manually here just to inspect wiring; consumeRetryHandler is the API.
+    clearRetryHandler();
+  });
+
+  it('consumeRetryHandler returns and clears the handler when live', () => {
+    let calls = 0;
+    setRetryHandler(() => { calls++; }, 5000);
+    const fn = consumeRetryHandler();
+    assert.equal(typeof fn, 'function');
+    assert.equal(appState._retryFn, null);
+    assert.equal(appState._retryExpiresAt, 0);
+    fn(); // should now execute
+    assert.equal(calls, 1);
+  });
+
+  it('a second consume after the first returns null', () => {
+    setRetryHandler(() => {}, 5000);
+    const first = consumeRetryHandler();
+    const second = consumeRetryHandler();
+    assert.equal(typeof first, 'function');
+    assert.equal(second, null);
+  });
+
+  it('clearRetryHandler drops any pending handler', () => {
+    setRetryHandler(() => { throw new Error('should not run'); }, 5000);
+    clearRetryHandler();
+    assert.equal(consumeRetryHandler(), null);
+  });
+
+  it('setRetryHandler replaces an existing handler (no stacking)', () => {
+    let aRan = false, bRan = false;
+    setRetryHandler(() => { aRan = true; }, 5000);
+    setRetryHandler(() => { bRan = true; }, 5000);
+    const fn = consumeRetryHandler();
+    fn();
+    assert.equal(aRan, false);
+    assert.equal(bRan, true);
+  });
+
+  it('non-function arguments null the handler (defensive)', () => {
+    setRetryHandler('not a function', 5000);
+    assert.equal(appState._retryFn, null);
+    assert.equal(consumeRetryHandler(), null);
+  });
+
+  it('an expired handler is no longer consumable', () => {
+    // Use a duration that's effectively already expired.
+    setRetryHandler(() => {}, -1);
+    // Force expiry (setRetryHandler clamps duration to >= 0).
+    appState._retryExpiresAt = Date.now() - 100;
+    assert.equal(consumeRetryHandler(), null);
+    assert.equal(appState._retryFn, null);
   });
 });

@@ -1,4 +1,4 @@
-// Forks sub-view (lives under the Analyze tab).
+// Forks sub-view (lives under the Explore tab).
 // Concurrent ahead/behind compares + Space-for-more pagination.
 
 import { appState, render, startAsync, isStale, showMessage } from '../state.mjs';
