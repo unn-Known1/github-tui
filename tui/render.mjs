@@ -2,7 +2,7 @@
 // message line, rate-limit indicator) and dispatches to whichever tab is
 // active. Tab modules only render inside their content box.
 
-import { appState, TABS, tabState, bindRender } from './state.mjs';
+import { appState, TABS, tabState, bindRender, checkLoadingWatchdog, getUnreadCount } from './state.mjs';
 import { Screen } from './screen.mjs';
 import { lastRateLimit, offlineState, getCacheStats } from './github.mjs';
 import { color } from './theme.mjs';
