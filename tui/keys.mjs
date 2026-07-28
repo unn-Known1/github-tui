@@ -555,8 +555,11 @@ export function handleKey(key) {
   if (tabState.current === 0) {
     if (key === '\x1b[D' || key === 'H') { dashboard.leftCard(); return; }
     if (key === '\x1b[C' || key === 'L') { dashboard.rightCard(); return; }
-    // l (lowercase) also moves right on dashboard for consistency with vi
-    if (key === 'l') { dashboard.rightCard(); return; }
+    // lowercase 'l' is intentionally NOT bound to rightCard. The dashboard tab
+    // binds 'l' per-tab to toggle localRepoFilter; binding it here as well
+    // used to fire BOTH actions on a single press (card moved AND filter
+    // toggled), which was a UX bug. Per-tab handler dispatch in step 7 runs
+    // after this returns.
     if (key === '\t' && appState.dashboardCardsFocus) {
       dashboard.unfocusCards();
       return;

@@ -42,6 +42,27 @@ export async function loadDashboardWidgets(force = false) {
     ]);
     const extract = (r) => r.status === 'fulfilled' ? r.value : null;
     const [events, trending, starred, issues, prs, followers] = results.map(extract);
+    // Surface silent per-widget failures. Previously the code mapped every
+    // rejection to null, leaving the user with no signal that a widget
+    // vanished because the API failed. Count failures and remember the
+    // timestamp so the greeting row can render an "N widgets failed" banner
+    // and a freshness badge.
+    const widgetLabels = ['events', 'trending', 'starred', 'issues', 'prs', 'followers'];
+    let failCount = 0;
+    for (let i = 0; i < results.length; i++) {
+      if (results[i].status === 'rejected') {
+        failCount++;
+        // DEBUG is module-private to app.mjs; check env vars inline so we
+        // don't have to plumb a new export through state.mjs. Avoids
+        // uncontrolled stderr writes that would tear the TUI.
+        if (process.env.DEBUG || process.env.GITHUB_TUI_DEBUG) {
+          console.error('[dashboard] widget "' + widgetLabels[i] + '" failed:',
+            results[i].reason && (results[i].reason.message || String(results[i].reason)));
+        }
+      }
+    }
+    appState.dashboardWidgetErrorCount = failCount;
+    if (failCount === 0) appState.dashboardLastFetched = Date.now();
     if (isStale(gen, 'dashboard-widgets')) {
       setWidgetLoading('events', false);
       setWidgetLoading('trending', false);
@@ -79,12 +100,20 @@ export async function loadDashboardWidgets(force = false) {
     appState.dashboardLoaded = true;
 
     // Load custom user-defined sections (non-blocking — don't fail the dashboard).
+    // Errors are NO LONGER silently swallowed: when DEBUG is set we additionally
+    // log the failure so a malformed user config isn't invisible. Inline
+    // process.env check avoids a circular import through app.mjs's DEBUG.
     if (!appState.customSectionsLoaded || force) {
       try {
         const { loadCustomSections } = await import('../custom-sections.mjs');
         appState.customSections = await loadCustomSections(appState.token);
         appState.customSectionsLoaded = true;
-      } catch {}
+      } catch (e) {
+        if (process.env.DEBUG || process.env.GITHUB_TUI_DEBUG) {
+          console.error('[dashboard] custom sections failed to load:',
+            (e && e.message) || String(e));
+        }
+      }
     }
 
     render();
@@ -211,6 +240,28 @@ export function renderDashboard(screen, y, h) {
   const W = screen.width;
   const user = appState.user;
 
+  // Self-heal stale keyboard selections on every render: if a fetch
+  // (or auto-refresh tick) shrinks a list, the previously-selected index
+  // might point past the end of the new dataset, leaving an invisible
+  // highlighted row. dashboardUp / dashboardDown also clamp on input, but
+  // those only fire when the user presses a key. clampList() here covers
+  // silent data swaps (auto-refresh returning fewer events, openDashboardItem
+  // being called from a stale focus, etc.).
+  function clampList(arr, selKey, scrollKey) {
+    if (!Array.isArray(arr)) return;
+    if (arr.length === 0) {
+      appState[selKey] = 0;
+      appState[scrollKey] = 0;
+      return;
+    }
+    if (appState[selKey] >= arr.length) appState[selKey] = arr.length - 1;
+    if (appState[scrollKey] >= arr.length) appState[scrollKey] = arr.length - 1;
+  }
+  clampList(appState.events,                'dashboardActivitySelected', 'dashboardActivityScroll');
+  clampList(appState.trending,              'trendingSelected',         'trendingScroll');
+  clampList(appState.dashboardRecentIssues, 'dashboardIssueSelected',   'dashboardIssueScroll');
+  clampList(appState.dashboardRecentPRs,    'dashboardPRSelected',      'dashboardPRScroll');
+
   if (!user) {
     emptyState(screen, y, h, {
       icon: '! NOT SIGNED IN',
@@ -238,6 +289,28 @@ export function renderDashboard(screen, y, h) {
     screen.writeStr(Math.max(2, W - badge.length - 4), y, badge, { fg: 'yellow', bold: true });
   }
   screen.hline(y + 1, '─', { dim: true });
+
+  // Banner row at y+2 (cards start at y+3, no layout shift). Left side
+  // surfaces the count of widgets that failed on the most recent
+  // loadDashboardWidgets() so silent Promise.allSettled rejections become
+  // visible. Right side surfaces a freshness stamp so users can tell
+  // whether the dashboard is 30s or 30m stale. Both can coexist on the
+  // same row without colliding (error badge starts at x=2, age badge
+  // right-aligned).
+  if (appState.dashboardWidgetErrorCount > 0) {
+    const errBadge = '⚠ ' + appState.dashboardWidgetErrorCount +
+      ' widget' + (appState.dashboardWidgetErrorCount === 1 ? '' : 's') + ' failed';
+    screen.writeStr(2, y + 2, errBadge, { fg: 'red', bold: true });
+  }
+  if (appState.dashboardLastFetched) {
+    const ageMs = Math.max(0, Date.now() - appState.dashboardLastFetched);
+    const ageLabel =
+      ageMs < 60_000 ? 'just now' :
+      ageMs < 3_600_000 ? Math.floor(ageMs / 60_000) + 'm ago' :
+      Math.floor(ageMs / 3_600_000) + 'h ago';
+    const ageBadge = 'Updated ' + ageLabel;
+    screen.writeStr(Math.max(2, W - ageBadge.length - 4), y + 2, ageBadge, { dim: true });
+  }
 
   // ── Stat cards ──────────────────────────────────────────────
   const cardY = y + 3;
@@ -456,7 +529,12 @@ export function renderDashboard(screen, y, h) {
   // RIGHT COLUMN ────────────────────────────────────────────
   let ry = bodyY;
 
-  const activityVisible = sectionHeader(screen, rightX, ry, 'RECENT ACTIVITY', '[Enter] open first', 'dashboard:recentActivity');
+  const activityFocused = appState.dashboardFocusZone === 'activity';
+  // When the activity zone is focused, advertise a working key. The previous
+  // "[Enter] open first" was misleading — pressing Enter used to fall through
+  // to the trending zone and open trendingSelected, NOT the first event.
+  const activityHint = activityFocused ? '[Enter] open repo' : null;
+  const activityVisible = sectionHeader(screen, rightX, ry, 'RECENT ACTIVITY', activityHint, 'dashboard:recentActivity');
   ry++;
   if (activityVisible) {
     if (appState.events.length === 0) {
@@ -468,15 +546,26 @@ export function renderDashboard(screen, y, h) {
       }
     } else {
       const maxEvents = Math.min(7, Math.max(1, Math.floor((y + h - bodyY) * 0.30)));
-      for (const ev of appState.events.slice(0, maxEvents)) {
+      // Honour keyboard scroll: viewport starts at dashboardActivityScroll.
+      const activityStart = Math.min(appState.dashboardActivityScroll, appState.events.length);
+      const activityEnd = Math.min(activityStart + maxEvents, appState.events.length);
+      for (let i = activityStart; i < activityEnd; i++) {
         if (ry >= y + h - 1) break;
+        const ev = appState.events[i];
+        const sel = activityFocused && i === appState.dashboardActivitySelected;
         const [icon, c, label] = eventGlyph(ev.type);
         const repo = (ev.repo && ev.repo.name ? ev.repo.name : '?').substring(0, Math.max(10, rightW - 22));
         const when = relTime(ev.created_at);
-        screen.writeStr(rightX, ry, icon, c);
-        screen.writeStr(rightX + 2, ry, label.substring(0, 11).padEnd(11), { dim: true });
-        screen.writeStr(rightX + 14, ry, truncate(repo, rightW - 22));
-        screen.writeStr(rightX + rightW - when.length, ry, when, { dim: true });
+        if (sel) {
+          // Background highlight across the full right-column width so the
+          // selection is unmistakable, mirroring how Issues/PRs are rendered
+          // when selected.
+          for (let x = rightX; x < rightX + rightW; x++) screen.styleBuf[ry][x] = { bg: 'blue', fg: 'white', bold: true };
+        }
+        screen.writeStr(rightX, ry, icon, sel ? { bg: 'blue', fg: 'white', bold: true } : c);
+        screen.writeStr(rightX + 2, ry, label.substring(0, 11).padEnd(11), sel ? { bg: 'blue', fg: 'white', bold: true } : { dim: true });
+        screen.writeStr(rightX + 14, ry, truncate(repo, rightW - 22), sel ? { bg: 'blue', fg: 'white' } : null);
+        screen.writeStr(rightX + rightW - when.length, ry, when, sel ? { bg: 'blue', fg: 'white' } : { dim: true });
         ry++;
       }
     }
@@ -637,31 +726,64 @@ export function renderDashboard(screen, y, h) {
   }
 }
 
-export async function loadMoreTrending() {
-  if (!appState.trendingHasMore || !appState.token || appState.loading) return;
+// ── Trending fetch helpers — deduped from the three originally near-clone
+// handlers (loadMoreTrending / pageUp / pageDown). Each public handler is
+// now a 3-line wrapper that delegates to _setTrendingPage with the right
+// (page, replace) tuple. Promise.resolve() in keys.mjs already wraps
+// per-tab key dispatches, so the public wrappers are intentionally
+// sync (fire-and-forget).
+function _trendingQuery() {
+  const days = appState.trendingPeriod || 7;
+  const since = new Date(Date.now() - days * 86400000).toISOString().split('T')[0];
+  return 'created:>' + since;
+}
+
+async function _fetchTrendingPage(page) {
   const gen = startAsync('dashboard-trending');
+  try {
+    const list = await searchRepositories(
+      appState.token, _trendingQuery(), page, 10, gen.signal
+    );
+    if (isStale(gen, 'dashboard-trending')) return { stale: true };
+    return { stale: false, list };
+  } catch (error) {
+    if (isStale(gen, 'dashboard-trending')) return { stale: true };
+    return { stale: false, error };
+  }
+}
+
+// `replace=true` swaps the list (pageUp). `replace=false` appends
+// (loadMoreTrending, pageDown). End-of-list responses clear the
+// trendingHasMore flag so the next j/Space stops trying to fetch.
+async function _setTrendingPage(page, replace) {
+  if (!appState.token) return;
   appState.loading = true;
   render();
-  try {
-    const days = appState.trendingPeriod || 7;
-    const since = new Date(Date.now() - days * 86400000).toISOString().split('T')[0];
-    const q = 'created:>' + since;
-    const page = appState.trendingPage + 1;
-    const more = await searchRepositories(appState.token, q, page, 10, gen.signal);
-    if (isStale(gen, 'dashboard-trending')) { appState.loading = false; render(); return; }
-    if (Array.isArray(more) && more.length > 0) {
-      appState.trending = [...appState.trending, ...more];
-      appState.trendingPage = page;
-      appState.trendingHasMore = more.length >= 10;
+  const { stale, list, error } = await _fetchTrendingPage(page);
+  if (stale) { appState.loading = false; render(); return; }
+  if (error) {
+    appState.trendingHasMore = false;
+    showMessage('Failed to load trending page ' + page, 'error');
+  } else if (Array.isArray(list) && list.length > 0) {
+    if (replace) {
+      appState.trending = list;
+      appState.trendingSelected = 0;
+      appState.trendingScroll = 0;
     } else {
-      appState.trendingHasMore = false;
+      appState.trending = [...appState.trending, ...list];
     }
-    appState.loading = false;
-    render();
-  } catch (e) {
-    appState.loading = false;
-    if (!isStale(gen, 'dashboard-trending')) showMessage('Failed to load more trending', 'error');
+    appState.trendingPage = page;
+    appState.trendingHasMore = list.length >= 10;
+  } else {
+    appState.trendingHasMore = false;
   }
+  appState.loading = false;
+  render();
+}
+
+export function loadMoreTrending() {
+  if (!appState.trendingHasMore || !appState.token || appState.loading) return;
+  _setTrendingPage(appState.trendingPage + 1, false);
 }
 
 export function openTrendingRepo() {
@@ -702,59 +824,28 @@ export function trendingDown() {
 }
 
 export function pageUp() {
-  if (appState.trendingPage > 1) {
-    const page = appState.trendingPage - 1;
-    const days = appState.trendingPeriod || 7;
-    const since = new Date(Date.now() - days * 86400000).toISOString().split('T')[0];
-    const q = 'created:>' + since;
-    const gen = startAsync('dashboard-trending');
-    appState.loading = true;
-    render();
-    searchRepositories(appState.token, q, page, 10, gen.signal).then(more => {
-      if (isStale(gen, 'dashboard-trending')) { appState.loading = false; return; }
-      if (Array.isArray(more)) {
-        appState.trending = more;
-        appState.trendingPage = page;
-        appState.trendingHasMore = more.length >= 10;
-        appState.trendingSelected = 0;
-        appState.trendingScroll = 0;
-      }
-      appState.loading = false;
-      render();
-    }).catch(() => { appState.loading = false; render(); });
+  if (appState.trendingPage > 1 && !appState.loading) {
+    _setTrendingPage(appState.trendingPage - 1, true);
   }
 }
 
 export function pageDown() {
-  if (appState.trendingHasMore) {
-    const page = appState.trendingPage + 1;
-    const days = appState.trendingPeriod || 7;
-    const since = new Date(Date.now() - days * 86400000).toISOString().split('T')[0];
-    const q = 'created:>' + since;
-    const gen = startAsync('dashboard-trending');
-    appState.loading = true;
-    render();
-    searchRepositories(appState.token, q, page, 10, gen.signal).then(more => {
-      if (isStale(gen, 'dashboard-trending')) { appState.loading = false; return; }
-      if (Array.isArray(more) && more.length > 0) {
-        appState.trending = [...appState.trending, ...more];
-        appState.trendingPage = page;
-        appState.trendingHasMore = more.length >= 10;
-      } else {
-        appState.trendingHasMore = false;
-      }
-      appState.loading = false;
-      render();
-    }).catch(() => { appState.loading = false; render(); });
+  if (appState.trendingHasMore && !appState.loading) {
+    _setTrendingPage(appState.trendingPage + 1, false);
   }
 }
 
-// Open the focused stat card (currently: STALE = jump to Repos with stale filter).
+// Open the focused stat card. Maps each of the 5 cards to a sensible action:
+//   STARS       (i=0) → Repos tab (whole list)
+//   FORKS       (i=1) → Repos tab (whole list)
+//   LANGUAGES   (i=2) → Repos tab with the language facet sidebar open
+//   ACCOUNT AGE (i=3) → user's GitHub profile in the configured browser
+//   STALE       (i=4) → Repos tab filtered to stale repos only
 export function openFocusedCard() {
   if (!appState.dashboardCardsFocus) return;
   const i = appState.dashboardSelectedCard;
   if (i === 4) {
-    // Stale → repos with stale filter
+    // STALE → Repos with stale-only filter on
     setTab(1);
     appState.repoStaleOnly = true;
     appState.repoScroll = 0;
@@ -763,8 +854,35 @@ export function openFocusedCard() {
     showMessage('Showing stale repos', 'info');
     render();
   } else if (i === 0 || i === 1) {
-    // Stars / Forks → repos tab
+    // STARS / FORKS → Repos tab (full list)
     setTab(1);
+    appState.dashboardCardsFocus = false;
+    render();
+  } else if (i === 2) {
+    // LANGUAGES → Repos with the language-facet sidebar visible. Setting
+    // reposShowLangFacet=true causes repos.mjs to render the chips column
+    // on the right; the user can then press L to filter by a chosen
+    // language from there.
+    setTab(1);
+    appState.reposShowLangFacet = true;
+    appState.repoScroll = 0;
+    appState.repoSelected = 0;
+    appState.dashboardCardsFocus = false;
+    showMessage('Pick a language to filter repos', 'info');
+    render();
+  } else if (i === 3) {
+    // ACCOUNT AGE → open the user's GitHub profile in browser. openUrl
+    // returns { ok, error } so surface failures rather than silently
+    // swallowing them. dashboard.mjs already imports openUrl from utils.
+    if (appState.user && appState.user.html_url) {
+      const url = appState.user.html_url;
+      openUrl(url).then(res => {
+        if (res && res.ok) showMessage('Opened profile in browser', 'success');
+        else showMessage((res && res.error) || 'Browser open failed', 'error');
+      });
+    } else {
+      showMessage('No profile URL available', 'warning');
+    }
     appState.dashboardCardsFocus = false;
     render();
   }
@@ -828,20 +946,23 @@ export const keys = {
   },
 };
 
-const ZONES = ['trending', 'issues', 'prs', 'cards'];
-
-export function cycleDashboardZone() {
-  const i = ZONES.indexOf(appState.dashboardFocusZone);
-  const nextZone = ZONES[(i + 1) % ZONES.length];
-  appState.dashboardFocusZone = nextZone;
-  appState.dashboardCardsFocus = (nextZone === 'cards');
-  showMessage('Focus: ' + appState.dashboardFocusZone, 'info', 1000);
-  render();
-}
+// (Removed the unused `ZONES` array and dead `cycleDashboardZone()` export.
+// Focus is driven entirely by `tui/focus.mjs`'s `_focusState.zoneIndex`
+// and Tab/Shift+Tab through `focusNext/focusPrev`. There were zero
+// callers of `cycleDashboardZone` anywhere in the codebase.)
 
 export function dashboardUp() {
   const zone = appState.dashboardFocusZone;
   if (zone === 'trending') { trendingUp(); return; }
+  if (zone === 'activity') {
+    if (appState.events.length === 0) return;
+    appState.dashboardActivitySelected = Math.max(0, appState.dashboardActivitySelected - 1);
+    if (appState.dashboardActivitySelected < appState.dashboardActivityScroll) {
+      appState.dashboardActivityScroll = appState.dashboardActivitySelected;
+    }
+    render();
+    return;
+  }
   if (zone === 'issues') {
     if (appState.dashboardRecentIssues.length === 0) return;
     appState.dashboardIssueSelected = Math.max(0, appState.dashboardIssueSelected - 1);
@@ -865,6 +986,21 @@ export function dashboardUp() {
 export function dashboardDown() {
   const zone = appState.dashboardFocusZone;
   if (zone === 'trending') { trendingDown(); return; }
+  if (zone === 'activity') {
+    if (appState.events.length === 0) return;
+    const screen = getScreen();
+    const H = screen ? screen.height : 24;
+    const maxVisible = Math.min(7, Math.max(1, Math.floor((H - 17) * 0.30)));
+    appState.dashboardActivitySelected = Math.min(
+      appState.events.length - 1,
+      appState.dashboardActivitySelected + 1
+    );
+    if (appState.dashboardActivitySelected >= appState.dashboardActivityScroll + maxVisible) {
+      appState.dashboardActivityScroll++;
+    }
+    render();
+    return;
+  }
   if (zone === 'issues') {
     if (appState.dashboardRecentIssues.length === 0) return;
     appState.dashboardIssueSelected = Math.min(
@@ -900,6 +1036,28 @@ export function dashboardDown() {
 export function openDashboardItem() {
   const zone = appState.dashboardFocusZone;
   if (zone === 'trending') { openTrendingRepo(); return; }
+  if (zone === 'activity') {
+    const ev = appState.events[appState.dashboardActivitySelected];
+    if (!ev) return;
+    // GitHub events have no single stable browser URL across all event
+    // types; the most useful drill-in is the affected repo. We switch to
+    // Explore (tab 2) and let loadRepoDetails paint it. Events without a
+    // repo.name (rare, e.g. user-level events) surface a warning instead.
+    if (ev.repo && ev.repo.name) {
+      const parts = ev.repo.name.split('/');
+      const owner = parts[0];
+      const repo = parts[1];
+      if (owner && repo) {
+        setTab(2);
+        loadRepoDetails(owner, repo);
+      } else {
+        showMessage('No repository for this event', 'warning');
+      }
+    } else {
+      showMessage('No repository for this event', 'warning');
+    }
+    return;
+  }
   if (zone === 'issues') {
     const issue = appState.dashboardRecentIssues[appState.dashboardIssueSelected];
     if (!issue) return;
@@ -967,6 +1125,7 @@ export function getSections() {
 export function getCurrentSection() {
   const zone = appState.dashboardFocusZone;
   if (zone === 'trending') return 'dashboard:trending';
+  if (zone === 'activity') return 'dashboard:recentActivity';
   if (zone === 'issues') return 'dashboard:issues';
   if (zone === 'prs') return 'dashboard:prs';
   return 'dashboard:profile';

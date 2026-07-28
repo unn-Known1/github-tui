@@ -7,10 +7,19 @@ import { appState, render } from './state.mjs';
 // Each zone has: id, label, and optional canFocus() guard.
 const FOCUS_ZONES = {
   0: [ // Dashboard
+    // Tab order mirrors top-to-bottom reading of the dashboard:
+    //   cards (top full-width row)
+    // → activity (1st on the right column)
+    // → issues, prs (middle of right column)
+    // → trending (anchored to the bottom of right column).
+    // Previously trending was 2nd in the list, which made the second Tab
+    // hop from "top of UI → bottom-right corner → top-of-right corner",
+    // a confusing jump.
     { id: 'cards', label: 'Stat Cards', canFocus: () => true },
-    { id: 'trending', label: 'Trending', canFocus: () => appState.trending?.length > 0 },
+    { id: 'activity', label: 'Recent Activity', canFocus: () => appState.events?.length > 0 },
     { id: 'issues', label: 'Recent Issues', canFocus: () => appState.dashboardRecentIssues?.length > 0 },
     { id: 'prs', label: 'Recent PRs', canFocus: () => appState.dashboardRecentPRs?.length > 0 },
+    { id: 'trending', label: 'Trending', canFocus: () => appState.trending?.length > 0 },
   ],
   1: [ // Repos
     { id: 'list', label: 'Repo List', canFocus: () => appState.repos?.length > 0 },
@@ -97,6 +106,7 @@ export function getFocusedSelection() {
   if (t === 0) {
     if (zone.id === 'cards') return { type: 'card', index: appState.dashboardSelectedCard };
     if (zone.id === 'trending') return { type: 'list', index: appState.trendingSelected, scroll: appState.trendingScroll };
+    if (zone.id === 'activity') return { type: 'list', index: appState.dashboardActivitySelected, scroll: appState.dashboardActivityScroll };
     if (zone.id === 'issues') return { type: 'list', index: appState.dashboardIssueSelected, scroll: appState.dashboardIssueScroll };
     if (zone.id === 'prs') return { type: 'list', index: appState.dashboardPRSelected, scroll: appState.dashboardPRScroll };
   }

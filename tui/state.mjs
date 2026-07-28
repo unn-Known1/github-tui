@@ -259,6 +259,8 @@ export const appState = {
   starredPage: 1,
   starredHasMore: false,
   dashboardLoaded: false,
+  dashboardLastFetched: null,    // ms timestamp — drives the "Updated Xm ago" badge in the greeting row
+  dashboardWidgetErrorCount: 0,  // count of widgets that failed on the most recent loadDashboardWidgets — used to render a non-modal "N widgets failed" banner so silent Promise.allSettled rejections become visible
   dashboardLoadingWidgets: {},  // { [widgetName]: boolean } — per-widget loading state
   dashboardContributions: null,  // { weeks: [[day, day, ...], ...] } heatmap data
   dashboardRecentIssues: [],     // recently opened/updated issues across repos
@@ -271,6 +273,8 @@ export const appState = {
   dashboardFocusZone: 'trending', // 'trending' | 'issues' | 'prs' — which list has keyboard focus
   dashboardIssueSelected: 0,
   dashboardIssueScroll: 0,
+  dashboardActivitySelected: 0,    // keyboard selection index inside Recent Activity list
+  dashboardActivityScroll: 0,      // scroll offset when activity list exceeds viewport
   dashboardPRSelected: 0,
   dashboardPRScroll: 0,
 
