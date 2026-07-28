@@ -395,7 +395,12 @@ function renderHeader(W) {
     const cacheW = cacheStats.entries > 0 ? cacheStats.totalKB.toString().length + 8 : 0;
     const x = Math.max(2, W - txt.length - cacheW - 3);
     screen.writeStr(x, 1, txt, style);
-  } else if (!appState.user) {
+  } else if (!appState.token) {
+    // Show "not signed in" only when the token itself is absent.
+    // Previously gated on !appState.user, which is null until
+    // getAuthenticatedUser() resolves — leaving a visible race where
+    // authenticated users saw the warning until the API call landed.
+    // Token presence is the source of truth (Settings also gates on it).
     const x = Math.max(2, W - starBanner.length - 2);
     screen.writeStr(x, 1, starBanner, { fg: 'yellow', bold: true });
   }
