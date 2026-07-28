@@ -301,7 +301,15 @@ export function request(path, opts) {
             recordSync(path);
             return resolve(cached.body);
           }
+          // Cache was stale or empty. The 304 means the server has the
+          // resource — our problem, not its problem. Re-issue the GET
+          // without `If-None-Match` so the server sends a fresh body,
+          // then re-cache it normally. Cap at one retry so a pathological
+          // server can't loop; second 304 falls through to normal error.
           etagCache.delete(key);
+          if (!o._retried304) {
+            return resolve(request(path, { ...o, _retried304: true }));
+          }
         }
         if (res.statusCode === 403 && rr === '0') {
           const resetDate = new Date(parseInt(rs, 10) * 1000);
