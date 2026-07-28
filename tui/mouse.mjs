@@ -1,6 +1,6 @@
 // Mouse support — parse terminal mouse events and dispatch to handlers.
 
-import { appState, tabState, setTab, render, TABS, toggleCollapse, showMessage } from './state.mjs';
+import { appState, tabState, setTab, render, TABS, toggleCollapse, showMessage, upsertEntity } from './state.mjs';
 import { getScreen, HEADER_HEIGHT, TAB_CONTENT_Y } from './render.mjs';
 import { setTheme } from './theme.mjs';
 import { startInput } from './input.mjs';

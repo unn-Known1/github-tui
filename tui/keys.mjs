@@ -11,7 +11,7 @@
 
 import {
   appState, tabState, setTab, showMessage, render, TABS, dismissConfirm, confirm,
-  consumeRetryHandler,
+  consumeRetryHandler, SECURITY_SUB_PANES,
 } from './state.mjs';
 import * as palette from './palette.mjs';
 import * as onboarding from './tabs/onboarding.mjs';
