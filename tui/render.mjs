@@ -356,10 +356,17 @@ function renderHeader(W) {
   }
 
   // User greeting on the right of the top line.
-  if (appState.user) {
-    const login = '@' + appState.user.login;
+  // Token is loaded synchronously in main(), so we can render synchronously:
+  //   - appState.user present      → "@login"             (cyan/bold)
+  //   - appState.token only        → "loading…" marker   (dim/substituted)
+  //   - neither                    → no greeting          (signed-out)
+  // This avoids a blank header window during the seconds-long
+  // getAuthenticatedUser() roundtrip on cold boot.
+  if (appState.token) {
+    const login = appState.user ? '@' + appState.user.login : (a11y ? '[loading]' : 'loading…');
+    const style = appState.user ? { fg: 'cyan', bold: true } : { dim: true };
     const x = Math.max(2, W - login.length - 2);
-    screen.writeStr(x, 0, login, { fg: 'cyan', bold: true });
+    screen.writeStr(x, 0, login, style);
   }
 
   // Row 1: tagline (left)  |  rate-limit + cache stats (right)
