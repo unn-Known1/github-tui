@@ -1,7 +1,7 @@
 // Repos tab — your personal repositories.
 // v0.5+ polish: dismissable filter chips, cleaner density, better selected row.
 
-import { appState, render, startAsync, isStale, showMessage, setTab } from '../state.mjs';
+import { appState, render, startAsync, isStale, showMessage, setTab, upsertEntity } from '../state.mjs';
 import { getAuthenticatedUser, getUserRepositories, getStarredRepos } from '../github.mjs';
 import { removeToken } from '../config.mjs';
 import { startInput, registerInputHandler } from '../input.mjs';
@@ -512,6 +512,17 @@ export function toggleReposView() {
   render();
 }
 
+// Seed the entity cache from the current `appState.starred` array. Called
+// after every assignment to `appState.starred` so cross-tab viewers
+// (dashboard trending, repos tab, analyze) see the starred membership
+// immediately. Idempotent — upsertEntity merges.
+function _seedStarredCache() {
+  if (!Array.isArray(appState.starred)) return;
+  for (const r of appState.starred) {
+    upsertEntity(r, { isStarred: true, starredAt: r.starred_at, isOwner: false });
+  }
+}
+
 async function loadStarredRepos() {
   if (!appState.token) return;
   const gen = startAsync('repos');
@@ -524,6 +535,7 @@ async function loadStarredRepos() {
       ...s.repo,
       starred_at: s.created_at,
     })) : [];
+    _seedStarredCache();
     appState.starredPage = 1;
     appState.starredHasMore = appState.starred.length >= 100;
     showMessage('Loaded ' + appState.starred.length + ' starred repos', 'success');
@@ -546,6 +558,9 @@ export async function loadMoreStarred() {
     if (Array.isArray(more) && more.length > 0) {
       const mapped = more.map(s => ({ ...(s.repo || s), starred_at: s.starred_at || s.created_at }));
       appState.starred = [...appState.starred, ...mapped];
+      // Seed only the newly-mapped delta — previously-seeds stay valid.
+      // Full re-seed via _seedStarredCache() would re-upsert every page.
+      for (const r of mapped) upsertEntity(r, { isStarred: true, starredAt: r.starred_at, isOwner: false });
       appState.starredPage = page;
       appState.starredHasMore = more.length >= 100;
       showMessage('Loaded ' + appState.starred.length + ' starred repos', 'success');
@@ -570,6 +585,7 @@ export function pageUp() {
       if (isStale(gen, 'repos')) { appState.loading = false; return; }
       if (Array.isArray(more)) {
         appState.starred = more.map(s => ({ ...(s.repo || s), starred_at: s.starred_at || s.created_at }));
+        _seedStarredCache();
         appState.starredPage = page;
         appState.starredHasMore = true;
         appState.starredSelected = 0;
@@ -595,6 +611,7 @@ export function pageDown() {
       if (isStale(gen, 'repos')) { appState.loading = false; return; }
       if (Array.isArray(more) && more.length > 0) {
         appState.starred = more.map(s => ({ ...(s.repo || s), starred_at: s.starred_at || s.created_at }));
+        _seedStarredCache();
         appState.starredPage = page;
         appState.starredHasMore = more.length >= 100;
         appState.starredSelected = 0;

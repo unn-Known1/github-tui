@@ -609,14 +609,12 @@ function dispatchDashboardClick(sx, sy) {
   }
 
   render();
-}  // ── Repos tab ─────────────────────────────────────────────────
-  // also seed the entityCache when loadStarred assigns to
-  // appState.starred so cross-tab viewers see updates.
-  if (typeof upsertEntity === 'function') {
-    for (const r of list) {
-      upsertEntity(r, { isStarred: true, starredAt: r.starred_at, isOwner: false });
-    }
-  }
+}
+
+// Starred-repo → entity-cache seeding moved to tui/tabs/repos.mjs
+// (`_seedStarredCache()`). It's called right after every assignment to
+// `appState.starred`, so the cache actually reflects what's currently
+// starred instead of running once at module load with an empty list.
 
 function dispatchReposClick(sx, sy) {
   if (repos.tryDismissChipAt(sx, sy)) { render(); return; }
