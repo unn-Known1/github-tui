@@ -226,14 +226,14 @@
 | Disk cache with ETags | ✅ shipped (v0.6) |
 | README + Markdown renderer | ✅ shipped |
 | Saved searches | ✅ shipped |
-| OS-keychain token storage | 🔲 v0.9 |
+| OS-keychain token storage | ✅ shipped (since v0.6.0) |
 | Workflow runs dashboard | ✅ shipped |
 | AI summarise (BYO-key) | 🎯 v1.1 |
 | Themes + keybinding customisation | ✅ shipped |
 | Plugin system | 🎯 v2.0 |
 | Release automation | 🎯 v2.0 |
 | Offline + disk cache | 🎯 v0.6 |
-| Test suite (81 tests) | ✅ shipped |
+| Test suite (213 tests) | ✅ shipped |
 | Graceful shutdown + crash logging | ✅ shipped |
 
 ---

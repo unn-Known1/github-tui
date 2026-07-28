@@ -234,7 +234,7 @@ The app is split into 30 focused modules. Adding a new tab is: create one file, 
 ├── app.mjs                          # ~70-line entrypoint — lifecycle only
 ├── README.md
 ├── VISION.md                        # Roadmap + persona-driven brainstorm
-├── tests/                           # 128 tests (Node built-in test runner, zero deps)
+├── tests/                           # 213 tests (Node built-in test runner, zero deps)
 │   ├── utils.test.mjs
 │   ├── repos-logic.test.mjs
 │   ├── theme.test.mjs
@@ -378,6 +378,18 @@ Every tab module exports `render(screen, y, h)`, an optional `keys` map for tab-
 **Shipped in v0.4:** Dashboard enhancements — contribution heatmap (15-week grid), star history sparkline (30-day trend), recent issues/PRs activity, stale repos alert (60+ days), quick actions bar.
 
 **Shipped in v0.5:** Issue/PR detail popup with rendered body, labels, comments, and file diffs. Comment from TUI, emoji reactions, close/reopen, merge PRs with confirmation. PR diff viewer with unified diff and syntax coloring. Inbox notifications open detail popup for issues/PRs.
+
+**Shipped in v0.6.6:**
+- **Gap-audit closeout** — full P0 + P1 sweep (see [CHANGELOG.md](CHANGELOG.md) for the 7 P0 + 13 P1 entries). Highlights: `--accessible` mode for screen readers, automatic loading watchdog via `Object.defineProperty` setter, retry-hint footer, contextual empty-state cards, POWER-USER help category (Ctrl-P / Ctrl-S / Ctrl-K / Ctrl-Y), `Analyze → Explore` rename sweep.
+- **Dashboard follow-up polish:**
+  - **F1 `l`-key double-binding fixed** — global `keys.mjs` no longer shadows the per-tab `localRepoFilter` toggle; card navigation now stays on Right arrow + uppercase `L`.
+  - **F3 Recent Activity zone added** — Tab reaches the activity list; `[Enter] open repo` drills into the affected repository via Explore.
+  - **All 5 stat cards now have a sensible action** — `LANGUAGES` (i=2) → Repos + language-chip sidebar; `ACCOUNT AGE` (i=3) → user profile in browser; `STARS` / `FORKS` / `STALE` unchanged.
+  - **Failure + freshness banner row** at the header right — red `⚠ N widget(s) failed` (left) surfaces silent `Promise.allSettled` rejections; dim `Updated Xm ago` (right) shows freshness.
+  - **`clampList()` self-heals stale selection/scroll** when a refresh shrinks a list (events / trending / issues / PRs).
+  - **FOCUS_ZONES re-ordered** to `cards → activity → issues → prs → trending` for top-to-bottom Tab flow through the right column.
+- **Internal:** trending-pagination fetch dedup (~80 lines removed into `_fetchTrendingPage` + `_setTrendingPage`), dead `ZONES` const + `cycleDashboardZone` export removed, custom-section loader now logs to stderr under `DEBUG`.
+- **Tests:** 213 / 213 passing (was 208 / 208).
 
 **Shipped in v0.6.3:**
 - **GitHub CLI login** — new "Login (GitHub CLI)" option in Settings. Uses `gh auth token` for zero-friction auth — no PAT creation needed if `gh` is installed. Graceful degradation: option grayed out if `gh` not available. Zero npm dependencies.
