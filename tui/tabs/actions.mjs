@@ -51,10 +51,11 @@ function stepStatusIcon(step) {
 
 export async function loadActionsRepos() {
   if (!appState.token) return;
-  if (appState.repos.length === 0) {
-    showMessage('Load repos on Dashboard or Repos tab first', 'warning');
-    return;
-  }
+  // Copy whatever's in appState.repos — never early-return on empty, since
+  // the renderer (renderRepoList) already owns the "No repos loaded"
+  // empty-state copy. Showing a redundant `Load repos on Dashboard…`
+  // toast *on top of* the empty-state would stack two messages and tell
+  // the user the same thing twice.
   appState.actionsRepos = appState.repos || [];
   appState.actionsRepoSelected = 0;
   appState.actionsRepoScroll = 0;
