@@ -941,9 +941,14 @@ export function registerCoreActions() {
           } });
     reg({ id: 'search.delete.' + s.id, label: 'Delete saved search: ' + s.label,
           run: () => {
-            removeSavedSearch(s.id);
-            appState.savedSearches = appState.savedSearches.filter(x => x.id !== s.id);
-            showMessage('Deleted saved search: ' + s.label, 'success');
+            // Saved searches are persisted to disk under ~/.github-tui/.
+            // Confirm before removing so a misclick doesn't blow away
+            // a query the user spent time composing.
+            confirm('Delete saved search "' + s.label + '"?', () => {
+              removeSavedSearch(s.id);
+              appState.savedSearches = appState.savedSearches.filter(x => x.id !== s.id);
+              showMessage('Deleted saved search: ' + s.label, 'success');
+            }, 'Delete saved search');
           } });
   });
 }

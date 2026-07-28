@@ -1,7 +1,7 @@
 // Bookmarks overlay — browse, open, delete, and export bookmarks.
 // Extracted from keys.mjs for maintainability.
 
-import { appState, render, showMessage } from './state.mjs';
+import { appState, render, showMessage, confirm } from './state.mjs';
 import { loadBookmarks, removeBookmark } from './store.mjs';
 import { openUrl, copyToClipboard } from './utils.mjs';
 
@@ -52,13 +52,17 @@ export function enter() {
 
 export function deleteCurrent() {
   const bm = appState.bookmarks[appState.bookmarksCursor];
-  if (bm) {
+  if (!bm) { render(); return; }
+  // Bookmarks are persisted to disk under ~/.github-tui/. Confirm
+  // before removing so a stray `d` keystroke doesn't blow away
+  // something the user curated.
+  confirm('Delete bookmark "' + bm.full_name + '"?', () => {
     removeBookmark(bm.id || bm.full_name);
     appState.bookmarks = loadBookmarks();
     appState.bookmarksCursor = Math.min(appState.bookmarksCursor, Math.max(0, appState.bookmarks.length - 1));
     showMessage('Removed bookmark: ' + bm.full_name, 'info');
-  }
-  render();
+    render();
+  }, 'Delete bookmark');
 }
 
 export function copyUrl() {

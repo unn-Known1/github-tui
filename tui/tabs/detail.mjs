@@ -129,11 +129,17 @@ export async function addReaction(content) {
   if (!appState.token || !appState.detailData) return;
   appState.detailReactionPicker = false;
   const { detailOwner: owner, detailRepo: repo, detailNumber: number } = appState;
-  try {
-    await createReaction(appState.token, owner, repo, number, content);
-    showMessage('Reacted with ' + content, 'success');
-    await loadDetail();
-  } catch (e) { showMessage('Reaction failed: ' + e.message, 'error'); }
+  // Reactions are visible to everyone subscribed to the thread and
+  // become part of the user's public reaction history. Confirm before
+  // committing so a misclick won't post an unwanted reaction —
+  // cancelling a reaction needs its own API call.
+  confirm('React with ' + content + ' on #' + number + '?', async () => {
+    try {
+      await createReaction(appState.token, owner, repo, number, content);
+      showMessage('Reacted with ' + content, 'success');
+      await loadDetail();
+    } catch (e) { showMessage('Reaction failed: ' + e.message, 'error'); }
+  }, 'Add reaction');
 }
 
 export function submitComment(value) {
@@ -141,12 +147,17 @@ export function submitComment(value) {
   if (!body) return;
   if (!appState.token || !appState.detailData) return;
   const { detailOwner: owner, detailRepo: repo, detailNumber: number } = appState;
-  postComment(appState.token, owner, repo, number, body)
-    .then(() => {
-      showMessage('Comment posted', 'success');
-      return loadDetail();
-    })
-    .catch(e => showMessage('Comment failed: ' + e.message, 'error'));
+  // Final gate before posting. Comments are public, get a stable
+  // author/SHA, and fire a notification on the surrounding
+  // issue/PR. The user composed with care but one keystroke to confirm.
+  confirm('Post comment on #' + number + '? "' + truncate(body, 60) + '"', () => {
+    postComment(appState.token, owner, repo, number, body)
+      .then(() => {
+        showMessage('Comment posted', 'success');
+        return loadDetail();
+      })
+      .catch(e => showMessage('Comment failed: ' + e.message, 'error'));
+  }, 'Post comment');
 }
 registerInputHandler('comment', submitComment);
 

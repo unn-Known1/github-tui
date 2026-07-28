@@ -6,7 +6,7 @@
 // currently open repo (if any). Errors fall back to opening the GitHub
 // "new issue" page in the user's browser so they can finish there.
 
-import { appState, showMessage, render } from '../state.mjs';
+import { appState, showMessage, render, confirm } from '../state.mjs';
 import { startInput } from '../input.mjs';
 import { openUrl } from '../utils.mjs';
 import { createIssue } from '../github.mjs';
@@ -39,27 +39,34 @@ export async function submitBody(body) {
   const title = appState._newIssueTitle;
   appState._newIssueTitle = null;
   const [owner, repo] = appState.repoDetails.full_name.split('/');
-  try {
-    const bodyText = (body && body.trim()) || '';
-    const created = await createIssue(appState.token, owner, repo, title, bodyText);
-    if (created && created.html_url) {
-      showMessage('Created issue #' + created.number, 'success');
-      render();
-    } else {
-      // Fall back: open browser composer.
-      const fallback = 'https://github.com/' + owner + '/' + repo + '/issues/new?title=' +
-        encodeURIComponent(title);
-      await openUrl(fallback);
-      showMessage('Opened browser to finish issue creation', 'info');
-    }
-  } catch (e) {
-    showMessage('Create issue failed: ' + (e && e.message || 'unknown'), 'error');
-    // Always offer the browser fallback so the user is never stranded.
+  const bodyText = (body && body.trim()) || '';
+  // The user typed the title and body through two input modals already.
+  // One last confirm gates the actual server commit — issues are
+  // public, hard to fully retract, and fire notifications on all
+  // watchers/subscribers on the repo.
+  const displayTitle = title.length > 60 ? title.slice(0, 60) + '…' : title;
+  confirm('Create issue on ' + owner + '/' + repo + ' titled "' + displayTitle + '"?', async () => {
     try {
-      const fallback = 'https://github.com/' + owner + '/' + repo + '/issues/new?title=' +
-        encodeURIComponent(title);
-      await openUrl(fallback);
-    } catch {}
-    render();
-  }
+      const created = await createIssue(appState.token, owner, repo, title, bodyText);
+      if (created && created.html_url) {
+        showMessage('Created issue #' + created.number, 'success');
+        render();
+      } else {
+        // Fall back: open browser composer.
+        const fallback = 'https://github.com/' + owner + '/' + repo + '/issues/new?title=' +
+          encodeURIComponent(title);
+        await openUrl(fallback);
+        showMessage('Opened browser to finish issue creation', 'info');
+      }
+    } catch (e) {
+      showMessage('Create issue failed: ' + (e && e.message || 'unknown'), 'error');
+      // Always offer the browser fallback so the user is never stranded.
+      try {
+        const fallback = 'https://github.com/' + owner + '/' + repo + '/issues/new?title=' +
+          encodeURIComponent(title);
+        await openUrl(fallback);
+      } catch {}
+      render();
+    }
+  }, 'Create issue');
 }
