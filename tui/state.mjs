@@ -630,7 +630,7 @@ import { homedir } from 'os';
 import { APP_VERSION } from './config.mjs';
 
 // ── Pure semver-like comparison. Exported for tests + onboarding version gate.
-// Parses "0.6.5", "v1.0.0", "0.6.5-beta" etc. Returns -1 / 0 / 1.
+// Parses "0.6.6", "v1.0.0", "0.6.6-beta" etc. Returns -1 / 0 / 1.
 // Pre-release tags sort BEFORE the matching released version ("1.0.0-rc1" < "1.0.0").
 export function compareVersions(a, b) {
   function parse(v) {

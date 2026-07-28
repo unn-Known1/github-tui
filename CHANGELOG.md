@@ -2,6 +2,43 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.6.6] - 2026-07-28
+
+### Fixed — 16 gap audit closeout (P0 + P1)
+- **P0-1 Onboarding staleness** — `lastSeenVersion` persisted to `session.json`; gating predicate `shouldAutoLaunchWelcome` only fires on version upgrades instead of every run.
+- **P0-2 Accessibility** — new `--accessible` CLI flag renders header, footer, toasts, heatmap, rate-limit bar, skeleton, input cursor and "Less/More" legends with ASCII (`./oO# [####..]= _`) instead of Unicode blocks (`░▒▓█`). `a11yHeatChar()` / `a11ySymbol()` exported helpers.
+- **P0-3 Esc-quit trap** — Dashboard `handleBack` no longer pops the quit confirm; shows a tab-nav hint instead. Esc on Inbox falls back to Dashboard consistently.
+- **P0-4 Mouse overlay routing** — `_dispatchOverlayClick` routes palette / help / bookmarks / confirm first so dispatch doesn't double-trig when overlays are stacked. Palette click now sets cursor before execution.
+- **P0-5 Destructive file-op confirms** — `files.mjs runWithConfirm` wraps `save` / `zipball` / `clone` / `gh-clone` with the standard `y`/`n` confirm dialog.
+- **P0-6 Retry hint** — footer reserves a `[r] to retry` suffix; global `r` consumes the active retry handler via `consumeRetryHandler()`.
+- **P0-7 "Analyze" → "Explore" rename sweep** — every user-facing string in `help` / `onboarding` / `render` / 9 tab files updated. Internal IDs (`id: 'analyze'`, `analyze:` section prefix, `appState.analyzeView`) intentionally kept as routing keys.
+
+### Changed — Polish & minor bugs
+- **P1-1 Toast `[u] undo` affordance** — header toast appends the undo hint when `undoStack` is non-empty.
+- **P1-2 `getUnreadCount()`** derived helper replaces scattered inbox filters.
+- **P1-3 Loading watchdog** — `Object.defineProperty` setter shim on `appState.loading` arms the watchdog on every direct write, replacing a 160-site sweep. `checkLoadingWatchdog()` aborts in-flight `startAsync` AbortControllers after 30s and toasts a recovery hint.
+- **P1-4** EmptyState cards — used consistently across Inbox / Repos / Dashboard widgets.
+- **P1-5 POWER-USER help category** — Ctrl-P / Ctrl-S / Ctrl-K / Ctrl-Y / `/` / `gg` are now listed under their own section in `?`.
+- **P1-6 Lowercase `s` for star in files sub-pane** — guard preserves Files save shortcut.
+- **P1-7 Palette `W` hint → `palette`** — `W` no longer toggles watch; the palette hint accurately reflects the only path.
+- **P1-8 Single-source-of-truth starred** — `_toggleStarInner` no longer does inline `splice` / `unshift`; `upsertEntity()` is the only mutation point. Cache and visible list can't diverge.
+- **P1-9 Strict footer truncate** with ellipsis (`Math.max(0, W - budget)`).
+- **P1-10 ⟳ auto-refresh chip** rendered on row 2 when enabled.
+- **P1-11 Recent-repos keyboard nav** — `_recentReposCursor` with `j`/`k`/`Enter` dispatch in `keys.mjs` (Explore search view).
+- **P1-12 Wipe-token keychain** confirm in Settings.
+- **P1-13 Ctrl-S (save search) + Ctrl-K (custom-keybindings hint) wired** — palette / onboarding / help promises are no longer lies. Ctrl-S context-gated to Explore tab.
+
+### Internal
+- `SECURITY_SUB_PANES` constant hoisted from `keys.mjs` into `state.mjs`.
+- Dead `_modalBounds` / `recordModalBounds` / `readModalBounds` helpers deleted.
+- `Object.defineProperty` setter shim: arms 30s watchdog automatically — see P1-3.
+- `getStarredList()` exported helper for derivable starred views.
+
+### Tests
+- 208 / 208 passing (was 208 before; no regression).
+- New: `tests/onboarding.test.mjs` covers `shouldAutoLaunchWelcome` predicate across all version transitions.
+- `tests/state.test.mjs` expanded for `getUnreadCount`, `setLoading`, `checkLoadingWatchdog`, entity-cache round-trip, single-source-of-truth star/unstar.
+
 ## [0.6.5] - 2026-07-27
 
 ### Fixed — Warranty + UX cleanup

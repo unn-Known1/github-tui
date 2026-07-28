@@ -2,7 +2,7 @@
 
 > *The fastest way to live in GitHub without a browser tab — discovery, triage, review, and CI in one terminal.*
 
-**Current version:** v0.6.5
+**Current version:** v0.6.6
 
 ---
 
