@@ -184,7 +184,7 @@ function sparkline(data, width) {
   }).join('');
 }
 
-// P0-2 a11y: when --accessible is on, swap the sparkline unicode
+// when --accessible is on, swap the sparkline unicode
 // gradient for bracketed text so screen readers receive a linear
 // density signal instead of opaque glyphs.
 function sparkCharsAccessible(level) {
@@ -394,7 +394,7 @@ export function renderDashboard(screen, y, h) {
     return color('heatmapHigh');
   };
 
-        // P0-2 a11y: heatmap char gradients differ in --accessible mode.
+        // heatmap char gradients differ in --accessible mode.
         const heatChars = appState.accessible
           ? [' ', '.', 'o', 'O', '#']
           : [' ', '░', '▒', '▓', '█'];

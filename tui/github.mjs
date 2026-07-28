@@ -129,7 +129,7 @@ function saveLastSynced() {
 }
 
 function recordSync(path, ts) {
-  // F014 fix: allow caller to pass an explicit timestamp (used by cache-
+  // allow caller to pass an explicit timestamp (used by cache-
   // serve paths so the sync stamp reflects data age, not "now").
   lastSynced[path] = (typeof ts === 'number') ? ts : Date.now();
   _syncedDirty = true;
@@ -215,7 +215,7 @@ export function request(path, opts) {
     if (cached) {
       cached.lastAccess = Date.now();
       _cacheDirty = true;
-      recordSync(path);   // F014: keep last-synced fresh even when serving from cache
+      recordSync(path);   // keep last-synced fresh even when serving from cache
       return Promise.resolve(cached.body);
     }
     return Promise.reject(new Error('Offline — no cached data available'));
@@ -227,7 +227,7 @@ export function request(path, opts) {
     if (cached && Date.now() - cached.ts < ETAG_TTL) {
       cached.lastAccess = Date.now();
       _cacheDirty = true;
-      recordSync(path);   // F014: same as offline path — refresh sync stamp
+      recordSync(path);   // same as offline path — refresh sync stamp
       return Promise.resolve(cached.body);
     }
   }
@@ -356,7 +356,7 @@ export function request(path, opts) {
         if (cached) {
           cached.lastAccess = Date.now();
           _cacheDirty = true;
-          recordSync(path);   // F014: refresh sync stamp even on network-error recovery
+          recordSync(path);   // refresh sync stamp even on network-error recovery
           return resolve(cached.body);
         }
       }
@@ -472,8 +472,6 @@ export const getUserPullRequests = (token, page, perPage, signal) =>
 export const getCommitActivity = (token, owner, repo, signal) =>
   request('/repos/' + owner + '/' + repo + '/stats/commit_activity', { token, signal });
 
-
-
 // ─── Actions / Workflows  (CI cockpit foundation) ──────────────────
 export const getWorkflows = (token, owner, repo) =>
   request('/repos/' + owner + '/' + repo + '/actions/workflows', { token });
@@ -499,7 +497,7 @@ export const getFileCommits = (token, owner, repo, path, perPage) =>
 // Returns the *redirect URL* to the zipball without following it. Used by the
 // file-tree pane to hand the URL to a streaming download routine that writes
 // straight to disk (so we don't buffer a 200 MB zip in memory).
-//
+
 // SECURITY: We use GitHub's universal archive URL
 // (`/repos/{owner}/{repo}/archive/{ref}.zip`) which works for BOTH branches
 // AND tags — the previous codeload.github.com heuristic
@@ -702,5 +700,3 @@ export const createIssue = (token, owner, repo, title, body, labels, assignees) 
     token, method: 'POST',
     body: { title, body: body || '', labels: labels || [], assignees: assignees || [] },
   });
-
-

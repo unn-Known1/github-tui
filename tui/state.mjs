@@ -1,6 +1,6 @@
 // Single source of truth for the entire app. Every other module imports from
 // here. ESM live bindings mean mutations are visible everywhere immediately.
-//
+
 // We export a function `getRender()` (rather than importing render directly)
 // to avoid an import cycle: state → render → state.
 
@@ -18,16 +18,15 @@ export function render() {
   });
 }
 
-// ────────────────────────────────────────────────────────────────────────────
 // Async generation guard — every long-running operation grabs a generation
 // number from an EXPLICIT scope string. When a newer call for the same scope
 // begins, the previous request's AbortController (if any) is fired and the
 // caller is told via isStale() to drop the stale result.
-//
+
 // Migration: callers now pass an explicit scope. The old auto-inferred 'global'
 // scope still exists as a fallback if anyone forgets the argument, but new
 // code should never rely on it.
-// ────────────────────────────────────────────────────────────────────────────
+
 const asyncGenerations = { _global: 0 };
 const asyncControllers = {};  // { [scope]: AbortController }
 
@@ -102,14 +101,13 @@ export function isStale(handle, scope) {
 // so adding/removing a sub-pane only requires editing state.mjs.
 export const SECURITY_SUB_PANES = ['dependabot', 'secret', 'codescan', 'advisories', 'branch', 'deps'];
 
-// ────────────────────────────────────────────────────────────────────────────
 // Current tab index. 0-based. Drives the top tab strip and render dispatch.
-// ────────────────────────────────────────────────────────────────────────────
-// F001 fix: each TABS entry carries its auto-refresh function so app.mjs
+
+// each TABS entry carries its auto-refresh function so app.mjs
 // no longer magic-numbers tabs as `if (t === 0) ... else if (t === 1) ...`.
 // Adding a new tab means writing one entry here with its own refresh fn.
 // `refresh` is async — failure is logged, never thrown.
-//
+
 // LAZY dynamic imports: tab modules re-import state.mjs for appState/render,
 // so static imports here would create a circular dependency. Each refresh is
 // resolved only when invoked, after both module records have fully evaluated.
@@ -141,9 +139,8 @@ export function setTab(i) {
   render();
 }
 
-// ────────────────────────────────────────────────────────────────────────────
 // Big shared state bag. Grouped by concern in comments for navigation.
-// ────────────────────────────────────────────────────────────────────────────
+
 export const appState = {
   // ── Auth ──
   token: null,
@@ -167,7 +164,7 @@ export const appState = {
   reposShowLangFacet: false,        // toggle the language facet sidebar
   reposLangFilter: null,            // null = no language filter
 
-  // P1-8: entityCache — single source of truth for repo entities.
+  // entityCache — single source of truth for repo entities.
   // Keyed by full_name. Each value carries { repo, isStarred, isBookmarked,
   // isPinned, isOwner, starredAt }. Derived views (appState.starred,
   // appState.repos) continue to work; mutations to starred membership
@@ -398,9 +395,8 @@ export const appState = {
 
 };
 
-// ────────────────────────────────────────────────────────────────────────────
 // Toast / status bar message bus.
-// ────────────────────────────────────────────────────────────────────────────
+
 const TOAST_ICONS = {
   info:    'ⓘ',
   success: '✓',
@@ -412,7 +408,7 @@ export function showMessage(text, type = 'info', durationMs = 3000) {
   appState.message = { text, type, icon: TOAST_ICONS[type] || 'ⓘ' };
   if (appState.messageTimer) clearTimeout(appState.messageTimer);
   appState.messageTimer = setTimeout(() => {
-    // L002 fix: only null the message if it hasn't been replaced by a newer one.
+    // only null the message if it hasn't been replaced by a newer one.
     if (appState.message && appState.message.text === text) {
       appState.message = null;
       appState.messageTimer = null;
@@ -428,9 +424,8 @@ export function clearMessage() {
   render();
 }
 
-// ────────────────────────────────────────────────────────────────────────────
 // Confirmation dialog for destructive actions.
-// ────────────────────────────────────────────────────────────────────────────
+
 // ── Retry handler API (P0-6). Set by error-recovery.mjs after a failed
 // async op. `consumeRetryHandler()` is called by `keys.mjs` on `r` (before
 // falling through to the per-tab refresh / Actions rerun). The footer reads
@@ -464,7 +459,7 @@ export function consumeRetryHandler() {
   return fn;
 }
 
-// P1-8: insert/update an entity in the entityCache. Side-effect: keeps
+// insert/update an entity in the entityCache. Side-effect: keeps
 // derived starred list membership in sync so viewers see the change
 // without waiting for a server round-trip.
 export function upsertEntity(repo, opts = {}) {
@@ -493,7 +488,7 @@ export function upsertEntity(repo, opts = {}) {
   }
 }
 
-// P1-8: derived starred list — returns entities flagged isStarred, sorted
+// derived starred list — returns entities flagged isStarred, sorted
 // by starredAt desc. Falls back to appState.starred when cache is empty.
 export function getStarredList() {
   const cache = appState.entityCache;
@@ -506,7 +501,7 @@ export function getStarredList() {
   return Array.isArray(appState.starred) ? appState.starred.slice() : [];
 }
 
-// P1-2: derived unread count. Pure helper — bind to render() once per state
+// derived unread count. Pure helper — bind to render() once per state
 // mutation so callers don't need to recompute on every render call.
 export function getUnreadCount() {
   const list = appState.notifications;
@@ -516,7 +511,7 @@ export function getUnreadCount() {
   return n;
 }
 
-// P1-3: watchdog timestamp — tracked via an Object.defineProperty setter
+// watchdog timestamp — tracked via an Object.defineProperty setter
 // on appState.loading so EVERY direct write (160+ sites) arms the
 // watchdog for free, no manual sweep needed. checkLoadingWatchdog() is
 // called from the render prologue and force-clears + surfaces a toast
@@ -566,7 +561,7 @@ Object.defineProperty(appState, 'loading', {
 });
 
 export function confirm(message, action, title = 'Confirm') {
-  // F008 fix: instead of silently dropping, surface a warning so the user
+  // instead of silently dropping, surface a warning so the user
   // understands why their clicked action didn't fire.
   if (appState.confirmAction) {
     showMessage('A confirmation is already pending — press y or n', 'warning');
@@ -585,9 +580,8 @@ export function dismissConfirm() {
   render();
 }
 
-// ────────────────────────────────────────────────────────────────────────────
 // Recently viewed repos — used for breadcrumbs and quick re-open.
-// ────────────────────────────────────────────────────────────────────────────
+
 export function pushRecentRepo(repo) {
   if (!repo || !repo.full_name) return;
   // Move-to-front, dedupe, cap.
@@ -598,10 +592,9 @@ export function pushRecentRepo(repo) {
   scheduleSessionSave();
 }
 
-// ────────────────────────────────────────────────────────────────────────────
 // Collapsible sections — toggle, collapse all, expand all.
 // Key: z (toggle), Z (collapse all), X (expand all).
-// ────────────────────────────────────────────────────────────────────────────
+
 export function isCollapsed(section) {
   return appState.collapsed[section] === true;
 }
@@ -660,7 +653,7 @@ export function compareVersions(a, b) {
   return 0;
 }
 
-// L001/L005: shutdown-callback registry. app.mjs attaches a callback to
+// shutdown-callback registry. app.mjs attaches a callback to
 // clear the pending toast timer; modules can register their own cleanup steps.
 // Idempotent registration (same fn twice is deduped).
 const _shutdownCallbacks = [];
@@ -717,7 +710,7 @@ export function saveSession() {
       // Persist filter text too (Fix #9): without this the user comes back
       // and silently sees filtered results with no visual chip indicator.
       inboxTextFilter: appState.inboxTextFilter,
-      // P0-1: persist `lastSeenVersion` so the "what's new" overlay can be
+      // persist `lastSeenVersion` so the "what's new" overlay can be
       // auto-launched on upgrades (not just on first install). Falls back
       // to APP_VERSION when not set — this means an existing user whose
       // session.json predates the field will see "what's new" exactly once

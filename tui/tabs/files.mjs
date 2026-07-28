@@ -1,6 +1,6 @@
 // File explorer — file tree + viewer + save/clone/zipball.
 // New in W1. Rendered as a sub-pane of Explore details when detailsPane === 'files'.
-//
+
 // State (lives on appState):
 //   filesPath     : current dir path inside the repo (empty = root)
 //   filesRef      : current branch / ref (default = repo.default_branch)
@@ -30,7 +30,7 @@ import { join, resolve } from 'path';
 const MAX_VIEW_BYTES = 1_000_000;
 const MAX_BULK_FILES = 500;
 
-// P0-5: wrap a destructive I/O op behind state.confirm() so pressing `Z`,
+// wrap a destructive I/O op behind state.confirm() so pressing `Z`,
 // `G`, `C`, or `S` in the files pane never dumps a zipball / clones over
 // an existing directory / walks a 500-file folder without an explicit
 // yes. Re-entry is naturally rejected by confirm() ("a confirmation is
@@ -105,7 +105,7 @@ export async function loadTree() {
     if (!isStale(gen)) showMessage('Failed to load: ' + e.message, 'error');
     appState.filesEntries = [];
   } finally {
-    // F005 fix: always clear loading flag regardless of how we exit the try.
+    // always clear loading flag regardless of how we exit the try.
     appState.loading = false;
   }
   if (!isStale(gen)) render();
@@ -150,7 +150,7 @@ export async function viewFile(ent) {
       '). Use [s] to save instead.', 'warning');
     return;
   }
-  // F007 fix: capture path/size BEFORE await so a stale-result return can't
+  // capture path/size BEFORE await so a stale-result return can't
   // overwrite fileViewing with the wrong path if the user navigated and the
   // selection refilled with a different entry.
   const targetPath = ent.path;
@@ -187,7 +187,7 @@ export async function openBranchPicker() {
       if (!isStale(gen)) showMessage('Branches: ' + e.message, 'error');
       appState.filesBranches = [];
     } finally {
-      appState.loading = false;  // F005: always clear
+      appState.loading = false;  // always clear
     }
   }
   appState.filesBranchPicker = true;
@@ -263,7 +263,7 @@ async function _saveCurrentFolderImpl() {
   const stack = [root];
   const gen = startAsync('files-bulk');
   const seenFiles = [];
-  appState.loading = true;   // F005: set up-front so finally can clear it
+  appState.loading = true;   // set up-front so finally can clear it
   try {
     // BFS to enumerate files.
     while (stack.length) {
@@ -334,7 +334,7 @@ async function _saveCurrentFolderImpl() {
   } catch (e) {
     if (!isStale(gen)) showMessage('Folder save failed: ' + e.message, 'error');
   } finally {
-    appState.loading = false;   // F005: always clear
+    appState.loading = false;   // always clear
     if (!isStale(gen)) render();
   }
 }

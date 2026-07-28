@@ -10,10 +10,8 @@ let _bookmarks = null;
 let _savedSearches = null;
 let _pins = null;
 
-// ────────────────────────────────────────────────────────────────────────────
 // Bookmarks — "read later" / private starring distinct from GitHub stars.
 // Shape: [{ id, full_name, url, description, language, stars, tags:[], addedAt }]
-// ────────────────────────────────────────────────────────────────────────────
 
 export function loadBookmarks() {
   if (_bookmarks === null) _bookmarks = readJson(BOOKMARKS_FILE, []);
@@ -55,10 +53,8 @@ export function isBookmarked(fullName) {
   return loadBookmarks().some(b => b.full_name === fullName);
 }
 
-// ────────────────────────────────────────────────────────────────────────────
 // Saved searches — named query templates.
 // Shape: [{ id, label, query, createdAt }]
-// ────────────────────────────────────────────────────────────────────────────
 
 export function loadSavedSearches() {
   if (_savedSearches === null) _savedSearches = readJson(SAVED_SEARCHES_FILE, []);
@@ -88,10 +84,9 @@ export function removeSavedSearch(id) {
   return list;
 }
 
-// ────────────────────────────────────────────────────────────────────────────
 // Repo preferences — sort, filter, density settings that survive restarts.
 // Shape: { repoSort, repoTypeFilter, reposLangFilter, repoStaleOnly, repoDensity }
-// ────────────────────────────────────────────────────────────────────────────
+
 const REPO_PREFS_FILE = join(CONFIG_DIR, 'repo-prefs.json');
 
 export function loadRepoPrefs() {
@@ -102,10 +97,8 @@ export function saveRepoPrefs(prefs) {
   writeJson(REPO_PREFS_FILE, prefs);
 }
 
-// ────────────────────────────────────────────────────────────────────────────
 // Pins — sticky favorites that float to the top of the Repos list.
 // Shape: array of full_name strings.
-// ────────────────────────────────────────────────────────────────────────────
 
 export function loadPins() {
   if (_pins === null) _pins = readJson(PINS_FILE, []);

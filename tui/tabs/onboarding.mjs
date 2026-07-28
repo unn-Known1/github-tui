@@ -1,5 +1,5 @@
 // Onboarding / "What's new" overlay — first-time welcome + version tour.
-// P0-1 fix: the STEPS array is now dynamic. Step 1 offers GitHub CLI login
+// the STEPS array is now dynamic. Step 1 offers GitHub CLI login
 // first when `gh` is detected and falls back to PAT paste otherwise. Step 4
 // pulls bullets from CHANGELOG.md so the "what's new" message stops going
 // stale on every release.

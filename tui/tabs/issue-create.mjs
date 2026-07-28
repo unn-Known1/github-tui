@@ -1,5 +1,5 @@
 // F009 stub: Create new issue from TUI via the command palette.
-//
+
 // The palette action `dashboard.new-issue` references this module. Until a
 // full implementation lands, this stub launches a labeled input flow that
 // asks the user for title + body, then creates an issue against the

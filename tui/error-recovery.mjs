@@ -70,7 +70,7 @@ export function showError(message, context, options = {}) {
   // Show with retry hint if available
   const displayDuration = duration || (retry ? 8000 : 3000);
   showMessage(fullMessage, 'error', displayDuration);
-  // P0-6: surface the retry handler so the footer can render "[r] to retry"
+  // surface the retry handler so the footer can render "[r] to retry"
   // and `keys.mjs` can invoke it on the user's next `r` keystroke.
   // Calls without retry clear any stale handler so an old op can't be
   // re-triggered after a fresh, unrecoverable error.

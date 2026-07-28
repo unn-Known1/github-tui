@@ -1,12 +1,12 @@
 // Custom user keybindings — loaded from ~/.github-tui/keybindings.json.
 // Each binding maps a key to a shell command with placeholder substitution.
-//
+
 // Expected format:
 // [
 //   { "key": "E", "command": "code .", "label": "Open in VS Code", "context": "repo" },
 //   { "key": "T", "command": "gh pr view {number} --web", "label": "View PR in browser", "context": "detail" }
 // ]
-//
+
 // Supported placeholders: {owner}, {repo}, {number}, {branch}
 
 import { KEYBINDINGS_FILE, readJson } from './config.mjs';

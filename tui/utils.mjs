@@ -26,7 +26,7 @@ export function truncate(s, n) {
 }
 
 // Word-wrap `text` so each visual line fits within `width` display cells.
-//
+
 // Behavior:
 //   - Splits on `\r?\n` first so source-line semantics are preserved
 //     (each `\n` produces a logical-line boundary).
@@ -41,7 +41,7 @@ export function truncate(s, n) {
 //     rows in READMEs / blank-line spacing in code files).
 //   - `width <= 0` returns the source lines unchanged (graceful
 //     degradation when the caller has no usable width).
-//
+
 // Used by the README pane and the file viewer so long horizontal lines
 // reflow instead of being hidden past the right edge.
 export function wrapTextWithMap(text, width) {
@@ -201,7 +201,7 @@ export function notificationToHtmlUrl(apiUrl) {
   let url = apiUrl.replace('api.github.com/repos', 'github.com');
   // Only convert /pulls/ to /pull/ for actual PR URLs.
   if (url.includes('/pulls/')) {
-    // F021 fix: only rewrite /pulls/<digits> → /pull/<digits>; never
+    // only rewrite /pulls/<digits> → /pull/<digits>; never
     // touch URLs that merely contain the substring `/pulls/` mid-path.
     url = url.replace(/\/pulls\/(\d+)(?=#|\?|$)/, '/pull/$1');
   }
@@ -215,10 +215,10 @@ import { mkdirSync, existsSync, writeFileSync, statSync } from 'fs';
 
 // Refuse paths that escape CWD via .. — used before writing any user-named
 // file to disk so a malicious repo can't overwrite ~/.ssh/authorized_keys etc.
-//
+
 // SECURITY: the prefix check MUST use a path-separator on CWD so a
 // same-prefix sibling directory (CWD=/a/b, target=/a/b-other) is rejected.
-// F022 regression — added regression test in tests/safe-cwd.test.mjs.
+// added regression test in tests/safe-cwd.test.mjs.
 export function safeCwdJoin(relPath) {
   if (relPath == null) throw new Error('safeCwdJoin: relPath is required');
   const cwd = process.cwd();

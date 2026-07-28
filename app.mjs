@@ -55,7 +55,7 @@ const TERM_ENV = process.env.TERM || '';
 const TERM_IS_TMUX = !!process.env.TMUX;
 const TERM_IS_SSH = !!(process.env.SSH_CLIENT || process.env.SSH_TTY);
 const TERM_IS_SCREEN = !!process.env.STY;
-// F011 fix: WSL detection previously used WSLENV, which git-bash on native
+// WSL detection previously used WSLENV, which git-bash on native
 // Windows can also set. Use WSL_DISTRO_NAME (only set inside actual WSL).
 const TERM_IS_WSL = !!process.env.WSL_DISTRO_NAME || /microsoft/i.test(process.env.WSL_INTEROP || '');
 
@@ -68,7 +68,7 @@ function startAutoRefresh() {
   autoRefreshInterval = setInterval(async () => {
     if (!appState.token || appState.loading) return;
     const t = tabState.current;
-    // F001 fix: dispatch via TABS[t].refresh instead of `if (t === N) …`.
+    // dispatch via TABS[t].refresh instead of `if (t === N) …`.
     // Adding a new tab in state.mjs with `refresh:` is automatically picked up.
     const fn = TABS[t] && TABS[t].refresh;
     if (!fn) return;
@@ -81,7 +81,7 @@ function startAutoRefresh() {
 // Export for settings to restart after interval change.
 globalThis._startAutoRefresh = startAutoRefresh;
 
-// F012 fix: import lastRateLimit once at module load instead of doing a
+// import lastRateLimit once at module load instead of doing a
 // dynamic import on every 60s poll.
 async function refreshRateLimit() {
   if (!appState.token) return;
@@ -103,7 +103,7 @@ async function main() {
     console.log('github-tui ' + pkg.version);
     process.exit(0);
   }
-  // P0-2: --accessible flag — turn on a11y mode for screen readers / high-
+  // --accessible flag — turn on a11y mode for screen readers / high-
   // contrast safe rendering. Color is disabled, unicode glyphs replaced
   // with bracketed ASCII labels.
   if (process.argv.includes('--accessible') || process.argv.includes('--a11y')) {
@@ -128,7 +128,7 @@ async function main() {
     process.exit(1);
   }
 
-  // L001/L005: register shutdown-side message-timer cleanup so shutdown()
+  // register shutdown-side message-timer cleanup so shutdown()
   // doesn't call an undefined global. Also register uncaughtException path.
   registerShutdownCallback(() => {
     if (typeof appState.messageTimer === 'number') {
@@ -142,7 +142,7 @@ async function main() {
   enableMouse();
   enableBracketedPaste();
 
-  // F009: wire the issue-create input modal contexts. Without this, pressing
+  // wire the issue-create input modal contexts. Without this, pressing
   // Enter on the title/body modal does nothing.
   const issueCreate = await import('./tui/tabs/issue-create.mjs');
   registerInputHandler('create-issue-title', (s) => issueCreate.submitTitle(s));
@@ -178,7 +178,7 @@ async function main() {
 process.stdin.on('error', (err) => {
   debug('stdin error:', err.message);
   shutdown();
-  // F-LIFECYCLE: also exit so process doesn't linger after stdin closes
+  // also exit so process doesn't linger after stdin closes
   // (SIGINT/SIGTERM handlers are not invoked on stdin close).
   setImmediate(() => process.exit(0));
 });
@@ -189,7 +189,7 @@ process.stdin.on('end', () => {
 });
 
   // Resize listener — debounced to avoid render thrashing.
-// L003 fix: wrap the callback in try/catch + always null the timer ref so a
+// wrap the callback in try/catch + always null the timer ref so a
 // throw inside updateSize() doesn't leave a stale timer reference that
 // blocks future resizes.
   let resizeTimer = null;
@@ -225,12 +225,12 @@ const _shutdownCallbacks = [];
 function shutdown() {
   if (_shuttingDown) return;
   _shuttingDown = true;
-  // L001: each cleanup step wrapped in try/catch so one failure doesn't
+  // each cleanup step wrapped in try/catch so one failure doesn't
   // strand other cleanup (multiple modules register their own exit hooks).
   try { if (rateLimitInterval) clearInterval(rateLimitInterval); } catch (e) { debug('shutdown rate-limit interval clear failed:', e.message); }
   try { if (autoRefreshInterval) clearInterval(autoRefreshInterval); } catch (e) { debug('shutdown auto-refresh interval clear failed:', e.message); }
   try { saveCurrentRepoPrefs(); } catch (e) { debug('shutdown saveRepoPrefs failed:', e.message); }
-  // L001/L002: run registered shutdown callbacks (clears pending toast timer,
+  // run registered shutdown callbacks (clears pending toast timer,
   // any other cleanup registered later). No reliance on an undefined global.
   for (const cb of _shutdownCallbacks) {
     try { cb(); } catch (e) { debug('shutdown callback failed:', e.message); }
@@ -244,7 +244,7 @@ process.on('exit', shutdown);
 process.on('SIGINT',  () => { shutdown(); process.exit(0); });
 process.on('SIGTERM', () => { shutdown(); process.exit(0); });
 process.on('SIGHUP',  () => { shutdown(); process.exit(0); });
-// L004 fix: handle Windows Ctrl+Break (SIGBREAK) the same way as SIGINT.
+// handle Windows Ctrl+Break (SIGBREAK) the same way as SIGINT.
 if (process.platform === 'win32') {
   process.on('SIGBREAK', () => { shutdown(); process.exit(0); });
 }
@@ -275,7 +275,7 @@ if (process.platform === 'win32') {
     if (onboarding.isFirstRun()) {
       onboarding.startOnboarding();
     }
-    // P0-1: auto-launch "what's new" overlay on version upgrade. Reuses the
+    // auto-launch "what's new" overlay on version upgrade. Reuses the
     // dynamic-imported `onboarding` handle above (the second `import` would
     // be wasted work). Only runs if there's a token AND we've previously
     // completed first-run onboarding (`lastSeenVersion` is set).
@@ -287,7 +287,7 @@ if (process.platform === 'win32') {
   render();
 }
 
-// L005 fix: on startup crash, also disable mouse + paste mode and clear
+// on startup crash, also disable mouse + paste mode and clear
 // pending toast timer so the terminal isn't left in a weird state.
 main().catch(err => {
   debug('Fatal:', err.message, err.stack);

@@ -3,7 +3,7 @@
 //   macOS  : Keychain Services via `security` CLI (built-in)
 //   Linux  : libsecret via `secret-tool` (GNOME) or plaintext fallback
 //   Windows: Credential Manager via `cmdkey` + PowerShell (built-in)
-//
+
 // The module never throws — every public function returns a value or null/false
 // so callers can always fall back to plaintext gracefully.
 
@@ -49,7 +49,7 @@ function _backend() {
   return _cachedBackend;
 }
 
-// F015 fix: when saving, allow one re-detection in case the user installed
+// when saving, allow one re-detection in case the user installed
 // `secret-tool` (Linux) or signed into macOS Keychain AFTER the first read.
 // Read paths stick to the cached value (avoids per-call shell-outs).
 let _saveRetriedOnce = false;
@@ -69,7 +69,7 @@ function _backendForSave() {
  */
 export function saveTokenSecure(token) {
   if (!token) return false;
-  // F015: re-detect once on save in case a backend appeared after first read.
+  // re-detect once on save in case a backend appeared after first read.
   const backend = _backendForSave();
   try {
     if (backend === 'macos-keychain')     return _saveMacos(token);

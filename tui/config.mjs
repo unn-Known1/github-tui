@@ -1,10 +1,10 @@
 // Configuration constants and PAT token persistence.
 // Kept dependency-free so it can be imported by any module without cycles.
-//
+
 // Token storage priority (v0.6.1+):
 //   1. OS keychain  — macOS Keychain, Linux libsecret, Windows Credential Manager
 //   2. Plaintext    — ~/.github-tui/token (chmod 600) — fallback when no keychain available
-//
+
 // Existing plaintext tokens are silently migrated to the keychain on first save.
 
 import { homedir } from 'os';

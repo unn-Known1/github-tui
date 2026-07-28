@@ -39,9 +39,8 @@ const getStarredList = _getStarredList;
 
 const tabModules = [dashboard, repos, analyze, actions, inbox, settings];
 
-// ──────────────────────────────────────────────────────────────────
 // Context helpers — figure out what the user is pointing at.
-// ──────────────────────────────────────────────────────────────────
+
 function currentRepoForAction() {
   if (tabState.current === 2) {
     const v = appState.analyzeView;
@@ -72,7 +71,7 @@ function currentUrl() {
 async function openCurrent() {
   const url = currentUrl();
   if (!url) { showMessage('Nothing to open', 'warning'); return; }
-  // U003 fix: when opening from Inbox, distinguish check-suite notifications
+  // when opening from Inbox, distinguish check-suite notifications
   // (whose URL redirects to the Actions tab) and friendly-message the user
   // instead of dumping a confusing /check-suites/N URL.
   let toastLabel = 'Opened ' + url;
@@ -105,7 +104,7 @@ async function _toggleStarInner() {
   if (!r || !appState.token) { showMessage('Login + select a repo first', 'warning'); return; }
   const fullName = r.full_name;
   const [owner, name] = fullName.split('/');
-  // F025 fix: capture the pre-mutation stargazers_count so we can roll back
+  // capture the pre-mutation stargazers_count so we can roll back
   // if any post-API work (buildStarHistory, dataset propagation) throws.
   const preCount = r.stargazers_count || 0;
   try {
@@ -119,7 +118,7 @@ async function _toggleStarInner() {
       r.stargazers_count = (r.stargazers_count || 0) + 1;
       showMessage('Starred ' + fullName, 'success');
     }
-    // F025 fix: snapshot pre-mutation state so a post-API throw can roll
+    // snapshot pre-mutation state so a post-API throw can roll
     // back BOTH the count AND the starred-list membership.
     const preStargazers = r.stargazers_count || 0;
     const preStarredList = Array.isArray(appState.starred) ? [...appState.starred] : [];
@@ -137,7 +136,7 @@ async function _toggleStarInner() {
       if (appState.repoDetails && appState.repoDetails.full_name === fullName) {
         appState.repoDetails.stargazers_count = r.stargazers_count;
       }
-      // P1-8: single source of truth. upsertEntity() keeps
+      // single source of truth. upsertEntity() keeps
       // appState.starred membership in sync internally via unshift/splice
       // so no inline splice/unshift is needed here. Single source of
       // truth avoids the previous double-bookkeeping divergence between
@@ -147,9 +146,9 @@ async function _toggleStarInner() {
       appState.dashboardStarHistory = dashboard.buildStarHistory(getStarredList());
       render();
   } catch (e) {
-    // F025 rollback: post-API step failed — undo BOTH the count AND the
+    // post-API step failed — undo BOTH the count AND the
     // starred-list mutation so the UI doesn't lie about GitHub state. Note
-    // P1-8: rollback restores BOTH the count and the cache entry. The
+    // rollback restores BOTH the count and the cache entry. The
     // upsertEntity call below re-mirrors the original `isStarred: already`
     // state so cache and starred list agree.
     r.stargazers_count = preStargazers;
@@ -217,10 +216,9 @@ function quit() {
   process.exit(0);
 }
 
-// ──────────────────────────────────────────────────────────────────
 // Main entry — process.stdin pipes every keystroke through here.
 // ──────────────────────────────────────────────────────────────────// Key repeat debouncing — limit renders to ~60fps for held keys.
-// F017 fix: bypass the debouncer for multi-byte / sequence keys (paste,
+// bypass the debouncer for multi-byte / sequence keys (paste,
 // mouse events, escape sequences) so paste isn't silently dropped.
 let _lastKeyTime = 0;
 let _lastKeyStr = '';
@@ -272,7 +270,7 @@ export function handleKey(key) {
   if (bookmarks.handleKey(key)) return;
 
   // 1b. Help overlay: handle special keys, any other key closes.
-  // F002 fix: the printable-char branch must come FIRST so typing letters
+  // the printable-char branch must come FIRST so typing letters
   // like k/j/g/n/p lets the user search. Previously those letters short-
   // circuited the scroll handlers above, making help search unusable.
   if (appState.showHelp) {
@@ -289,7 +287,7 @@ export function handleKey(key) {
     if (key === '\x1b[A' || key === 'k') { help.scrollHelp(-3); render(); return; }
     if (key === '\x1b[B' || key === 'j' || key === '\r' || key === '\n') { help.scrollHelp(3); render(); return; }
     if (key === 'g' || key === '\x1b[H' || key === '\x1bOH') {
-      // F002 fix: g scrolls-to-top WITHOUT clearing the user's search query.
+      // g scrolls-to-top WITHOUT clearing the user's search query.
       // Previously this inadvertently wiped any filter the user had typed.
       // Use 'gg' (type g twice) to also clear, or 'Esc' to dismiss the overlay.
       appState.helpCursor = 0;
@@ -353,7 +351,7 @@ export function handleKey(key) {
   const isSecurityPane = tabState.current === 2 && appState.analyzeView === 'details' && appState.detailsPane === 'security';
   switch (key) {
     case '1': case '2': case '3': case '4': case '5': case '6': {
-      // U006 fix: when in the Analyze security sub-pane, 1-6 switch between
+      // when in the Analyze security sub-pane, 1-6 switch between
       // sub-panes (dependabot / secret / codescan / advisories / branch / deps)
       // instead of changing tabs. The previous `break` fall-through silently
       // relied on the per-tab key map running AFTER the switch — fragile if
@@ -382,14 +380,14 @@ export function handleKey(key) {
       return;
     }
     case '\x13': {
-      // P1-13: Ctrl-S — save the current Explore search query (palette
+      // Ctrl-S — save the current Explore search query (palette
       // already advertises this; pressing the actual key does it now).
       if (!appState.searchQuery) { showMessage('No search query to save', 'warning'); return; }
       startInput('Label for this search: ', 'save-search');
       return;
     }
     case '\x0b': {
-      // P1-13: Ctrl-K — hint about custom keybindings (we don't auto-open
+      // Ctrl-K — hint about custom keybindings (we don't auto-open
       // an editor to avoid spawning child processes; users can configure
       // $EDITOR in their own time). Toast for 6s is enough discoverability.
       showMessage('Edit ~/.github-tui/keybindings.json for custom key bindings — format: [{key, command, label, context}]', 'info', 6000);
@@ -422,7 +420,7 @@ export function handleKey(key) {
     case '\x10':
     case ':': palette.open(); return;
     case 'r': {
-      // P0-6: a retry handler attached by error-recovery.mjs takes priority
+      // a retry handler attached by error-recovery.mjs takes priority
       // over the per-tab refresh / Actions workflow rerun. Users in an error
       // state expect `r` to fix the failure, not re-fire a workflow.
       const retryFn = consumeRetryHandler();
@@ -439,7 +437,7 @@ export function handleKey(key) {
       // Actions runs view: 'r' re-runs selected workflow, not a generic refresh.
       if (tabState.current === 3 && appState.actionsView === 'runs') { actions.rerunSelected(); return; }
       refreshCurrent();
-      // P1-1: surface undo affordance in toast when an undo stack exists.
+      // surface undo affordance in toast when an undo stack exists.
       // Append only once to avoid noisy double-suffix in chained messages.
       const undoInfo = getUndoInfo ? getUndoInfo() : null;
       if (undoInfo && undoInfo.canUndo) {
@@ -451,7 +449,7 @@ export function handleKey(key) {
     case 'y': copyCurrentUrl(); return;
     case 'b': toggleBookmark(); return;
     case 'B': {
-      // U001 fix: in the files pane, B opens the branch picker; everywhere
+      // in the files pane, B opens the branch picker; everywhere
       // else it opens the bookmarks browser. Explicit dispatch.
       if (tabState.current === 2 && appState.analyzeView === 'details' && appState.detailsPane === 'files') {
         import('./tabs/files.mjs').then(m => m.openBranchPicker()).catch(e =>
@@ -471,7 +469,7 @@ export function handleKey(key) {
     case '\x1b[6~': handlePageDown(); return;  // PageDown
     case 'g': handleTop(); return;
     case 'G': {
-      // U001 fix: in the files pane (Analyze details + files sub-pane),
+      // in the files pane (Analyze details + files sub-pane),
       // capital G triggers `gh repo clone` rather than jump-to-bottom.
       // Previously this was a `break;` fall-through that silently relied on
       // the per-tab key map running AFTER the switch — fragile if anyone
@@ -486,7 +484,7 @@ export function handleKey(key) {
     }
     case 'z': handleCollapseToggle(); return;
     case 'Z': {
-      // U001 fix: in the files pane, Z triggers a zipball download; everywhere
+      // in the files pane, Z triggers a zipball download; everywhere
       // else it collapses all collapsible sections. Explicit dispatch.
       if (tabState.current === 2 && appState.analyzeView === 'details' && appState.detailsPane === 'files') {
         import('./tabs/files.mjs').then(m => m.downloadZipball()).catch(e =>
@@ -509,7 +507,7 @@ export function handleKey(key) {
   // 5. Global star toggle.
   if (key === '*' && currentRepoForAction()) { toggleStar(); return; }
 
-  // P1-6: lowercase 's' on repo-bearing tabs (1=Repos / 3=Explore details,
+  // lowercase 's' on repo-bearing tabs (1=Repos / 3=Explore details,
   // NOT inside Files sub-pane where 's' means saveCurrentFile) toggles star
   // for the current repo. 'S' on Settings still stars the github-tui repo.
   // Critical: Files sub-pane (analyzeView === 'details' && detailsPane === 'files')
@@ -528,7 +526,7 @@ export function handleKey(key) {
     }
     if (currentRepoForAction()) { toggleStar(); return; }
   }
-  // P0-7 fallback: 'S' in file-pane contexts (Files sub-view of Explore)
+  // 'S' in file-pane contexts (Files sub-view of Explore)
   // still acts on the file (save), not the globally-bound star.
   if (key === 'S' && tabState.current === 5 && !appState.showDetail) {
     if (!appState.token) { showMessage('Login first (Settings → Login)', 'warning'); return; }
@@ -538,7 +536,7 @@ export function handleKey(key) {
     return;
   }
 
-  // P1-7: keep `w` as the canonical "what's new" toggle (canonical doc key);
+  // keep `w` as the canonical "what's new" toggle (canonical doc key);
   // the global capital `W` watch toggle is now palette-only (Ctrl-P → "Watch
   // current repo"). This avoids the long-standing `W` vs `w` key collision
   // that new users reported when both "Watch toggle" and "What's new"
@@ -571,7 +569,7 @@ export function handleKey(key) {
   }
 
   // 7. Per-tab key map.
-  // F003 fix: many tab keys[key] entries return Promises (saveCurrentFile,
+  // many tab keys[key] entries return Promises (saveCurrentFile,
   // downloadZipball, toggleStar, etc.). Previously the Promise was dropped,
   // creating silent unhandled rejections. Now we await through a Promise.resolve
   // and route errors to showMessage so users see a toast.
@@ -760,7 +758,7 @@ function handleUp() {
   if (t === 0) { dashboard.dashboardUp(); return; }
   if (t === 1) repos.up(screen);
   else if (t === 2) {
-    // P1-11: keyboard nav for recent repos when Explore is in search mode.
+    // keyboard nav for recent repos when Explore is in search mode.
     // The list is visible only when appState.recentRepos.length > 0;
     // j/k/Enter mirror the mouse _recentReposBounds dispatch.
     if (appState.analyzeView === 'search' && appState.recentRepos.length > 0) {
@@ -782,7 +780,7 @@ function handleDown() {
   if (t === 0) { dashboard.dashboardDown(); return; }
   if (t === 1) repos.down(screen);
   else if (t === 2) {
-    // P1-11: keyboard nav for recent repos when Explore is in search mode.
+    // keyboard nav for recent repos when Explore is in search mode.
     if (appState.analyzeView === 'search' && appState.recentRepos.length > 0) {
       const max = Math.max(0, appState.recentRepos.length - 1);
       const cur = appState._recentReposCursor || 0;
@@ -800,7 +798,7 @@ function handleDown() {
 function handleBack() {
   const t = tabState.current;
   if (t === 0) {
-    // P0-3 fix: `Esc` / `h` / `Backspace` on Dashboard MUST NOT trigger a
+    // `Esc` / `h` / `Backspace` on Dashboard MUST NOT trigger a
     // quit confirmation — one stray `Enter` would silently exit the app.
     // It's a muscle-memory trap. Quit is bound to `q` and `Ctrl-C` directly.
     // On Dashboard these keys instead (a) unfocus the stat cards if they're
@@ -824,16 +822,15 @@ function handleBack() {
       import('./tabs/detail.mjs').then(m => m.closeDetail()).catch(() => {});
       return;
     }
-    // U004 fix: Inbox Esc with no open detail popup now falls back to
+    // Inbox Esc with no open detail popup now falls back to
     // tab 0 (Dashboard) like every other tab. Previously it was a silent
     // no-op, breaking the expected "Esc = back" mental model.
   }
   setTab(0);
 }
 
-// ──────────────────────────────────────────────────────────────────
 // Palette action registry.
-// ──────────────────────────────────────────────────────────────────
+
 export function registerCoreActions() {
   const reg = palette.register;
 

@@ -156,7 +156,7 @@ export function handleMouseEvent(event) {
   }
 }
 
-// P0-4: route clicks to the active overlay before they fall through to
+// route clicks to the active overlay before they fall through to
 // the underlying tab handler. Clicks outside any open overlay → handleClick's
 // normal dispatch. Clicks inside an overlay → consumed (or worse, leak
 // through to the tab rendering underneath — a real bug pre-fix).
@@ -241,7 +241,7 @@ function handleClick(col, row) {
   const sx = col - 1;
   const sy = row - 1;
 
-  // P0-4: route clicks to active overlays FIRST so they don't leak through
+  // route clicks to active overlays FIRST so they don't leak through
   // to the underlying tab handler.
   if (_dispatchOverlayClick(sx, sy)) return;
 
@@ -610,7 +610,7 @@ function dispatchDashboardClick(sx, sy) {
 
   render();
 }  // ── Repos tab ─────────────────────────────────────────────────
-  // P1-8: also seed the entityCache when loadStarred assigns to
+  // also seed the entityCache when loadStarred assigns to
   // appState.starred so cross-tab viewers see updates.
   if (typeof upsertEntity === 'function') {
     for (const r of list) {

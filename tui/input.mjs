@@ -61,7 +61,7 @@ export function handleInputKey(key) {
   if (appState.inputMode !== 'input') return false;
 
   // Handle bracketed paste mode.
-  //
+
   // The start/end sequences can arrive ANYWHERE in a `data` chunk — modern
   // terminals (xterm ≥370, iTerm2, kitty, wezterm, modern GNOME Terminal)
   // deliver a paste as ONE big chunk \x1b[200~<content>\x1b[201~. Older
@@ -74,7 +74,7 @@ export function handleInputKey(key) {
   const PASTE_END   = '\x1b[201~';
 
   // ── Shared helpers for the paste paths ──
-  //
+
   // Strip control bytes (<32) and DEL (127) from a string and return the
   // remaining codepoints as an array (codepoint-array form keeps the
   // splice call correct for surrogate pairs and combining marks).

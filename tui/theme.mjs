@@ -1,12 +1,12 @@
 // Theme system — fully distinct palettes for every theme.
 // Each theme maps semantic role names to style objects understood by screen.mjs.
-//
+
 // Color values accepted by screen.mjs:
 //   'cyan'        → named ANSI-8 color (always works)
 //   '#rrggbb'     → true-color hex  (falls back to 256-color on non-truecolor terminals)
 //   [r, g, b]     → true-color tuple
 //   '256:n'       → explicit xterm-256 index
-//
+
 // Themes are designed so they look distinctly different from each other:
 //   default      — professional dark teal/cyan on near-black
 //   highContrast — maximum legibility, bold everything, bright whites

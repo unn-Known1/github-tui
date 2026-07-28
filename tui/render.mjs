@@ -148,7 +148,7 @@ export function loadingIndicator(screen, x, y, label = 'loading', style) {
 const MIN_W = 60;
 const MIN_H = 20;
 
-// P0-2: --accessible mode flag. When set, color() returns null and any
+// --accessible mode flag. When set, color() returns null and any
 // unicode glyphs are replaced with bracketed ASCII labels so screen
 // readers and high-contrast displays get a clear text-only picture.
 // Settable via appState.accessible (set by app.mjs from --accessible arg).
@@ -295,7 +295,7 @@ export function scrollIndicators(screen, topY, botY, scroll, total, pageSize) {
 export function skeletonBars(screen, y, h, count = 5, barWidth = 0.4) {
   const W = screen.width;
   const bw = Math.floor(W * barWidth);
-  // P0-2 a11y: skeleton placeholder bars use a plain `=` stripe in
+  // skeleton placeholder bars use a plain `=` stripe in
   // accessible mode (linear, no shadow look).
   const fillChar = appState.accessible ? '=' : '░';
   for (let i = 0; i < count && y + i * 2 < y + h; i++) {
@@ -334,7 +334,7 @@ function renderHeader(W) {
   const titleStyle = color('title') || { fg: 'white', bold: true };
   const subtitleStyle = { dim: true };
 
-  // P1-3: check the loading watchdog BEFORE rendering the spinner so a
+  // check the loading watchdog BEFORE rendering the spinner so a
   // stuck operation collapses into a banner toast before painting.
   checkLoadingWatchdog();
 
@@ -377,7 +377,7 @@ function renderHeader(W) {
     const r = lastRateLimit.remaining, lim = lastRateLimit.limit;
     const pct = lim > 0 ? r / lim : 0;
     const barWidth = 10;
-    // P0-2 a11y: rate-limit bar uses unicode block chars by default;
+    // rate-limit bar uses unicode block chars by default;
     // in --accessible mode it's a plain `[######....]` bracketed bar.
     let bar;
     if (appState.accessible) {
@@ -427,12 +427,12 @@ function renderHeader(W) {
 function renderTabStrip(y, W) {
   const tabRowY = y;
   const sepY = y + 1;
-  // P1-2: derived unread count via helper (still computed here for the
+  // derived unread count via helper (still computed here for the
   // tab badge — keep the same call site so other code paths update too).
   const unreadCount = getUnreadCount();
 
   // Pre-compute each tab's width (proportional to label, but min-width).
-  const    // P1-10: render a small ⟳ chip on row 2 (right-aligned) when
+  const    // render a small ⟳ chip on row 2 (right-aligned) when
     // auto-refresh is on. Replaces a stale white "loading" blink when the
     // interval is silent, giving the user a passive "data is fresh" cue.
     // (The loading text itself is already rendered from appState.loading.)
@@ -509,7 +509,7 @@ function renderFooter(W, H) {
     // Insert cursor character at the correct position.
     const before = shown.slice(0, cursor);
     const after = shown.slice(cursor);
-    // P0-2 a11y: input cursor uses a plain '_' in --accessible mode.
+    // input cursor uses a plain '_' in --accessible mode.
     const cursorChar = appState.accessible ? '_' : '█';
     const line = appState.inputPrompt + before + cursorChar + after;
     screen.writeStr(1, statusY, line.substring(0, W - 2), color('inputBox'));
@@ -530,7 +530,7 @@ function renderFooter(W, H) {
     };
     const style = typeStyles[appState.message.type] || statusStyle;
     let txt = ' ' + icon + '  ' + appState.message.text;
-    // P0-6: reserve the trailing "[r] to retry" affordance BEFORE truncating
+    // reserve the trailing "[r] to retry" affordance BEFORE truncating
     // the message body, so the keyboard hint is never visually clipped at
     // narrow terminal widths. Without this, W-2 truncation shortens the
     // message text instead of dropping the affordance — defeating discoverability.
