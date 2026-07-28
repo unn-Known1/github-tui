@@ -156,12 +156,15 @@ export function markAllRead() {
 export async function unsubscribeCurrent() {
   const n = selected();
   if (!n) return;
-  try {
-    await unsubscribeNotification(appState.token, n.id);
-    n.unread = false;
-    showMessage('Unsubscribed from thread', 'success');
-    render();
-  } catch (e) { showMessage('Failed: ' + e.message, 'error'); }
+  const title = (n.subject && n.subject.title) || 'this thread';
+  confirm('Unsubscribe from "' + truncate(title, 40) + '"?', async () => {
+    try {
+      await unsubscribeNotification(appState.token, n.id);
+      n.unread = false;
+      showMessage('Unsubscribed from thread', 'success');
+      render();
+    } catch (e) { showMessage('Failed: ' + e.message, 'error'); }
+  }, 'Unsubscribe');
 }
 
 export function cycleFilter() {

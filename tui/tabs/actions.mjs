@@ -2,7 +2,7 @@
 // v0.7 milestone: runs list, status indicators, re-run, cancel.
 // v0.6 enhancement: expandable run detail with jobs and steps.
 
-import { appState, render, startAsync, isStale, showMessage, setTab } from '../state.mjs';
+import { appState, render, startAsync, isStale, showMessage, setTab, confirm } from '../state.mjs';
 import { getWorkflowRuns, getWorkflowJobs, rerunWorkflow, cancelWorkflowRun } from '../github.mjs';
 import { openUrl, relTime, truncate } from '../utils.mjs';
 import { color } from '../theme.mjs';
@@ -157,13 +157,15 @@ export async function cancelSelected() {
   const repo = repos[appState.actionsRepoSelected];
   if (!repo) return;
   const [owner, name] = repo.full_name.split('/');
-  try {
-    await cancelWorkflowRun(appState.token, owner, name, run.id);
-    showMessage('Cancelled run #' + run.id, 'success');
-    loadWorkflowRuns();
-  } catch (e) {
-    showMessage(e.message || 'Cancel failed', 'error');
-  }
+  confirm('Cancel run #' + run.run_number + ' on ' + repo.full_name + '?', async () => {
+    try {
+      await cancelWorkflowRun(appState.token, owner, name, run.id);
+      showMessage('Cancelled run #' + run.id, 'success');
+      loadWorkflowRuns();
+    } catch (e) {
+      showMessage(e.message || 'Cancel failed', 'error');
+    }
+  }, 'Cancel run');
 }
 
 function openSelectedRun() {

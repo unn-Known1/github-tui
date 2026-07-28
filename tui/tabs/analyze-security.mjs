@@ -1,7 +1,7 @@
 // Security sub-pane — Dependabot, Secret Scanning, Code Scanning,
 // Advisories, Branch Protection, and Dependencies views.
 
-import { appState, render, startAsync, isStale, showMessage } from '../state.mjs';
+import { appState, render, startAsync, isStale, showMessage, confirm } from '../state.mjs';
 import {
   getRepoDependabotAlerts, dismissDependabotAlert,
   getSecretScanningAlerts, getCodeScanningAlerts,
@@ -77,11 +77,15 @@ export async function dismissAlert(alertId) {
   const repo = appState.repoDetails;
   if (!repo || !appState.token) return;
   const [owner, name] = repo.full_name.split('/');
-  try {
-    await dismissDependabotAlert(appState.token, owner, name, alertId, 'tolerate_risk');
-    showMessage('Alert dismissed', 'success');
-    loadSecurity();
-  } catch (e) { showMessage('Dismiss failed: ' + e.message, 'error'); }
+  // Dismissing an alert with `tolerate_risk` silences the Dependabot warning
+  // for the repo. Confirmation prevents accidental dismissal.
+  confirm('Dismiss alert #' + alertId + ' (tolerate_risk) on ' + repo.full_name + '?', async () => {
+    try {
+      await dismissDependabotAlert(appState.token, owner, name, alertId, 'tolerate_risk');
+      showMessage('Alert dismissed', 'success');
+      loadSecurity();
+    } catch (e) { showMessage('Dismiss failed: ' + e.message, 'error'); }
+  }, 'Dismiss alert');
 }
 
 export function cycleSecurityFilter() {

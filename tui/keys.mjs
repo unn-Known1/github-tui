@@ -170,8 +170,16 @@ async function toggleWatch() {
     let sub;
     try { sub = await getSubscription(appState.token, owner, name); } catch (e) { sub = null; }
     if (sub && sub.subscribed) {
-      await deleteSubscription(appState.token, owner, name);
-      showMessage('Unwatched ' + r.full_name, 'info');
+      // Unwatching is destructive — it silently stops notifications. Require
+      // confirmation so a stray `W` keystroke in the Repos tab doesn't undo
+      // the user's subscription. Re-watching is one keystroke so the cost
+      // of guarding is small.
+      confirm('Unwatch ' + r.full_name + '? You\'ll stop receiving notifications about it.', async () => {
+        try {
+          await deleteSubscription(appState.token, owner, name);
+          showMessage('Unwatched ' + r.full_name, 'info');
+        } catch (e) { showMessage(e.message || 'Unwatch failed', 'error'); }
+      }, 'Unwatch repo');
     } else {
       await setSubscription(appState.token, owner, name, true);
       showMessage('Watching ' + r.full_name + ' (all activity)', 'success');
