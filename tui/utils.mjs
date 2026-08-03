@@ -152,14 +152,91 @@ export async function openUrl(url) {
   }
 }
 
-// Copy text to clipboard via OSC-52 — works over SSH and inside tmux.
-// Capped at ~75KB after base64 to avoid terminal limits.
+// Copy text to clipboard — tries multiple strategies synchronously so the
+// caller can trust that the clipboard is populated before returning.
+// Priority: OSC-52 → tmux load-buffer → pbcopy (macOS) → xclip/xsel (Linux X11)
+//           → wl-copy (Wayland) → /tmp file.
 export function copyToClipboard(text) {
   if (!text) return false;
-  const b64 = Buffer.from(String(text), 'utf-8').toString('base64');
-  if (b64.length > 75_000) return false;
-  process.stdout.write(`\x1b]52;c;${b64}\x07`);
-  return true;
+  const str = String(text);
+  let success = false;
+
+  // 1. OSC-52 — synchronous escape sequence to the terminal. Works in most
+  //    modern terminals (tmux with allow-passthrough, iTerm2, kitty, foot, etc.)
+  const b64 = Buffer.from(str, 'utf-8').toString('base64');
+  if (b64.length <= 75_000) {
+    try {
+      process.stdout.write(`\x1b]52;c;${b64}\x07`);
+      process.stdout.flush();
+      success = true;
+    } catch { /* fall through */ }
+  }
+
+  // 2. Inside tmux: write directly to tmux's paste buffer. This is reliable
+  //    regardless of whether OSC-52 passthrough is enabled. User accesses it
+  //    via tmux copy-mode (Ctrl+B [) or `tmux show-buffer`.
+  if (!success && process.env.TMUX) {
+    try {
+      const r = spawnSync('tmux', ['load-buffer', '-'], {
+        input: str, stdio: ['pipe', 'ignore', 'ignore'], encoding: 'utf-8',
+      });
+      if (r.status === 0) {
+        globalThis._lastClipboardMethod = 'tmux';
+        return true;
+      }
+    } catch {}
+  }
+
+  // 3. Native clipboard tools — synchronous so paste immediately after copy works.
+  if (_tryNativeClipboardSync(str)) {
+    globalThis._lastClipboardMethod = 'native';
+    return true;
+  }
+
+  globalThis._lastClipboardMethod = success ? 'osc52' : 'none';
+  return success;
+}
+
+// Synchronous native clipboard helper. Tries pbcopy / xclip / xsel / wl-copy / clip.
+function _tryNativeClipboardSync(str) {
+  const platform = process.platform;
+  let candidates = [];
+  if (platform === 'darwin') {
+    candidates = [['pbcopy', []]];
+  } else if (platform === 'win32') {
+    candidates = [['powershell', ['-Command', 'Set-Clipboard -Value (Get-Content -Raw)']], ['clip', []]];
+  } else {
+    candidates = [['xclip', ['-selection', 'clipboard']], ['xsel', ['--clipboard', '--input']], ['wl-copy', []]];
+  }
+
+  for (const [cmd, args] of candidates) {
+    try {
+      const result = spawnSync(cmd, args, {
+        input: str, stdio: ['pipe', 'ignore', 'ignore'], encoding: 'utf-8',
+      });
+      if (result.status === 0) return true;
+    } catch { /* not found or failed — try next */ }
+  }
+
+  // Ultimate fallback: write to a well-known temp file.
+  try {
+    const tmpFile = join(tmpdir(), 'github-tui-clipboard.txt');
+    writeFileSync(tmpFile, str, 'utf-8');
+    globalThis._lastClipboardTempFile = tmpFile;
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+// Return the path of the last temp-file fallback, or null.
+export function getClipboardTempFilePath() {
+  return globalThis._lastClipboardTempFile || null;
+}
+
+// Return which method was last used to copy text, or null.
+export function getLastClipboardMethod() {
+  return globalThis._lastClipboardMethod || null;
 }
 
 // Map a GitHub event type to icon + color + short label.
@@ -212,6 +289,8 @@ export function notificationToHtmlUrl(apiUrl) {
 
 import { resolve, normalize, join, dirname } from 'path';
 import { mkdirSync, existsSync, writeFileSync, statSync } from 'fs';
+import { spawnSync } from 'child_process';
+import { tmpdir } from 'os';
 
 // Refuse paths that escape CWD via .. — used before writing any user-named
 // file to disk so a malicious repo can't overwrite ~/.ssh/authorized_keys etc.

@@ -238,6 +238,11 @@ export const appState = {
   dependencyManifests: [],
   _readmeText: null,
 
+  // ── Text selection (README / file viewer) ──
+  textSelectionMode: 'none', // 'none' | 'readme' | 'file'
+  textSelectStart: null,     // { row, col } in visual-row coords
+  textSelectEnd: null,       // { row, col } in visual-row coords
+
   // ── Forks sub-view ──
   forks: [],
   forksPage: 1,

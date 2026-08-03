@@ -44,10 +44,20 @@ export { viewReadme } from './analyze-readme.mjs';
 export { cycleIssueStateFilter } from './analyze-issues.mjs';
 export { pageUp, pageDown } from './analyze-search.mjs';
 
+// Clear text-selection state whenever the user leaves a text-viewing pane
+// (README / file viewer) so stale selection coordinates don't bleed into
+// the next view.
+function clearTextSelection() {
+  appState.textSelectionMode = 'none';
+  appState.textSelectStart = null;
+  appState.textSelectEnd = null;
+}
+
 export async function loadRepoDetails(owner, name) {
   const gen = startAsync('analyze-details');
   appState.loading = true;
   appState.detailsPane = 'overview';
+  clearTextSelection();
   appState.detailsScroll = 0;
   appState.repoLanguages = null;
   appState.repoContributors = [];
@@ -280,6 +290,7 @@ export function handleBack() {
     if (appState.detailsPane !== 'overview') {
       appState.detailsPane = 'overview';
       appState.detailsScroll = 0;
+      clearTextSelection();
       render();
       return;
     }
@@ -346,8 +357,10 @@ export function jumpTop() {
 export const keys = {
   'i': () => {
     if (appState.analyzeView === 'details') {
-      appState.detailsPane = appState.detailsPane === 'issues' ? 'overview' : 'issues';
+      const next = appState.detailsPane === 'issues' ? 'overview' : 'issues';
+      appState.detailsPane = next;
       appState.detailsScroll = 0;
+      if (next !== 'issues' && next !== 'prs') clearTextSelection();
       render();
     } else {
       startInput('Search repos: ', 'search');
@@ -355,8 +368,10 @@ export const keys = {
   },
   'P': () => {
     if (appState.analyzeView === 'details') {
-      appState.detailsPane = appState.detailsPane === 'prs' ? 'overview' : 'prs';
+      const next = appState.detailsPane === 'prs' ? 'overview' : 'prs';
+      appState.detailsPane = next;
       appState.detailsScroll = 0;
+      if (next !== 'issues' && next !== 'prs') clearTextSelection();
       render();
     }
   },
@@ -364,6 +379,7 @@ export const keys = {
     if (appState.analyzeView === 'details') {
       appState.detailsPane = 'overview';
       appState.detailsScroll = 0;
+      clearTextSelection();
       render();
     }
   },
@@ -373,6 +389,7 @@ export const keys = {
     if (appState.analyzeView === 'details') {
       if (appState.detailsPane === 'packages') {
         appState.detailsPane = 'overview';
+        clearTextSelection();
       } else {
         appState.detailsPane = 'packages';
         appState.detailsScroll = 0;
@@ -392,6 +409,7 @@ export const keys = {
     if (appState.analyzeView === 'details') {
       if (appState.detailsPane === 'security') {
         appState.detailsPane = 'overview';
+        clearTextSelection();
       } else if (isFilesPane()) {
         files.keys.S();
       } else {
@@ -433,6 +451,7 @@ export const keys = {
     if (appState.analyzeView === 'details') {
       if (appState.detailsPane === 'traffic') {
         appState.detailsPane = 'overview';
+        clearTextSelection();
       } else {
         appState.detailsPane = 'traffic';
         appState.detailsScroll = 0;
@@ -445,6 +464,7 @@ export const keys = {
     if (appState.analyzeView === 'details') {
       if (appState.detailsPane === 'milestones') {
         appState.detailsPane = 'overview';
+        clearTextSelection();
       } else {
         appState.detailsPane = 'milestones';
         appState.detailsScroll = 0;
@@ -457,6 +477,7 @@ export const keys = {
     if (appState.analyzeView === 'details') {
       if (appState.detailsPane === 'labels') {
         appState.detailsPane = 'overview';
+        clearTextSelection();
       } else {
         appState.detailsPane = 'labels';
         appState.detailsScroll = 0;
@@ -469,6 +490,7 @@ export const keys = {
     if (appState.analyzeView === 'details') {
       if (appState.detailsPane === 'checks') {
         appState.detailsPane = 'overview';
+        clearTextSelection();
       } else {
         appState.detailsPane = 'checks';
         appState.detailsScroll = 0;

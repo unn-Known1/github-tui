@@ -89,7 +89,7 @@ async function openCurrent() {
 function copyCurrentUrl() {
   const url = currentUrl();
   if (!url) { showMessage('Nothing to copy', 'warning'); return; }
-  if (copyToClipboard(url)) showMessage('Copied to clipboard (OSC-52)', 'success');
+  if (copyToClipboard(url)) showMessage('Copied to clipboard', 'success');
   else showMessage('Clipboard copy failed', 'error');
 }
 
@@ -239,8 +239,15 @@ export function handleKey(key) {
   if (key.length === 1 && key === _lastKeyStr && now - _lastKeyTime < KEY_REPEAT_DEBOUNCE_MS) return;
   _lastKeyTime = now;
   _lastKeyStr = key;
-  // 0. Ctrl+C always quits, no matter what overlay is open.
-  if (key === '\x03') { quit(); return; }
+  // 0. Ctrl+C quits by default — except when a text selection is active
+  //    (README / file viewer), in which case Ctrl+C copies the selection.
+  if (key === '\x03') {
+    if (appState.textSelectionMode !== 'none') {
+      import('./mouse.mjs').then(m => m.copySelectedText()).catch(() => {});
+      return;
+    }
+    quit();
+  }
 
   // 0a. Mouse events (SGR or legacy X10 format).
   const mouseEvent = parseMouseEvent(key);
@@ -250,6 +257,8 @@ export function handleKey(key) {
   }
 
   // 0b. Esc dismisses ANY open overlay — prevents stuck modal states.
+  // Also clears text selection in README / file viewer before falling
+  // through to the normal back handler.
   if (key === '\x1b') {
     if (appState.showPalette) { palette.close(); return; }
     if (appState.showOnboarding || appState.showWelcome) {
@@ -262,6 +271,14 @@ export function handleKey(key) {
     if (appState.showDetail) { import('./tabs/detail.mjs').then(m => m.closeDetail()).catch(() => {}); return; }
     if (appState.confirmAction) { dismissConfirm(); return; }
     if (appState.inputMode === 'input') { import('./input.mjs').then(m => m.cancelInput()).catch(() => {}); return; }
+    // Clear text selection if one is active.
+    if (appState.textSelectionMode !== 'none') {
+      appState.textSelectionMode = 'none';
+      appState.textSelectStart = null;
+      appState.textSelectEnd = null;
+      render();
+      return;
+    }
     // No overlay open — let Esc fall through to per-tab back handlers.
   }
 
@@ -577,6 +594,32 @@ export function handleKey(key) {
   if (key === 'l' && tabState.current !== 0) {
     handleEnter();
     return;
+  }
+
+  // Ctrl+A — select all text and auto-copy in README / file viewer panes.
+  if (key === '\x01') {
+    const inTextSel = appState.textSelectionMode !== 'none';
+    if (inTextSel) {
+      import('./mouse.mjs').then(m => m.selectAllAndCopy()).catch(() => {});
+      return;
+    }
+    // Not in text-selection mode yet — activate it at current scroll position.
+    if (tabState.current === 2 && appState.analyzeView === 'details') {
+      if (appState.detailsPane === 'readme') {
+        appState.textSelectionMode = 'readme';
+        appState.textSelectStart = { row: 0, col: 0 };
+        appState.textSelectEnd = { row: 0, col: 0 };
+        import('./mouse.mjs').then(m => m.selectAllAndCopy()).catch(() => {});
+        return;
+      }
+      if (appState.detailsPane === 'files' && appState.fileViewing) {
+        appState.textSelectionMode = 'file';
+        appState.textSelectStart = { row: 0, col: 0 };
+        appState.textSelectEnd = { row: 0, col: 0 };
+        import('./mouse.mjs').then(m => m.selectAllAndCopy()).catch(() => {});
+        return;
+      }
+    }
   }
 
   // 7. Per-tab key map.

@@ -78,6 +78,10 @@ export async function openFilesPane() {
   appState.filesBranches = [];
   appState.filesBranchPicker = false;
   appState.filesBranchCursor = 0;
+  // Clear any stale text selection from a previous pane.
+  appState.textSelectionMode = 'none';
+  appState.textSelectStart = null;
+  appState.textSelectEnd = null;
   await loadTree();
 }
 
@@ -130,6 +134,10 @@ export async function goUp() {
     appState.fileViewing = null;
     appState.fileText = '';
     appState.fileScroll = 0;
+    // Clear text selection when leaving the file viewer.
+    appState.textSelectionMode = 'none';
+    appState.textSelectStart = null;
+    appState.textSelectEnd = null;
     render();
     return;
   }
@@ -544,10 +552,22 @@ function renderFileViewer(screen, y, maxH) {
   const { lines: visualLines, visualToLogical } = wrapTextWithMap(text, innerW);
   const rows = Math.max(1, maxH - 4);
   const start = appState.fileScroll || 0;
+
+  // Determine selection state for this pane.
+  const inSel = appState.textSelectionMode === 'file';
+  let selStart = inSel ? appState.textSelectStart : null;
+  let selEnd = inSel ? appState.textSelectEnd : null;
+  if (selStart && selEnd) {
+    if (selEnd.row < selStart.row || (selEnd.row === selStart.row && selEnd.col < selStart.col)) {
+      [selStart, selEnd] = [selEnd, selStart];
+    }
+  }
+
   for (let i = 0; i < rows && start + i < visualLines.length; i++) {
     const row = y + 2 + i;
     const logicalIdx = visualToLogical[start + i];
     const sourceLn = logicalLines[logicalIdx] || '';
+
     // Line-number gutter: show the source line number on the FIRST visual
     // row of that source line; blank the gutter on continuations.
     const isFirst = (start + i) === 0
@@ -557,16 +577,47 @@ function renderFileViewer(screen, y, maxH) {
       : ' '.repeat(lineNumW);
     screen.writeStr(4, row, lnNumStr, color('dim'));
     screen.writeStr(4 + lineNumW + 1, row, '│', color('dim'));
+
     // Apply syntax style based on the SOURCE line so wrapped keyword/
     // string/etc. highlighting is preserved on continuations.
     const lineStyle = decorateLine(sourceLn, appState.fileViewing);
     screen.writeStr(4 + lineNumW + 3, row, visualLines[start + i], lineStyle);
   }
 
+  // Second pass: overlay selection background via styleBuf. Column-aware so
+  // partial-row selections don't leak into unselected cells.
+  if (selStart && selEnd) {
+    for (let i = 0; i < rows && start + i < visualLines.length; i++) {
+      const visRow = start + i;
+      if (visRow < selStart.row || visRow > selEnd.row) continue;
+      const row = y + 2 + i;
+      const selColStart = visRow === selStart.row ? (selStart.col ?? 0) : 0;
+      const selColEnd = visRow === selEnd.row ? (selEnd.col ?? innerW) : innerW;
+      const clampedStart = Math.max(0, selColStart);
+      const clampedEnd = Math.min(innerW, selColEnd);
+      if (clampedEnd <= clampedStart) continue;
+      for (let x = clampedStart; x < clampedEnd; x++) {
+        screen.styleBuf[row][4 + lineNumW + 3 + x] = color('selection');
+      }
+    }
+  }
+
   const footerY = y + 2 + Math.min(rows, visualLines.length) + 1;
   if (footerY < y + maxH) {
-    const hints = 'Line ' + (start + 1) + '-' + Math.min(start + rows, visualLines.length) +
-      ' of ' + visualLines.length + '  [↑↓] scroll  [s] Save  [y] URL  [Esc] Back';
+    const hintParts = [];
+    hintParts.push('Line ' + (start + 1) + '-' + Math.min(start + rows, visualLines.length) +
+      ' of ' + visualLines.length);
+    hintParts.push('[↑↓] scroll');
+    hintParts.push('[s] Save');
+    hintParts.push('[y] URL');
+    if (inSel) {
+      hintParts.push('[Esc] clear selection');
+      hintParts.push('[Ctrl+A] select all → copy');
+    } else {
+      hintParts.push('[Ctrl+A] select all → copy');
+    }
+    hintParts.push('[Esc] Back');
+    const hints = hintParts.join('  ');
     screen.writeStr(4, footerY, hints, color('dim'));
   }
 }
@@ -828,8 +879,13 @@ export const keys = {
   'B': () => openBranchPicker(),
   'Y': () => {
     if (appState.fileViewing) {
-      if (copyToClipboard(appState.fileText)) showMessage('File contents copied', 'success');
-      else showMessage('Too big for OSC-52 — use [s] save instead', 'warning');
+      if (copyToClipboard(appState.fileText)) {
+        const tmpFile = getClipboardTempFilePath();
+        if (tmpFile) showMessage('File contents copied (saved to ' + tmpFile + ')', 'success');
+        else showMessage('File contents copied', 'success');
+      } else {
+        showMessage('Copy failed — use [s] save instead', 'warning');
+      }
     } else {
       showMessage('Open a file first with [Enter] to copy its contents', 'info');
     }

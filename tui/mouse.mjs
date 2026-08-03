@@ -4,13 +4,213 @@ import { appState, tabState, setTab, render, TABS, toggleCollapse, showMessage, 
 import { getScreen, HEADER_HEIGHT, TAB_CONTENT_Y } from './render.mjs';
 import { setTheme } from './theme.mjs';
 import { startInput } from './input.mjs';
-import { openUrl } from './utils.mjs';
+import { openUrl, copyToClipboard, getClipboardTempFilePath, getLastClipboardMethod, wrapTextWithMap } from './utils.mjs';
 import { dismissConfirm } from './state.mjs';
 import * as analyze from './tabs/analyze.mjs';
 import * as detail from './tabs/detail.mjs';
 import * as repos from './tabs/repos.mjs';
 import * as dashboard from './tabs/dashboard.mjs';
 import * as settings from './tabs/settings.mjs';
+
+// ── Text-selection helpers for README / file viewer ──
+
+const TEXT_SEL_PANE_Y = TAB_CONTENT_Y[2] + 3; // pane-tabs row (9)
+const TEXT_SEL_CONTENT_Y = TEXT_SEL_PANE_Y + 1; // first content row (10) — sy is 0-based (col-1, row-1)
+
+// Map a screen coordinate (sx, sy) to a visual-row/col inside the active
+// text-selection pane (readme or file), or null if the click is outside.
+// scroll is compensated so clicking on a scrolled-down line lands on the
+// correct visual row rather than an offset one.
+function mapTextSelCoords(sx, sy) {
+  const t = tabState.current;
+  if (t !== 2 || appState.analyzeView !== 'details') return null;
+
+  const screen = getScreen();
+  if (!screen) return null;
+  const W = screen.width;
+
+  if (appState.detailsPane === 'readme') {
+    if (sy < TEXT_SEL_CONTENT_Y) return null;
+    const row = (sy - TEXT_SEL_CONTENT_Y) + (appState.detailsScroll || 0);
+    const col = Math.max(0, sx - 2);
+    return { mode: 'readme', row, col };
+  }
+
+  if (appState.detailsPane === 'files' && appState.fileViewing) {
+    if (sy < TEXT_SEL_CONTENT_Y) return null;
+    const row = (sy - TEXT_SEL_CONTENT_Y) + (appState.fileScroll || 0);
+    // File viewer: col offset = 4 (left pad) + lineNumW + 1 (gutter) + 3 (after │).
+    const logicalLines = (appState.fileText || '').split(/\r?\n/);
+    const lineNumW = String(logicalLines.length).length;
+    const col = Math.max(0, sx - (4 + lineNumW + 3));
+    return { mode: 'file', row, col };
+  }
+
+  return null;
+}
+
+function applyTextSel(mode, row, col, isClick = false) {
+  appState.textSelectionMode = mode;
+  // On a fresh click (not a drag extension), always reset the start point so
+  // the user can start a new selection from anywhere without dragging backwards.
+  if (isClick || !appState.textSelectStart) {
+    appState.textSelectStart = { row, col };
+  }
+  appState.textSelectEnd = { row, col };
+  render();
+}
+
+function clearTextSel() {
+  appState.textSelectionMode = 'none';
+  appState.textSelectStart = null;
+  appState.textSelectEnd = null;
+  render();
+}
+
+// Extract the selected text region from mode-specific state and return it as a
+// single string. Returns null if there is no valid selection.
+export function getSelectedText() {
+  const mode = appState.textSelectionMode;
+  const selStart = appState.textSelectStart;
+  const selEnd = appState.textSelectEnd;
+  if (!selStart || !selEnd || mode === 'none') return null;
+
+  // Normalise so (sr,sc) <= (er,ec).
+  let sr = selStart.row, sc = selStart.col;
+  let er = selEnd.row,   ec = selEnd.col;
+  if (er < sr || (er === sr && ec < sc)) { [sr, er] = [er, sr]; [sc, ec] = [ec, sc]; }
+
+  const screen = getScreen();
+  if (!screen) return null;
+  const W = screen.width;
+
+  if (mode === 'readme') {
+    const innerW = Math.max(20, W - 6);
+    const raw = appState._readmeText || '';
+    const { lines } = wrapTextWithMap(raw, innerW);
+    const linesNormalized = [];
+    for (let i = 0; i < lines.length; i++) {
+      const ln = lines[i];
+      // Include a trailing newline for every line except the last visual line.
+      linesNormalized.push(ln + '\n');
+    }
+    let out = '';
+    for (let r = sr; r <= er; r++) {
+      if (r < 0 || r >= linesNormalized.length) continue;
+      const ln = linesNormalized[r];
+      if (r === sr && r === er) {
+        // Single-cell selection — take exactly the characters from sc to ec.
+        out += ln.substring(sc, ec);
+      } else if (r === sr) {
+        out += ln.substring(sc);
+      } else if (r === er) {
+        out += ln.substring(0, ec);
+      } else {
+        out += ln;
+      }
+    }
+    return out || null;
+  }
+
+  if (mode === 'file') {
+    const text = appState.fileText || '';
+    const logicalLines = text.split(/\r?\n/);
+    const { lines: visualLines, visualToLogical } = wrapTextWithMap(text, Math.max(10, W - 8 - String(logicalLines.length).length));
+    let out = '';
+    for (let vr = sr; vr <= er; vr++) {
+      if (vr < 0 || vr >= visualLines.length) continue;
+      const ln = visualLines[vr];
+      if (vr === sr && vr === er) {
+        out += ln.substring(sc, ec);
+      } else if (vr === sr) {
+        out += ln.substring(sc);
+      } else if (vr === er) {
+        out += ln.substring(0, ec);
+      } else {
+        out += ln + '\n';
+      }
+    }
+    return out || null;
+  }
+
+  return null;
+}
+
+export async function copySelectedText() {
+  const text = getSelectedText();
+  if (!text) {
+    showMessage('No text selected', 'warning');
+    return false;
+  }
+  if (copyToClipboard(text)) {
+    const method = getLastClipboardMethod();
+    const tmpFile = getClipboardTempFilePath();
+    if (method === 'tmux') {
+      showMessage('Copied ' + text.length + ' chars — tmux buffer (Ctrl+B [ to view)', 'success');
+    } else if (tmpFile) {
+      showMessage('Copied ' + text.length + ' chars → ' + tmpFile, 'info');
+    } else {
+      showMessage('Copied ' + text.length + ' chars to clipboard', 'success');
+    }
+  } else {
+    showMessage('Copy failed', 'error');
+  }
+  return true;
+}
+
+export async function selectAllAndCopy() {
+  const mode = appState.textSelectionMode;
+  if (mode === 'none') return false;
+  const screen = getScreen();
+  if (!screen) return false;
+  const W = screen.width;
+  let text = '';
+  let totalRows = 0;
+  let maxCol = W;
+
+  if (mode === 'readme') {
+    const innerW = Math.max(20, W - 6);
+    const raw = appState._readmeText || '';
+    try {
+      const { wrapTextWithMap } = await import('./utils.mjs');
+      const wrapped = wrapTextWithMap(raw, innerW);
+      text = wrapped.lines.join('\n');
+      totalRows = wrapped.lines.length;
+      maxCol = innerW;
+    } catch {
+      text = raw;
+      totalRows = raw.split(/\r?\n/).length;
+      maxCol = innerW;
+    }
+  } else if (mode === 'file') {
+    text = appState.fileText || '';
+    const logicalLines = text.split(/\r?\n/);
+    totalRows = logicalLines.length;
+    const lineNumW = String(logicalLines.length).length;
+    maxCol = Math.max(10, W - 8 - lineNumW);
+  }
+
+  // Select entire text: (0, 0) to (lastRow, maxCol).
+  appState.textSelectStart = { row: 0, col: 0 };
+  appState.textSelectEnd = { row: Math.max(0, totalRows - 1), col: maxCol };
+  render();
+
+  // Auto-copy the full text.
+  if (text && copyToClipboard(text)) {
+    const method = getLastClipboardMethod();
+    const tmpFile = getClipboardTempFilePath();
+    if (method === 'tmux') {
+      showMessage('Copied all text — tmux buffer (Ctrl+B [ to view)', 'success');
+    } else if (tmpFile) {
+      showMessage('Copied all text → ' + tmpFile, 'info');
+    } else {
+      showMessage('Copied all text to clipboard', 'success');
+    }
+  } else {
+    showMessage('Copy failed — text may be too large', 'warning');
+  }
+  return true;
+}
 
 export function enableMouse() {
   process.stdout.write('\x1b[?1000h');
@@ -60,11 +260,26 @@ export function handleMouseEvent(event) {
 
   const { button, col, row, pressed } = event;
 
-  // Motion (button 32–63) — live hover selection on lists.
+  // Motion (button 32–63) — live hover selection on lists + text selection drag.
   if (button >= 32 && button < 64) {
     const sx = col - 1;
     const sy = row - 1;
     const t = tabState.current;
+
+    // Text selection drag in README / file viewer.
+    if (t === 2 && appState.analyzeView === 'details' &&
+        (appState.detailsPane === 'readme' || (appState.detailsPane === 'files' && appState.fileViewing))) {
+      const coords = mapTextSelCoords(sx, sy);
+      if (coords) {
+        applyTextSel(coords.mode, coords.row, coords.col, false);
+        return;
+      }
+      // Clicked outside the text area while dragging — clear selection.
+      if (appState.textSelectionMode !== 'none') {
+        clearTextSel();
+        return;
+      }
+    }
 
     // Dashboard trending list.
     if (t === 0 && inTrendingSection(sx, sy)) {
@@ -152,6 +367,19 @@ export function handleMouseEvent(event) {
 
   // Click — only left button presses.
   if (button === 0 && pressed) {
+    const sx = col - 1;
+    const sy = row - 1;
+    // Text selection click: start a fresh selection (reset both endpoints)
+    // when clicking inside README or file-viewer areas.
+    const t = tabState.current;
+    if (t === 2 && appState.analyzeView === 'details' &&
+        (appState.detailsPane === 'readme' || (appState.detailsPane === 'files' && appState.fileViewing))) {
+      const coords = mapTextSelCoords(sx, sy);
+      if (coords) {
+        applyTextSel(coords.mode, coords.row, coords.col, true);
+        return;
+      }
+    }
     handleClick(col, row);
   }
 }
