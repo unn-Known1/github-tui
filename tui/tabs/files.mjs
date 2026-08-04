@@ -233,7 +233,7 @@ export async function saveCurrentFile() {
     const [owner, name] = repoOwnerName();
     try {
       content = await getRepoFile(
-        appState.token, owner, name, ent.path, appState.filesRef);
+        appState.token, owner, name, ent.path, appState.filesRef, undefined);
     } catch (e) { showMessage('Save: ' + e.message, 'error'); return; }
     path = ent.path;
   }

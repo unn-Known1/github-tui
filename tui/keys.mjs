@@ -60,9 +60,9 @@ function currentRepoForAction() {
 }
 
 function currentUrl() {
-  if (tabState.current === 4 && appState.notifications[appState.selectedNotification]) {
-    const n = appState.notifications[appState.selectedNotification];
-    return notificationToHtmlUrl(n.subject && n.subject.url);
+  if (tabState.current === 4) {
+    const n = inbox.getSelectedNotification();
+    return n ? notificationToHtmlUrl(n.subject && n.subject.url) : null;
   }
   const r = currentRepoForAction();
   return r ? r.html_url : null;
@@ -75,9 +75,9 @@ async function openCurrent() {
   // (whose URL redirects to the Actions tab) and friendly-message the user
   // instead of dumping a confusing /check-suites/N URL.
   let toastLabel = 'Opened ' + url;
-  if (tabState.current === 4 && appState.notifications[appState.selectedNotification]) {
-    const n = appState.notifications[appState.selectedNotification];
-    const subjectType = n.subject && n.subject.type;
+  if (tabState.current === 4) {
+    const n = inbox.getSelectedNotification();
+    const subjectType = n && n.subject && n.subject.type;
     if (subjectType === 'CheckSuite') toastLabel = 'Opened Actions tab';
     else if (subjectType === 'Discussion') toastLabel = 'Opened discussion in browser';
   }
@@ -262,9 +262,10 @@ export function handleKey(key) {
   if (key === '\x1b') {
     if (appState.showPalette) { palette.close(); return; }
     if (appState.showOnboarding || appState.showWelcome) {
-      if (appState.showOnboarding) { appState.showOnboarding = false; }
-      if (appState.showWelcome) { appState.showWelcome = false; }
-      render(); return;
+      // Let the onboarding module close the overlay and persist the seen
+      // version; directly clearing the flags made upgrade notes reappear.
+      onboarding.handleOnboardingKey(key);
+      return;
     }
     if (appState.showBookmarks) { bookmarks.closeBookmarks(); return; }
     if (appState.showHelp) { appState.showHelp = false; render(); return; }
@@ -946,7 +947,7 @@ export function registerCoreActions() {
   reg({ id: 'inbox.cycle',       label: 'Inbox: cycle filter',                run: inbox.cycleFilter });
 
   reg({ id: 'settings.theme',  label: 'Change theme...',
-        run: () => { setTab(5); appState.settingsCursor = 4; render(); settings.enter(); } });
+        run: () => { setTab(5); appState.settingsCursor = 6; render(); settings.enter(); } });
   reg({ id: 'settings.logout', label: 'Log out', run: () => confirm('Log out of GitHub?', settings.handleLogout, 'Log Out') });
   reg({ id: 'dashboard.refresh', label: 'Refresh dashboard widgets',
         run: () => dashboard.loadDashboardWidgets(true) });

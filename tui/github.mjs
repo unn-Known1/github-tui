@@ -2,7 +2,8 @@
 // Supports any HTTP method, optional body, ETag caching, live rate-limit mirror.
 
 import https from 'https';
-import { readFileSync, writeFileSync, existsSync, mkdirSync, chmodSync } from 'fs';
+import { createHash } from 'crypto';
+import { readFileSync, writeFileSync, existsSync, mkdirSync, chmodSync, unlinkSync } from 'fs';
 import { dirname } from 'path';
 import { ETAG_CACHE_FILE, LAST_SYNCED_FILE } from './config.mjs';
 
@@ -30,6 +31,19 @@ const etagCache = new Map();
 const ETAG_CACHE_MAX = 500;
 const ETAG_TTL = 300_000; // 5 minutes
 let _cacheDirty = false;
+
+export function cacheKeyFor(method, path, accept, raw, token) {
+  // Keep credentials out of the persisted key while partitioning private
+  // responses between accounts. An empty identity is the anonymous cache.
+  const identity = token
+    ? createHash('sha256').update(String(token)).digest('hex').slice(0, 16)
+    : 'anonymous';
+  return `v2:${method}:${path}:${accept || ''}:${raw ? 'raw' : 'json'}:${identity}`;
+}
+
+export function encodeRepoPath(path) {
+  return String(path || '').split('/').map(encodeURIComponent).join('/');
+}
 let _cacheFlushTimer = null;
 
 // ── Last-synced timestamps ──
@@ -55,6 +69,10 @@ function loadEtagCache() {
       } else {
         ({ key, etag, body, ts, lastAccess } = entry);
       }
+      // Entries from the pre-account-partition format are intentionally
+      // ignored. They could contain another user's private response and
+      // cannot be safely attributed to the current token.
+      if (typeof key !== 'string' || !key.startsWith('v2:')) continue;
       if (now - ts < ETAG_TTL * 6) { // Disk cache lives 6x longer (30 min)
         etagCache.set(key, { etag, body, ts, lastAccess: lastAccess || ts });
       }
@@ -177,10 +195,10 @@ export function getCacheStats() {
   };
 }
 
-function buildOptions(path, token, method, body) {
+function buildOptions(path, token, method, body, accept, raw) {
   const headers = {
     'User-Agent': USER_AGENT,
-    'Accept': 'application/vnd.github.v3+json',
+    'Accept': accept || 'application/vnd.github.v3+json',
   };
   if (token) headers['Authorization'] = `token ${token}`;
   if (body != null) {
@@ -188,7 +206,7 @@ function buildOptions(path, token, method, body) {
     headers['Content-Length'] = Buffer.byteLength(body);
   }
   if (method === 'GET') {
-    const cached = etagCache.get(`${method}:${path}`);
+    const cached = etagCache.get(cacheKeyFor(method, path, accept, raw, token));
     if (cached && cached.etag) headers['If-None-Match'] = cached.etag;
   }
   return { hostname: GITHUB_API, path, method, headers };
@@ -207,7 +225,7 @@ export function request(path, opts) {
   const raw = !!o.raw;
   const bodyStr = body == null ? null : JSON.stringify(body);
 
-  const cacheKey = `${method}:${path}`;
+  const cacheKey = cacheKeyFor(method, path, accept, raw, token);
 
   // Offline mode: return cached data for GETs when offline.
   if (method === 'GET' && offlineState.isOffline) {
@@ -246,7 +264,7 @@ export function request(path, opts) {
       reject(new Error('Request timed out'));
     }, timeoutMs);
 
-    const options = buildOptions(path, token, method, bodyStr);
+    const options = buildOptions(path, token, method, bodyStr, accept, raw);
     if (accept) options.headers['Accept'] = accept;
 
     // Honor an external AbortSignal — when fired, kill the socket immediately
@@ -293,8 +311,7 @@ export function request(path, opts) {
         clearTimeout(timer);
 
         if (res.statusCode === 304) {
-          const key = `${method}:${path}`;
-          const cached = etagCache.get(key);
+          const cached = etagCache.get(cacheKey);
           if (cached && Date.now() - cached.ts < ETAG_TTL) {
             cached.lastAccess = Date.now();
             _cacheDirty = true;
@@ -306,7 +323,7 @@ export function request(path, opts) {
           // without `If-None-Match` so the server sends a fresh body,
           // then re-cache it normally. Cap at one retry so a pathological
           // server can't loop; second 304 falls through to normal error.
-          etagCache.delete(key);
+          etagCache.delete(cacheKey);
           if (!o._retried304) {
             return resolve(request(path, { ...o, _retried304: true }));
           }
@@ -328,7 +345,7 @@ export function request(path, opts) {
           }
           if (method === 'GET' && res.headers.etag) {
             const now = Date.now();
-            etagCache.set(`${method}:${path}`, { etag: res.headers.etag, body: payload, ts: now, lastAccess: now });
+            etagCache.set(cacheKey, { etag: res.headers.etag, body: payload, ts: now, lastAccess: now });
             evictLRU();
             _cacheDirty = true;
           }
@@ -345,7 +362,6 @@ export function request(path, opts) {
         } catch (e) {}
         // Invalidate ETag cache on 4xx errors (except 403 rate limit) to prevent stale data
         if (res.statusCode >= 400 && res.statusCode < 500 && res.statusCode !== 403) {
-          const cacheKey = `${method}:${path}`;
           etagCache.delete(cacheKey);
         }
         reject(new GitHubApiError(msg, res.statusCode, path));
@@ -463,11 +479,11 @@ export const getReadme = (token, owner, repo, signal) =>
     token, signal, accept: 'application/vnd.github.raw', raw: true,
   });
 export const getRepoContents = (token, owner, repo, path, ref, signal) =>
-  request('/repos/' + owner + '/' + repo + '/contents/' + (path||'') +
-    (ref ? '?ref=' + ref : ''), { token, signal });
+  request('/repos/' + owner + '/' + repo + '/contents/' + encodeRepoPath(path) +
+    (ref ? '?ref=' + encodeURIComponent(ref) : ''), { token, signal });
 export const getRepoFile = (token, owner, repo, path, ref, signal) =>
-  request('/repos/' + owner + '/' + repo + '/contents/' + path +
-    (ref ? '?ref=' + ref : ''), {
+  request('/repos/' + owner + '/' + repo + '/contents/' + encodeRepoPath(path) +
+    (ref ? '?ref=' + encodeURIComponent(ref) : ''), {
     token, signal, accept: 'application/vnd.github.raw', raw: true,
   });
 // ─── User issues / PRs (for dashboard) ─────────────────────────────
@@ -481,8 +497,8 @@ export const getCommitActivity = (token, owner, repo, signal) =>
   request('/repos/' + owner + '/' + repo + '/stats/commit_activity', { token, signal });
 
 // ─── Actions / Workflows  (CI cockpit foundation) ──────────────────
-export const getWorkflows = (token, owner, repo) =>
-  request('/repos/' + owner + '/' + repo + '/actions/workflows', { token });
+export const getWorkflows = (token, owner, repo, signal) =>
+  request('/repos/' + owner + '/' + repo + '/actions/workflows', { token, signal });
 export const getWorkflowRuns = (token, owner, repo, perPage, signal) =>
   request('/repos/' + owner + '/' + repo + '/actions/runs?per_page=' + (perPage||20), { token, signal });
 export const rerunWorkflow = (token, owner, repo, runId) =>
@@ -495,12 +511,12 @@ export const getWorkflowJobs = (token, owner, repo, runId, signal) =>
   request('/repos/' + owner + '/' + repo + '/actions/runs/' + runId + '/jobs', { token, signal });
 
 // ─── Branches, zipball, per-file commits, raw bytes ──────────────────
-export const getBranches = (token, owner, repo, perPage) =>
-  request('/repos/' + owner + '/' + repo + '/branches?per_page=' + (perPage||50), { token });
+export const getBranches = (token, owner, repo, perPage, signal) =>
+  request('/repos/' + owner + '/' + repo + '/branches?per_page=' + (perPage||50), { token, signal });
 
-export const getFileCommits = (token, owner, repo, path, perPage) =>
+export const getFileCommits = (token, owner, repo, path, perPage, signal) =>
   request('/repos/' + owner + '/' + repo + '/commits?path=' +
-    encodeURIComponent(path) + '&per_page=' + (perPage||10), { token });
+    encodeURIComponent(path) + '&per_page=' + (perPage||10), { token, signal });
 
 // Returns the *redirect URL* to the zipball without following it. Used by the
 // file-tree pane to hand the URL to a streaming download routine that writes
@@ -523,22 +539,46 @@ export function getZipballUrl(owner, repo, ref) {
 // Used for zipballs. Requires only built-in https.
 import { createWriteStream } from 'fs';
 export function downloadToFile(url, destPath, token) {
+  let parsedUrl;
+  try {
+    parsedUrl = new URL(url);
+    if (parsedUrl.protocol !== 'https:') throw new Error('Download URL must use HTTPS');
+  } catch (e) {
+    return Promise.reject(e instanceof Error ? e : new Error('Invalid download URL'));
+  }
   return new Promise((resolve, reject) => {
     const out = createWriteStream(destPath);
     let bytes = 0;
     let settled = false;
+    let cleanupRequested = false;
+    const removeDestination = () => {
+      // A stream can finish opening after destroy() is called. Retry removal
+      // on close so failed downloads cannot recreate an empty artifact.
+      try { unlinkSync(destPath); } catch {}
+    };
     function cleanup() {
+      cleanupRequested = true;
       try { out.destroy(); } catch {}
+      // Never leave a misleading partial archive at the requested path.
+      removeDestination();
     }
     function settle(fn) {
       if (settled) return;
       settled = true;
       fn();
     }
-    function get(u, redirectsLeft) {
-      const u2 = new URL(u);
+    function get(u, redirectsLeft, sendToken = true) {
+      let u2;
+      try {
+        u2 = new URL(u);
+        if (u2.protocol !== 'https:') throw new Error('Download URL must use HTTPS');
+      } catch (e) {
+        cleanup();
+        return settle(() => reject(e instanceof Error ? e : new Error('Invalid download URL')));
+      }
       const headers = { 'User-Agent': USER_AGENT };
-      if (token) headers['Authorization'] = 'token ' + token;
+      // Never forward a GitHub token to a different host after a redirect.
+      if (token && sendToken && u2.hostname === GITHUB_API) headers['Authorization'] = 'token ' + token;
       const req = https.get({
         hostname: u2.hostname,
         path: u2.pathname + u2.search,
@@ -547,7 +587,14 @@ export function downloadToFile(url, destPath, token) {
         if (res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) {
           if (redirectsLeft <= 0) { cleanup(); return settle(() => reject(new Error('Too many redirects'))); }
           res.resume();
-          return get(res.headers.location, redirectsLeft - 1);
+          let next;
+          try {
+            next = new URL(res.headers.location, u2);
+          } catch (e) {
+            cleanup();
+            return settle(() => reject(new Error('Invalid download redirect')));
+          }
+          return get(next.toString(), redirectsLeft - 1, next.hostname === GITHUB_API);
         }
         if (res.statusCode !== 200) {
           res.resume();
@@ -558,10 +605,15 @@ export function downloadToFile(url, destPath, token) {
         res.pipe(out);
         out.on('finish', () => out.close(() => settle(() => resolve({ bytes, path: destPath }))));
         out.on('error', (e) => { cleanup(); settle(() => reject(e)); });
+        res.on('error', (e) => { cleanup(); settle(() => reject(e)); });
       });
       req.on('error', (e) => { cleanup(); settle(() => reject(e)); });
     }
-    get(url, 5);
+    out.on('error', (e) => { cleanup(); settle(() => reject(e)); });
+    out.on('close', () => {
+      if (cleanupRequested) removeDestination();
+    });
+    get(parsedUrl.toString(), 5, true);
   });
 }
 
@@ -609,42 +661,42 @@ export const getRateLimit = (token) =>
   request('/rate_limit', { token });
 
 // ─── Traffic ────────────────────────────────────────────────────────
-export const getRepoTrafficViews = (token, owner, repo) =>
-  request('/repos/' + owner + '/' + repo + '/traffic/views', { token });
-export const getRepoTrafficClones = (token, owner, repo) =>
-  request('/repos/' + owner + '/' + repo + '/traffic/clones', { token });
-export const getRepoTrafficPopularPaths = (token, owner, repo) =>
-  request('/repos/' + owner + '/' + repo + '/traffic/popular/paths', { token });
-export const getRepoTrafficPopularReferrers = (token, owner, repo) =>
-  request('/repos/' + owner + '/' + repo + '/traffic/popular/referrers', { token });
+export const getRepoTrafficViews = (token, owner, repo, signal) =>
+  request('/repos/' + owner + '/' + repo + '/traffic/views', { token, signal });
+export const getRepoTrafficClones = (token, owner, repo, signal) =>
+  request('/repos/' + owner + '/' + repo + '/traffic/clones', { token, signal });
+export const getRepoTrafficPopularPaths = (token, owner, repo, signal) =>
+  request('/repos/' + owner + '/' + repo + '/traffic/popular/paths', { token, signal });
+export const getRepoTrafficPopularReferrers = (token, owner, repo, signal) =>
+  request('/repos/' + owner + '/' + repo + '/traffic/popular/referrers', { token, signal });
 
 // ─── Milestones ─────────────────────────────────────────────────────
-export const getRepoMilestones = (token, owner, repo, page, perPage) =>
+export const getRepoMilestones = (token, owner, repo, page, perPage, signal) =>
   request('/repos/' + owner + '/' + repo + '/milestones?page=' + (page||1) +
-    '&per_page=' + (perPage||20), { token });
+    '&per_page=' + (perPage||20), { token, signal });
 
 // ─── Labels ─────────────────────────────────────────────────────────
-export const getRepoLabels = (token, owner, repo, page, perPage) =>
+export const getRepoLabels = (token, owner, repo, page, perPage, signal) =>
   request('/repos/' + owner + '/' + repo + '/labels?page=' + (page||1) +
-    '&per_page=' + (perPage||100), { token });
+    '&per_page=' + (perPage||100), { token, signal });
 
 // ─── Checks/CI ─────────────────────────────────────────────────────
-export const getRepoCheckRuns = (token, owner, repo, ref) =>
-  request('/repos/' + owner + '/' + repo + '/commits/' + (ref || 'HEAD') + '/check-runs', { token });
+export const getRepoCheckRuns = (token, owner, repo, ref, signal) =>
+  request('/repos/' + owner + '/' + repo + '/commits/' + encodeURIComponent(ref || 'HEAD') + '/check-runs', { token, signal });
 
-export const getRepoCheckSuites = (token, owner, repo, ref) =>
-  request('/repos/' + owner + '/' + repo + '/commits/' + (ref || 'HEAD') + '/check-suites', { token });
+export const getRepoCheckSuites = (token, owner, repo, ref, signal) =>
+  request('/repos/' + owner + '/' + repo + '/commits/' + encodeURIComponent(ref || 'HEAD') + '/check-suites', { token, signal });
 
 // ─── Followers ─────────────────────────────────────────────────────
-export const getUserFollowers = (token, page, perPage) =>
-  request('/user/followers?page=' + (page||1) + '&per_page=' + (perPage||30), { token });
+export const getUserFollowers = (token, page, perPage, signal) =>
+  request('/user/followers?page=' + (page||1) + '&per_page=' + (perPage||30), { token, signal });
 
-export const getUserFollowing = (token, page, perPage) =>
-  request('/user/following?page=' + (page||1) + '&per_page=' + (perPage||30), { token });
+export const getUserFollowing = (token, page, perPage, signal) =>
+  request('/user/following?page=' + (page||1) + '&per_page=' + (perPage||30), { token, signal });
 
 // ─── Security (Dependabot) ────────────────────────────────────────
-export const getRepoDependabotAlerts = (token, owner, repo, state) =>
-  request('/repos/' + owner + '/' + repo + '/dependabot/alerts' + (state ? '?state=' + state : ''), { token });
+export const getRepoDependabotAlerts = (token, owner, repo, state, signal) =>
+  request('/repos/' + owner + '/' + repo + '/dependabot/alerts' + (state ? '?state=' + encodeURIComponent(state) : ''), { token, signal });
 export const getDependabotAlert = (token, owner, repo, alertId) =>
   request('/repos/' + owner + '/' + repo + '/dependabot/alerts/' + alertId, { token });
 export const dismissDependabotAlert = (token, owner, repo, alertId, dismissedReason, comment) =>
@@ -656,39 +708,39 @@ export const dismissDependabotAlert = (token, owner, repo, alertId, dismissedRea
 
 export const getSecretScanningAlerts = (token, owner, repo, state, signal) =>
   request('/repos/' + owner + '/' + repo + '/secret-scanning/alerts' +
-    (state ? '?state=' + state : ''), { token, signal });
+    (state ? '?state=' + encodeURIComponent(state) : ''), { token, signal });
 
 // ─── Security (Code Scanning) ─────────────────────────────────────
-export const getCodeScanningAlerts = (token, owner, repo, state, perPage) =>
+export const getCodeScanningAlerts = (token, owner, repo, state, perPage, signal) =>
   request('/repos/' + owner + '/' + repo + '/code-scanning/alerts' +
-    (state ? '?state=' + state : '') +
-    (perPage ? (state ? '&' : '?') + 'per_page=' + perPage : ''), { token });
+    (state ? '?state=' + encodeURIComponent(state) : '') +
+    (perPage ? (state ? '&' : '?') + 'per_page=' + perPage : ''), { token, signal });
 
 // ─── Security Advisories ──────────────────────────────────────────
-export const getSecurityAdvisories = (token, owner, repo) =>
-  request('/repos/' + owner + '/' + repo + '/security-advisories', { token });
+export const getSecurityAdvisories = (token, owner, repo, signal) =>
+  request('/repos/' + owner + '/' + repo + '/security-advisories', { token, signal });
 
 // ─── Branch Protection ────────────────────────────────────────────
-export const getBranchProtection = (token, owner, repo, branch) =>
-  request('/repos/' + owner + '/' + repo + '/branches/' + encodeURIComponent(branch) + '/protection', { token });
+export const getBranchProtection = (token, owner, repo, branch, signal) =>
+  request('/repos/' + owner + '/' + repo + '/branches/' + encodeURIComponent(branch) + '/protection', { token, signal });
 
 // ─── Dependency Graph ─────────────────────────────────────────────
-export const getDependencyGraphManifests = (token, owner, repo) =>
+export const getDependencyGraphManifests = (token, owner, repo, signal) =>
   request('/repos/' + owner + '/' + repo + '/dependency-graph/manifests', {
-    token, accept: 'application/vnd.github.hawthorn-preview+json',
+    token, signal, accept: 'application/vnd.github.hawthorn-preview+json',
   });
 
 // ─── User search ──────────────────────────────────────────────────
-export async function searchUsers(token, query, page, perPage) {
+export async function searchUsers(token, query, page, perPage, signal) {
   const r = await request('/search/users?q=' + encodeURIComponent(query) +
-    '&page=' + (page||1) + '&per_page=' + (perPage||20), { token });
+    '&page=' + (page||1) + '&per_page=' + (perPage||20), { token, signal });
   return r.items || [];
 }
 
 // ─── Code search ──────────────────────────────────────────────────
-export async function searchCode(token, query, page, perPage) {
+export async function searchCode(token, query, page, perPage, signal) {
   const r = await request('/search/code?q=' + encodeURIComponent(query) +
-    '&page=' + (page||1) + '&per_page=' + (perPage||20), { token });
+    '&page=' + (page||1) + '&per_page=' + (perPage||20), { token, signal });
   return r.items || [];
 }
 

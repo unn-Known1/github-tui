@@ -227,7 +227,10 @@ export function startOnboarding() {
 }
 
 export function startWelcome() {
-  stepIdx = 0;
+  // The welcome shortcut is specifically the release-notes view, not the
+  // first-run wizard's generic greeting/login steps.
+  stepIdx = 3;
+  appState.showOnboarding = false;
   appState.showWelcome = true;
   _stepsDirty = true;
   render();
@@ -267,6 +270,14 @@ export function handleOnboardingKey(key) {
     return true;
   }
   if (key === '\r' || key === '\n' || key === ' ') {
+    // Standalone What's New displays only the current release notes. Do not
+    // fall through into the first-run theme step when the user accepts it.
+    if (appState.showWelcome) {
+      appState.showWelcome = false;
+      markVersionSeen();
+      render();
+      return true;
+    }
     const step = STEPS[stepIdx];
     if (step && step.onEnter) {
       const r = step.onEnter();

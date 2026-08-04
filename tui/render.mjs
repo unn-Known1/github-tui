@@ -514,13 +514,13 @@ function renderFooter(W, H) {
   screen.fillRow(statusY, ' ', statusStyle);
 
   if (appState.inputMode === 'input') {
-    const buf = appState.inputBuffer;
-    const cursor = appState.inputCursor || buf.length;
+    const buf = Array.from(appState.inputBuffer);
+    const cursor = appState.inputCursor != null ? appState.inputCursor : buf.length;
     const shown = appState.inputMask
-      ? '•'.repeat(buf.length) : buf;
-    // Insert cursor character at the correct position.
-    const before = shown.slice(0, cursor);
-    const after = shown.slice(cursor);
+      ? Array.from('•'.repeat(buf.length)) : buf;
+    // Insert cursor character at the correct code-point position.
+    const before = shown.slice(0, cursor).join('');
+    const after = shown.slice(cursor).join('');
     // input cursor uses a plain '_' in --accessible mode.
     const cursorChar = appState.accessible ? '_' : '█';
     const line = appState.inputPrompt + before + cursorChar + after;

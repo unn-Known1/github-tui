@@ -132,15 +132,86 @@ export async function submitLogin(value) {
 registerInputHandler('login', submitLogin);
 
 export async function handleLogout() {
+  // Invalidate account-scoped requests before clearing their data. The
+  // generation bump aborts active requests and prevents late responses from
+  // repopulating the UI after logout.
+  for (const scope of [
+    'login', 'repos', 'repos-more', 'dashboard-widgets', 'dashboard-trending',
+    'inbox', 'inbox-more', 'inbox-page', 'actions-runs', 'actions-jobs',
+    'analyze-details', 'analyze-search-repos', 'analyze-search-users',
+    'analyze-search-code', 'analyze-user-profile', 'forks', 'forks-more',
+    'analyze-labels', 'analyze-checks', 'analyze-issues', 'analyze-traffic',
+    'analyze-milestones', 'analyze-readme', 'analyze-packages',
+    'analyze-security', 'files-tree', 'files-view', 'files-branches', 'files-bulk', 'detail',
+  ]) startAsync(scope);
+
   appState.token = null;
   appState.user = null;
   appState.repos = [];
   appState.reposPage = 1;
   appState.reposHasMore = true;
+  appState.repoSelected = 0;
+  appState.repoScroll = 0;
   appState.events = [];
   appState.trending = [];
+  appState.trendingPage = 1;
+  appState.trendingHasMore = true;
   appState.notifications = [];
+  appState.inboxPage = 1;
+  appState.inboxHasMore = false;
+  appState.selectedNotification = 0;
+  appState.starred = [];
+  appState.starredPage = 1;
+  appState.starredHasMore = false;
+  appState.entityCache = {};
+  appState.actionsRepos = [];
+  appState.actionsRuns = [];
+  appState.actionsJobs = {};
+  appState.repoDetails = null;
+  appState.repoLanguages = null;
+  appState.repoContributors = [];
+  appState.repoReleases = [];
+  appState.repoReleaseAssets = [];
+  appState.repoIssues = [];
+  appState.repoPullRequests = [];
+  appState.repoTraffic = null;
+  appState.repoTrafficClones = null;
+  appState.repoTrafficPopularPaths = [];
+  appState.repoTrafficPopularReferrers = [];
+  appState.repoMilestones = [];
+  appState.repoLabels = [];
+  appState.repoCheckRuns = [];
+  appState.repoCheckSuites = [];
+  appState.repoDependabotAlerts = [];
+  appState.secretScanningAlerts = [];
+  appState.codeScanningAlerts = [];
+  appState.securityAdvisories = [];
+  appState.branchProtection = null;
+  appState.dependencyManifests = [];
+  appState.forks = [];
+  appState.searchResults = [];
+  appState.userSearchResults = [];
+  appState.codeSearchResults = [];
+  appState.filesEntries = [];
+  appState.filesBranches = [];
+  appState.filesPath = '';
+  appState.fileViewing = null;
+  appState.fileText = '';
+  appState._readmeText = null;
+  appState.showDetail = false;
+  appState.detailData = null;
+  appState.detailComments = [];
+  appState.detailReviews = [];
+  appState.detailFiles = [];
+  appState.detailDiffContent = '';
+  appState.detailDiffFile = null;
+  appState.securityAlertDetail = null;
+  appState.dashboardRecentIssues = [];
+  appState.dashboardRecentPRs = [];
+  appState.dashboardContributions = null;
+  appState.dashboardStarHistory = [];
   appState.dashboardLoaded = false;
+  appState.loading = false;
   removeToken();
   showMessage('Logged out', 'success');
   render();
@@ -314,7 +385,7 @@ export function renderSettings(screen, y, h) {
       ? { bg: 'red', fg: 'white', bold: true }
       : (item.enabled ? { fg: 'red', bold: true } : { dim: true });
     renderRow(screen, row, leftMaxW, item.label, item.desc, item.enabled, item.sel, dangerStyle);
-    rowBounds.push({ cursor: 6, y: row });
+    rowBounds.push({ cursor: 7, y: row });
     row++;
   }
 
@@ -501,7 +572,7 @@ function isCursorEnabled(cursor) {
     return isLoggedIn;
   }
   if (DATA_ITEMS.includes(cursor)) {
-    if (cursor === 4) return true;  // Auto-refresh is always available
+    if (cursor === 5) return true;  // Auto-refresh is always available
     return isLoggedIn;
   }
   if (APPEARANCE_ITEMS.includes(cursor)) return true;

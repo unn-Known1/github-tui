@@ -121,8 +121,12 @@ function filtered() {
   return list;
 }
 
-function selected() {
+export function getSelectedNotification() {
   return filtered()[appState.selectedNotification];
+}
+
+function selected() {
+  return getSelectedNotification();
 }
 
 export async function markCurrentRead() {

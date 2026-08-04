@@ -1116,7 +1116,7 @@ function dispatchSettingsClick(sx, sy) {
   // Click on the star row → trigger starRepo() directly with full feedback.
   const starBounds = appState._starRowBounds;
   if (starBounds && sy === starBounds.y && sx >= starBounds.x1 && sx < starBounds.x2) {
-    appState.settingsCursor = 7;
+    appState.settingsCursor = 8;
     import('./tabs/settings.mjs').then(m => m.starRepo());
     render();
     return;

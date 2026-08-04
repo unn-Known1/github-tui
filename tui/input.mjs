@@ -203,7 +203,7 @@ export function handleInputKey(key) {
 
   // Ctrl-E — move cursor to end.
   if (key === '\x05') {
-    appState.inputCursor = appState.inputBuffer.length;
+    appState.inputCursor = Array.from(appState.inputBuffer).length;
     render();
     return true;
   }
@@ -242,7 +242,7 @@ export function handleInputKey(key) {
   // Right arrow.
   if (key === '\x1b[C') {
     const cur = appState.inputCursor || 0;
-    appState.inputCursor = Math.min(appState.inputBuffer.length, cur + 1);
+    appState.inputCursor = Math.min(Array.from(appState.inputBuffer).length, cur + 1);
     render();
     return true;
   }
@@ -280,7 +280,7 @@ export function handleInputKey(key) {
 
   // End.
   if (key === '\x1b[F' || key === '\x1bOF') {
-    appState.inputCursor = appState.inputBuffer.length;
+    appState.inputCursor = Array.from(appState.inputBuffer).length;
     render();
     return true;
   }

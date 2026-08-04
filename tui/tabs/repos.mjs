@@ -89,7 +89,7 @@ export async function loadUserData() {
   appState.loading = true;
   render();
   try {
-    appState.user = await getAuthenticatedUser(appState.token);
+    appState.user = await getAuthenticatedUser(appState.token, gen.signal);
     if (isStale(gen, 'repos')) { appState.loading = false; return; }
     if (appState.user) {
       appState.repos = await getUserRepositories(appState.token, 1, REPOS_PER_PAGE, gen.signal);
@@ -529,7 +529,7 @@ async function loadStarredRepos() {
   appState.loading = true;
   render();
   try {
-    const starred = await getStarredRepos(appState.token, 1, 100);
+    const starred = await getStarredRepos(appState.token, 1, 100, gen.signal);
     if (isStale(gen, 'repos')) { appState.loading = false; return; }
     appState.starred = Array.isArray(starred) ? starred.map(s => ({
       ...s.repo,
@@ -553,7 +553,7 @@ export async function loadMoreStarred() {
   render();
   try {
     const page = appState.starredPage + 1;
-    const more = await getStarredRepos(appState.token, page, 100);
+    const more = await getStarredRepos(appState.token, page, 100, gen.signal);
     if (isStale(gen, 'repos')) { appState.loading = false; return; }
     if (Array.isArray(more) && more.length > 0) {
       const mapped = more.map(s => ({ ...(s.repo || s), starred_at: s.starred_at || s.created_at }));
@@ -581,13 +581,13 @@ export function pageUp() {
     const gen = startAsync('repos');
     appState.loading = true;
     render();
-    getStarredRepos(appState.token, page, 100).then(more => {
+    getStarredRepos(appState.token, page, 100, gen.signal).then(more => {
       if (isStale(gen, 'repos')) { appState.loading = false; return; }
       if (Array.isArray(more)) {
         appState.starred = more.map(s => ({ ...(s.repo || s), starred_at: s.starred_at || s.created_at }));
         _seedStarredCache();
         appState.starredPage = page;
-        appState.starredHasMore = true;
+        appState.starredHasMore = more.length >= 100;
         appState.starredSelected = 0;
         appState.starredScroll = 0;
       }
@@ -607,7 +607,7 @@ export function pageDown() {
     const gen = startAsync('repos');
     appState.loading = true;
     render();
-    getStarredRepos(appState.token, page, 100).then(more => {
+    getStarredRepos(appState.token, page, 100, gen.signal).then(more => {
       if (isStale(gen, 'repos')) { appState.loading = false; return; }
       if (Array.isArray(more) && more.length > 0) {
         appState.starred = more.map(s => ({ ...(s.repo || s), starred_at: s.starred_at || s.created_at }));

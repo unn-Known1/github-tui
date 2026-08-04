@@ -2,6 +2,23 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.6.7] - 2026-08-04
+
+### Fixed — Audit hardening and account-safe state
+- **Lifecycle cleanup** — shutdown callbacks now run through the shared state registry, including toast-timer cleanup; stdin and resize paths are guarded so terminal cleanup can complete safely.
+- **Upgrade notes** — returning authenticated users now receive the version-gated “What’s new” overlay; standalone release notes open on the correct release step and close cleanly after acknowledgement.
+- **Account isolation** — logout invalidates active async scopes and clears private repositories, dashboard, inbox, actions, search, files, repository-detail, security, and issue/PR detail state before returning to the signed-out UI.
+- **ETag cache safety** — cached responses are partitioned by token identity and representation, preventing private data from crossing accounts and preventing JSON responses from being reused as raw file content. Legacy unpartitioned cache entries are ignored.
+- **Download safety** — streamed downloads require HTTPS, never forward GitHub credentials to unrelated redirect hosts, reject malformed redirects, and remove failed partial archives.
+- **Stale request prevention** — repository authentication, follower loading, starred pagination, file access, and the audited analysis flows now honor `AbortSignal` cancellation.
+- **Navigation correctness** — filtered Inbox open/copy actions now use the highlighted filtered notification; Settings mouse/palette actions target the correct menu items; starred pagination stops accurately at short pages.
+- **Input robustness** — Unicode cursor movement and footer rendering use consistent code-point indexing, avoiding split surrogate pairs while editing emoji and other astral characters.
+
+### Documentation and tests
+- Updated version metadata and release documentation to `0.6.7`.
+- Added focused regression coverage for cache partitioning, repository path encoding, secure downloads, filtered Inbox selection, and release-note lifecycle.
+- **222 / 222 passing** with import and syntax checks clean.
+
 ## [0.6.6] - 2026-07-28
 
 ### Fixed — 16 gap audit closeout (P0 + P1)

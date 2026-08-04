@@ -8,7 +8,7 @@
 // at line ~11.
 import {
   appState, tabState, TABS, showMessage,
-  loadCollapsed, loadSession, registerShutdownCallback,
+  loadCollapsed, loadSession, registerShutdownCallback, runShutdownCallbacks,
 } from './tui/state.mjs';
 import { enableMouse, disableMouse } from './tui/mouse.mjs';
 import { checkLoadingWatchdog } from './tui/state.mjs';
@@ -219,10 +219,7 @@ process.stdin.on('end', () => {
   }
 
 // ── Atomic shutdown — single function, no double-calls ──
-let _shuttingDown = false;
-// Registered shutdown callbacks (state.mjs attaches the message-timer clear).
-const _shutdownCallbacks = [];
-function shutdown() {
+let _shuttingDown = false;function shutdown() {
   if (_shuttingDown) return;
   _shuttingDown = true;
   // each cleanup step wrapped in try/catch so one failure doesn't
@@ -230,11 +227,8 @@ function shutdown() {
   try { if (rateLimitInterval) clearInterval(rateLimitInterval); } catch (e) { debug('shutdown rate-limit interval clear failed:', e.message); }
   try { if (autoRefreshInterval) clearInterval(autoRefreshInterval); } catch (e) { debug('shutdown auto-refresh interval clear failed:', e.message); }
   try { saveCurrentRepoPrefs(); } catch (e) { debug('shutdown saveRepoPrefs failed:', e.message); }
-  // run registered shutdown callbacks (clears pending toast timer,
-  // any other cleanup registered later). No reliance on an undefined global.
-  for (const cb of _shutdownCallbacks) {
-    try { cb(); } catch (e) { debug('shutdown callback failed:', e.message); }
-  }
+  // Run callbacks registered by state and other modules.
+  runShutdownCallbacks();
   try { process.stdin.setRawMode(false); } catch {}
   try { disableMouse(); } catch (e) { debug('disableMouse failed:', e.message); }
   try { disableBracketedPaste(); } catch (e) { debug('disableBracketedPaste failed:', e.message); }
@@ -248,6 +242,10 @@ process.on('SIGHUP',  () => { shutdown(); process.exit(0); });
 if (process.platform === 'win32') {
   process.on('SIGBREAK', () => { shutdown(); process.exit(0); });
 }
+
+  // Load onboarding helpers before either startup branch so the upgrade
+  // welcome check works for authenticated and logged-out users alike.
+  const onboarding = await import('./tui/tabs/onboarding.mjs');
 
   // Auto-load if we already have a saved token.
   if (appState.token) {
@@ -271,18 +269,16 @@ if (process.platform === 'win32') {
     startAutoRefresh();
   } else {
     // First-time users get a friendly welcome overlay.
-    const onboarding = await import('./tui/tabs/onboarding.mjs');
     if (onboarding.isFirstRun()) {
       onboarding.startOnboarding();
     }
-    // auto-launch "what's new" overlay on version upgrade. Reuses the
-    // dynamic-imported `onboarding` handle above (the second `import` would
-    // be wasted work). Only runs if there's a token AND we've previously
-    // completed first-run onboarding (`lastSeenVersion` is set).
-    if (appState.lastSeenVersion) {
-      const { shouldAutoLaunchWelcome, startWelcome } = onboarding;
-      if (shouldAutoLaunchWelcome()) startWelcome();
-    }
+  }
+
+  // Show release notes for returning users as well as first-time users.
+  // This must run after session restoration and outside the no-token branch;
+  // authenticated users are the primary upgrade path.
+  if (!appState.showOnboarding && onboarding.shouldAutoLaunchWelcome()) {
+    onboarding.startWelcome();
   }
   render();
 }
@@ -292,7 +288,7 @@ if (process.platform === 'win32') {
 main().catch(err => {
   debug('Fatal:', err.message, err.stack);
   try {
-    for (const cb of _shutdownCallbacks) { cb(); }
+    runShutdownCallbacks();
   } catch {}
   try { disableMouse(); } catch {}
   try { disableBracketedPaste(); } catch {}
