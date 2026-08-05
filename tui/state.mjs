@@ -191,7 +191,7 @@ export const appState = {
   searchHasMore: true,
   selectedRepo: 0,
   searchScroll: 0,
-  searchType: 'repos',    // 'repos' | 'users' | 'code'
+  searchType: 'repos',    // 'repos' | 'users' | 'code' | 'user-repos'
   analyzeView: 'search',  // 'search' | 'results' | 'details' | 'forks'
   userSearchResults: [],   // user search results
   codeSearchResults: [],   // code search results
@@ -203,6 +203,14 @@ export const appState = {
   userSearchScroll: 0,
   codeSelectedRepo: 0,
   codeSearchScroll: 0,
+  // Repos of a user opened from user-search results (searchType 'user-repos').
+  selectedUser: null,      // user profile being browsed
+  userRepos: [],
+  userReposPage: 1,
+  userReposHasMore: true,
+  userReposSelected: 0,
+  userReposScroll: 0,
+  userReposSort: { field: 'updated', asc: false },  // 'stars' | 'updated' | 'name'
   detailsPane: 'overview', // 'overview' | 'issues' | 'prs' | 'readme' | 'files'
   detailsScroll: 0,
   repoDetails: null,

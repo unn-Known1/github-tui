@@ -54,7 +54,11 @@ const CATEGORIES = [
   ]},
   { id: 'analyze',    name: 'EXPLORE',           shortcuts: [
     { key: 'i',         desc: 'Search prompt (or toggle Issues pane on details)' },
+    { key: 'u',         desc: 'Search GitHub users (then Enter to browse their repos)' },
+    { key: 'C',         desc: 'Search code across GitHub' },
     { key: 'Enter',     desc: 'Open details (or open Forks / Issue-PR detail)' },
+    { key: 'Space',     desc: 'Load more search results / user repos' },
+    { key: 'S / U',     desc: 'Sort user repos by stars / last updated' },
     { key: 'O',         desc: 'Overview pane' },
     { key: 'R',         desc: 'README pane' },
     { key: 'F',         desc: 'Files pane' },

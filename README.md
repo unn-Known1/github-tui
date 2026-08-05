@@ -137,6 +137,9 @@ Your current token scopes are shown in the Settings → System panel so you can 
 | Key | Action |
 |---|---|
 | `i` | Open the search prompt (from details: toggle Issues pane) |
+| `u` | Search GitHub users — `Enter` on a result lists all their public repos |
+| `C` | Search code across GitHub |
+| `S` / `U` | On a user's repo list: sort by **stars** / **last updated** (press again to reverse) |
 | `Enter` | View details → from details: view Forks / **open Issue/PR detail popup** |
 | `P` | Toggle PRs pane (on details view) |
 | `O` | Reset to Overview pane (on details view) |
@@ -297,6 +300,8 @@ Every tab module exports `render(screen, y, h)`, an optional `keys` map for tab-
 
 ### 3 · Analyze
 - Search any public repo. `Enter` opens a 2-column detail view.
+- `u` searches GitHub users; `Enter` on a user lists all their public repos (paginated with `Space`), and `Enter` on a repo drills into full details.
+- `C` searches code across GitHub.
 - **Pane tabs:** `[O] Overview`, `[i] Issues (N)`, `[P] PRs (N)`, `[R] README`, `[F] Files`, `[T] Traffic`, `[M] Milestones`, `[L] Labels`, `[K] Checks`, `[S] Security`.
 - Overview = metadata column + (languages bar chart / top contributors / latest releases) column.
 - README pane renders Markdown with naive styling (headings bold, lists in accent color, code fences dimmed).

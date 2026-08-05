@@ -3,7 +3,6 @@
 import { appState, tabState, setTab, render, TABS, toggleCollapse, showMessage, upsertEntity } from './state.mjs';
 import { getScreen, HEADER_HEIGHT, TAB_CONTENT_Y } from './render.mjs';
 import { setTheme } from './theme.mjs';
-import { startInput } from './input.mjs';
 import { openUrl, copyToClipboard, getClipboardTempFilePath, getLastClipboardMethod, wrapTextWithMap } from './utils.mjs';
 import { dismissConfirm } from './state.mjs';
 import * as analyze from './tabs/analyze.mjs';
@@ -901,8 +900,7 @@ function dispatchAnalyzeClick(sx, sy) {
 
     // Click on search input box → start typing.
     if (sy >= inputY && sy <= inputY + 2 && sx >= 2 && sx < 2 + inputW + 2) {
-      startInput('Search repos: ', 'search');
-      render();
+      analyze.startSearchInputFor(appState.searchType || 'repos');
       return;
     }
 
@@ -916,6 +914,40 @@ function dispatchAnalyzeClick(sx, sy) {
         analyze.loadRepoDetails(owner, name);
       }
       return;
+    }
+    return;
+  }
+
+  // ── Results view: search result rows (repos / users / code / user-repos) ──
+  if (appState.analyzeView === 'results') {
+    const type = appState.searchType || 'repos';
+    const results = analyze.getResultList();
+    const screen = getScreen();
+    const maxVisible = analyze.maxVisibleResults((screen ? screen.height : 24) - 8);
+    const rowOff = HEADER_HEIGHT + 2 + 4 + 2;  // contentY + listY offset + 2 rows
+    const scroll = type === 'users' ? appState.userSearchScroll
+      : type === 'code' ? appState.codeSearchScroll
+      : type === 'user-repos' ? appState.userReposScroll
+      : appState.searchScroll;
+    const idx = sy - rowOff + scroll;
+    if (idx >= 0 && idx < results.length) {
+      // Scroll so the clicked item becomes the last visible row, clamped to
+      // the valid scroll range (mirrors the previous fixed-width behavior).
+      const newScroll = Math.max(0, Math.min(idx - (maxVisible - 1), Math.max(0, results.length - maxVisible)));
+      if (type === 'users') {
+        appState.userSelectedRepo = idx;
+        appState.userSearchScroll = newScroll;
+      } else if (type === 'code') {
+        appState.codeSelectedRepo = idx;
+        appState.codeSearchScroll = newScroll;
+      } else if (type === 'user-repos') {
+        appState.userReposSelected = idx;
+        appState.userReposScroll = newScroll;
+      } else {
+        appState.selectedRepo = idx;
+        appState.searchScroll = newScroll;
+      }
+      render();
     }
     return;
   }

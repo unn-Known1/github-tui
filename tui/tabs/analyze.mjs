@@ -28,12 +28,13 @@ import {
 } from './analyze-security.mjs';
 import {
   submitSearch, submitUserSearch, submitCodeSearch,
-  loadMoreSearchResults, openUserProfile,
+  loadMoreSearchResults, openUserRepos,
   renderSearchInput, renderResultsList,
-  pageUp, pageDown,
+  pageUp, pageDown, getResultList, maxVisibleResults,
+  toggleUserReposSort,
 } from './analyze-search.mjs';
 import { openDetail as _openDetail } from './detail.mjs';
-export { _openDetail as openDetail, submitSearch, submitUserSearch, submitCodeSearch };
+export { _openDetail as openDetail, submitSearch, submitUserSearch, submitCodeSearch, openUserRepos };
 export { loadSecurity, cycleSecurityFilter, cycleSecurityStateFilter, securityUp, securityDown, securityEnter, securityDismiss } from './analyze-security.mjs';
 export { loadTraffic } from './analyze-traffic.mjs';
 export { loadMilestones } from './analyze-milestones.mjs';
@@ -43,6 +44,7 @@ export { loadReleaseAssets, downloadAsset } from './analyze-packages.mjs';
 export { viewReadme } from './analyze-readme.mjs';
 export { cycleIssueStateFilter } from './analyze-issues.mjs';
 export { pageUp, pageDown } from './analyze-search.mjs';
+export { getResultList, maxVisibleResults } from './analyze-search.mjs';
 
 // Clear text-selection state whenever the user leaves a text-viewing pane
 // (README / file viewer) so stale selection coordinates don't bleed into
@@ -320,9 +322,21 @@ export function handleBack() {
     appState.analyzeView = 'results';
     render();
   } else if (v === 'results') {
+    if (appState.searchType === 'user-repos') {
+      // Back from a user's repos → return to the user-search results.
+      appState.searchType = 'users';
+      appState.userRepos = [];
+      appState.selectedUser = null;
+      appState.userSelectedRepo = 0;
+      appState.userSearchScroll = 0;
+      render();
+      return;
+    }
     appState.searchResults = [];
     appState.userSearchResults = [];
     appState.codeSearchResults = [];
+    appState.userRepos = [];
+    appState.selectedUser = null;
     appState.searchQuery = '';
     appState.analyzeView = 'search';
     render();
@@ -340,6 +354,9 @@ export function jumpTop() {
     } else if (type === 'code') {
       appState.codeSelectedRepo = 0;
       appState.codeSearchScroll = 0;
+    } else if (type === 'user-repos') {
+      appState.userReposSelected = 0;
+      appState.userReposScroll = 0;
     } else {
       appState.selectedRepo = 0;
       appState.searchScroll = 0;
@@ -354,6 +371,31 @@ export function jumpTop() {
     render();
   }
 }
+export function startSearchInputFor(type) {
+  if (type === 'users') {
+    appState.searchType = 'users';
+    appState.analyzeView = 'search';
+    appState.userSelectedRepo = 0;
+    appState.userSearchScroll = 0;
+    render();
+    startInput('Search users: ', 'user-search');
+  } else if (type === 'code') {
+    appState.searchType = 'code';
+    appState.analyzeView = 'search';
+    appState.codeSelectedRepo = 0;
+    appState.codeSearchScroll = 0;
+    render();
+    startInput('Search code: ', 'code-search');
+  } else {
+    appState.searchType = 'repos';
+    appState.analyzeView = 'search';
+    appState.selectedRepo = 0;
+    appState.searchScroll = 0;
+    render();
+    startInput('Search repos: ', 'search');
+  }
+}
+
 export const keys = {
   'i': () => {
     if (appState.analyzeView === 'details') {
@@ -363,7 +405,7 @@ export const keys = {
       if (next !== 'issues' && next !== 'prs') clearTextSelection();
       render();
     } else {
-      startInput('Search repos: ', 'search');
+      startSearchInputFor('repos');
     }
   },
   'P': () => {
@@ -406,7 +448,9 @@ export const keys = {
     else cycleIssueStateFilter();
   },
   'S': () => {
-    if (appState.analyzeView === 'details') {
+    if (appState.searchType === 'user-repos') {
+      toggleUserReposSort('stars');
+    } else if (appState.analyzeView === 'details') {
       if (appState.detailsPane === 'security') {
         appState.detailsPane = 'overview';
         clearTextSelection();
@@ -420,26 +464,19 @@ export const keys = {
       render();
     }
   },
+  'U': () => {
+    if (appState.searchType === 'user-repos') toggleUserReposSort('updated');
+  },
   'Z': () => { if (isFilesPane()) files.keys.Z(); },
   'C': () => {
     if (isFilesPane()) files.keys.C();
     else if (appState.analyzeView === 'search' || appState.analyzeView === 'results') {
-      appState.searchType = 'code';
-      appState.analyzeView = 'search';
-      appState.codeSelectedRepo = 0;
-      appState.codeSearchScroll = 0;
-      render();
-      startInput('Search code: ', 'code-search');
+      startSearchInputFor('code');
     }
   },
   'u': () => {
     if (appState.analyzeView === 'search' || appState.analyzeView === 'results') {
-      appState.searchType = 'users';
-      appState.analyzeView = 'search';
-      appState.userSelectedRepo = 0;
-      appState.userSearchScroll = 0;
-      render();
-      startInput('Search users: ', 'user-search');
+      startSearchInputFor('users');
     }
   },
   'G': () => { if (isFilesPane()) files.keys.G(); },
@@ -541,6 +578,12 @@ export function up(screen) {
         if (appState.codeSelectedRepo > appState.codeSearchScroll) appState.codeSelectedRepo--;
         else if (appState.codeSearchScroll > 0) { appState.codeSearchScroll--; appState.codeSelectedRepo--; }
       }
+    } else if (type === 'user-repos') {
+      const list = appState.userRepos;
+      if (list.length > 0) {
+        if (appState.userReposSelected > appState.userReposScroll) appState.userReposSelected--;
+        else if (appState.userReposScroll > 0) { appState.userReposScroll--; appState.userReposSelected--; }
+      }
     } else {
       const list = appState.searchResults;
       if (list.length > 0) {
@@ -574,7 +617,7 @@ export function down(screen) {
   }
   if (appState.analyzeView === 'results') {
     const type = appState.searchType || 'repos';
-    const maxVisible = Math.max(1, Math.min(8, screen.height - 16));
+    const maxVisible = maxVisibleResults(screen.height - 8);
     if (type === 'users') {
       const list = appState.userSearchResults;
       if (list.length > 0) {
@@ -593,6 +636,16 @@ export function down(screen) {
         } else if (appState.codeSearchScroll + maxVisible < list.length) {
           appState.codeSearchScroll++;
           appState.codeSelectedRepo = Math.min(list.length - 1, appState.codeSelectedRepo + 1);
+        }
+      }
+    } else if (type === 'user-repos') {
+      const list = appState.userRepos;
+      if (list.length > 0) {
+        if (appState.userReposSelected < appState.userReposScroll + maxVisible - 1) {
+          appState.userReposSelected = Math.min(list.length - 1, appState.userReposSelected + 1);
+        } else if (appState.userReposScroll + maxVisible < list.length) {
+          appState.userReposScroll++;
+          appState.userReposSelected = Math.min(list.length - 1, appState.userReposSelected + 1);
         }
       }
     } else {
@@ -629,7 +682,7 @@ export function enter() {
     if (type === 'users') {
       const user = appState.userSearchResults[appState.userSelectedRepo];
       if (user && user.login) {
-        openUserProfile(user.login);
+        openUserRepos(user);
       }
     } else if (type === 'code') {
       const item = appState.codeSearchResults[appState.codeSelectedRepo];
@@ -638,6 +691,12 @@ export function enter() {
           if (res.ok) showMessage('Opened in browser', 'success');
           else showMessage(res.error || 'Open failed', 'error');
         });
+      }
+    } else if (type === 'user-repos') {
+      const repo = appState.userRepos[appState.userReposSelected];
+      if (repo) {
+        const [owner, name] = repo.full_name.split('/');
+        loadRepoDetails(owner, name);
       }
     } else if (appState.searchResults.length > 0) {
       const repo = appState.searchResults[appState.selectedRepo];
@@ -666,7 +725,7 @@ export function enter() {
       loadForks();
     }
   } else if (v === 'search') {
-    startInput('Search repos: ', 'search');
+    startSearchInputFor(appState.searchType || 'repos');
   }
 }
 

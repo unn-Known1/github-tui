@@ -44,8 +44,12 @@ const tabModules = [dashboard, repos, analyze, actions, inbox, settings];
 function currentRepoForAction() {
   if (tabState.current === 2) {
     const v = appState.analyzeView;
-    if (v === 'results' && appState.searchType === 'repos' && appState.searchResults[appState.selectedRepo])
-      return appState.searchResults[appState.selectedRepo];
+    if (v === 'results') {
+      if (appState.searchType === 'repos' && appState.searchResults[appState.selectedRepo])
+        return appState.searchResults[appState.selectedRepo];
+      if (appState.searchType === 'user-repos' && appState.userRepos[appState.userReposSelected])
+        return appState.userRepos[appState.userReposSelected];
+    }
     if (v === 'details' && appState.repoDetails)
       return appState.repoDetails;
     if (v === 'forks' && appState.forks[appState.selectedFork])
@@ -63,6 +67,12 @@ function currentUrl() {
   if (tabState.current === 4) {
     const n = inbox.getSelectedNotification();
     return n ? notificationToHtmlUrl(n.subject && n.subject.url) : null;
+  }
+  if (tabState.current === 2 && appState.analyzeView === 'results') {
+    if (appState.searchType === 'users') {
+      const u = appState.userSearchResults[appState.userSelectedRepo];
+      return u ? u.html_url : null;
+    }
   }
   const r = currentRepoForAction();
   return r ? r.html_url : null;
@@ -526,7 +536,22 @@ export function handleKey(key) {
       handleExpandAll();
       return;
     }
-    case 'u': undo(); return;
+    case 'u': {
+      // 'u' is the undo hotkey globally — but several tabs define their OWN
+      // 'u' meaning (Explore → search users, Repos → sort by updated, Inbox →
+      // unsubscribe). Those per-tab handlers could NEVER fire because this
+      // global binding caught the key first. Yield to the active tab's 'u'
+      // handler when one exists; fall back to undo everywhere else.
+      const mod = tabModules[tabState.current];
+      if (mod && mod.keys && typeof mod.keys[key] === 'function') {
+        Promise.resolve()
+          .then(() => mod.keys[key]())
+          .catch((e) => showMessage((e && e.message) || 'Action failed', 'error'));
+        return;
+      }
+      undo();
+      return;
+    }
     case '\x19': redo(); return;  // Ctrl+Y
   }
 
@@ -727,13 +752,16 @@ function handleBottom() {
   else if (t === 2) {
     if (appState.analyzeView === 'results') {
       const type = appState.searchType || 'repos';
-      const maxVisible = Math.max(1, Math.min(8, screen.height - 16));
+      const maxVisible = analyze.maxVisibleResults(screen.height - 8);
       if (type === 'users') {
         appState.userSelectedRepo = Math.max(0, appState.userSearchResults.length - 1);
         appState.userSearchScroll = Math.max(0, appState.userSearchResults.length - maxVisible);
       } else if (type === 'code') {
         appState.codeSelectedRepo = Math.max(0, appState.codeSearchResults.length - 1);
         appState.codeSearchScroll = Math.max(0, appState.codeSearchResults.length - maxVisible);
+      } else if (type === 'user-repos') {
+        appState.userReposSelected = Math.max(0, appState.userRepos.length - 1);
+        appState.userReposScroll = Math.max(0, appState.userRepos.length - maxVisible);
       } else {
         appState.selectedRepo = Math.max(0, appState.searchResults.length - 1);
         appState.searchScroll = Math.max(0, appState.searchResults.length - maxVisible);
@@ -937,8 +965,17 @@ export function registerCoreActions() {
 
   reg({ id: 'analyze.search', label: 'Search public repositories...',
         hint: 'i', run: () => { setTab(2); analyze.keys.i(); } });
+  reg({ id: 'analyze.search-users', label: 'Search GitHub users...',
+        hint: 'u', run: () => { setTab(2); analyze.keys.u(); } });
+  reg({ id: 'analyze.search-code', label: 'Search code...',
+        hint: 'C', run: () => { setTab(2); analyze.keys.C(); } });
   reg({ id: 'analyze.readme', label: 'View README of current repo',
         hint: 'R', run: () => { if (appState.repoDetails) analyze.keys.R(); } });
+
+  reg({ id: 'undo.undo', label: 'Undo last action', hint: 'u',
+        run: () => undo() });
+  reg({ id: 'undo.redo', label: 'Redo last undone action', hint: 'Ctrl-Y',
+        run: () => redo() });
 
   reg({ id: 'inbox.refresh',     label: 'Inbox: refresh notifications',       hint: 'r', run: inbox.loadNotifications });
   reg({ id: 'inbox.mark.read',   label: 'Inbox: mark current thread as read', hint: 'm', run: inbox.markCurrentRead });

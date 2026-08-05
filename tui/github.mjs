@@ -402,7 +402,10 @@ export function request(path, opts) {
 export const getAuthenticatedUser = (token, signal) => request('/user', { token, signal });
 export const getUserRepositories = (token, page, perPage, signal) =>
   request('/user/repos?page=' + (page||1) + '&per_page=' + (perPage||50) + '&sort=updated', { token, signal });
-export const getUser = (token, username, signal) => request('/users/' + username, { token, signal });
+export const getUser = (token, username, signal) => request('/users/' + encodeURIComponent(username), { token, signal });
+export const getUserRepos = (token, username, page, perPage, signal) =>
+  request('/users/' + encodeURIComponent(username) + '/repos?page=' + (page||1) +
+    '&per_page=' + (perPage||50) + '&sort=updated', { token, signal });
 export const searchRepositories = async (token, query, page, perPage, signal) => {
   const r = await request('/search/repositories?q=' + encodeURIComponent(query) +
     '&page=' + (page||1) + '&per_page=' + (perPage||100), { token, signal });
