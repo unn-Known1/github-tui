@@ -21,6 +21,58 @@ export function maxVisibleResults(contentH) {
   return Math.max(1, contentH - 8);
 }
 
+// ── Explore base-view landing ─────────────────────────────────────
+// The search view shows a two-column landing below the input: trending
+// repos (left) and saved searches + recent repos (right). Items are merged
+// into one linear list so keyboard nav, mouse clicks, and rendering agree.
+
+export const EXPLORE_MAX_TRENDING = 6;
+export const EXPLORE_MAX_SAVED = 5;
+export const EXPLORE_MAX_RECENT = 5;
+
+export function getExploreLanding() {
+  const items = [];
+  for (const r of appState.trending.slice(0, EXPLORE_MAX_TRENDING)) items.push({ kind: 'trending', repo: r });
+  for (const s of appState.savedSearches.slice(0, EXPLORE_MAX_SAVED)) items.push({ kind: 'saved', search: s });
+  for (const r of appState.recentRepos.slice(0, EXPLORE_MAX_RECENT)) items.push({ kind: 'recent', repo: r });
+  return items;
+}
+
+// Lazy-load "trending this week" for the landing (same query the dashboard
+// uses). Guarded so it only fires once per session and only when authenticated.
+export function loadExploreTrending() {
+  if (!appState.token || appState._exploreTrendingLoaded || appState.loading) return;
+  appState._exploreTrendingLoaded = true;
+  if (appState.trending.length > 0) return;
+  const gen = startAsync('analyze-explore-trending');
+  const days = appState.trendingPeriod || 7;
+  const since = new Date(Date.now() - days * 86400000).toISOString().split('T')[0];
+  searchRepositories(appState.token, 'created:>' + since, 1, 10, gen.signal)
+    .then(list => {
+      if (isStale(gen, 'analyze-explore-trending')) return;
+      if (Array.isArray(list) && list.length > 0) {
+        appState.trending = list;
+        appState.trendingHasMore = list.length >= 10;
+      }
+      render();
+    })
+    .catch(() => {});
+}
+
+export function exploreUp() {
+  const items = getExploreLanding();
+  if (items.length === 0) return;
+  appState.exploreSel = Math.max(0, appState.exploreSel - 1);
+  render();
+}
+
+export function exploreDown() {
+  const items = getExploreLanding();
+  if (items.length === 0) return;
+  appState.exploreSel = Math.min(items.length - 1, appState.exploreSel + 1);
+  render();
+}
+
 export async function submitSearch(value) {
   const query = (value || '').trim();
   if (!query) return;
@@ -425,25 +477,99 @@ export function renderSearchInput(screen, y, h) {
     screen.writeStr(2, ++tipY, t, { dim: true });
   }
 
-  // Recent repos (if any) — quick access.
-  if (appState.recentRepos.length > 0) {
-    tipY += 2;
-    sectionHeader(screen, 2, tipY, '🕘 RECENT');
-    const recentStart = tipY;
-    tipY++;
-    let recentIdx = 0;
-    for (const r of appState.recentRepos.slice(0, 5)) {
-      screen.writeStr(2, tipY, truncate(r.full_name, W - 4), color('repoName') || { fg: 'white' });
-      if (r.description) {
-        const desc = '  ' + truncate(r.description, W - 22);
-        screen.writeStr(2 + 2 + truncate(r.full_name, W - 4).length, tipY, desc, { dim: true });
-      }
-      tipY++;
-      recentIdx++;
-      if (tipY > y + h - 2) break;
-    }
-    appState._recentReposBounds = { x: 2, y: recentStart, count: recentIdx };
+  // Key hints — always show how to search repos, users, and code.
+  tipY += 2;
+  const hint = '[i] Search repos   [u] Search users   [C] Search code   [Enter] Open highlighted';
+  screen.writeStr(2, tipY, hint, { dim: true });
+
+  renderExploreLanding(screen, tipY + 1, h);
+}
+
+function renderExploreLanding(screen, y, h) {
+  const W = screen.width;
+  const splitX = Math.floor(W / 2);
+  const leftX = 2;
+  const rightX = splitX + 2;
+  const leftW = splitX - leftX - 2;
+  const rightW = W - rightX - 2;
+  const landing = getExploreLanding();
+  const sel = appState.exploreSel;
+  const bounds = { trending: null, saved: null, recent: null };
+
+  const selectRow = (x, row, itemIdx, colW) => {
+    if (itemIdx !== sel) return;
+    for (let c = 0; c < colW; c++) screen.styleBuf[row][x + c] = color('selection');
+  };
+
+  // ── LEFT: Trending this week ──────────────────────────────────
+  let ly = y;
+  let gi = 0; // global index into the merged landing list
+  sectionHeader(screen, leftX, ly, '🔥 TRENDING THIS WEEK');
+  ly++;
+  screen.writeStr(leftX, ly, '─'.repeat(Math.max(2, leftW)), { dim: true });
+  ly++;
+  if (appState.trending.length === 0) {
+    screen.writeStr(leftX, ly, appState.token ? 'Loading trending…' : 'Sign in to load trending', { dim: true });
+    ly++;
   }
+  const trendCount = Math.min(appState.trending.length, EXPLORE_MAX_TRENDING);
+  for (let i = 0; i < trendCount; i++) {
+    if (ly > y + h - 2) break;
+    const repo = appState.trending[i];
+    selectRow(leftX, ly, gi, leftW);
+    screen.writeStr(leftX, ly, gi === sel ? '▶ ' : '  ', gi === sel ? color('selection') : color('dim'));
+    const name = truncate(repo.full_name || '?', Math.max(8, Math.min(26, leftW - 12)));
+    screen.writeStr(leftX + 2, ly, name, gi === sel ? color('selection') : color('repoName'));
+    const stats = '★ ' + shortNum(repo.stargazers_count || 0) +
+      (repo.language ? '  ' + repo.language : '');
+    screen.writeStr(Math.min(leftX + 28, leftX + leftW - 10), ly, truncate(stats, Math.max(6, leftW - 12)), gi === sel ? color('selection') : color('dim'));
+    ly++;
+    gi++;
+  }
+  bounds.trending = { x: leftX, y, count: trendCount, startIdx: 0 };
+
+  // ── RIGHT: Saved searches + Recent ────────────────────────────
+  let ry = y;
+  sectionHeader(screen, rightX, ry, '⭐ SAVED SEARCHES');
+  ry++;
+  if (appState.savedSearches.length === 0) {
+    screen.writeStr(rightX, ry, 'None yet — save a query with [Ctrl-P]', { dim: true });
+    ry++;
+  }
+  const savedCount = Math.min(appState.savedSearches.length, EXPLORE_MAX_SAVED);
+  for (let i = 0; i < savedCount; i++) {
+    if (ry > y + h - 2) break;
+    const s = appState.savedSearches[i];
+    selectRow(rightX, ry, gi, rightW);
+    screen.writeStr(rightX, ry, gi === sel ? '▶ ' : '  ', gi === sel ? color('selection') : color('dim'));
+    screen.writeStr(rightX + 2, ry, truncate(s.label || s.query || '?', Math.max(8, Math.min(20, rightW - 2))), gi === sel ? color('selection') : color('repoName'));
+    screen.writeStr(Math.min(rightX + 24, rightX + rightW - 14), ry, truncate(s.query || '', Math.max(6, rightW - 24)), gi === sel ? color('selection') : color('dim'));
+    ry++;
+    gi++;
+  }
+  bounds.saved = { x: rightX, y, count: savedCount, startIdx: gi - savedCount };
+  ry++;
+
+  if (appState.recentRepos.length > 0) {
+    sectionHeader(screen, rightX, ry, '🕘 RECENT');
+    ry++;
+    const recentCount = Math.min(appState.recentRepos.length, EXPLORE_MAX_RECENT);
+    for (let i = 0; i < recentCount; i++) {
+      if (ry > y + h - 2) break;
+      const r = appState.recentRepos[i];
+      selectRow(rightX, ry, gi, rightW);
+      screen.writeStr(rightX, ry, gi === sel ? '▶ ' : '  ', gi === sel ? color('selection') : color('dim'));
+      screen.writeStr(rightX + 2, ry, truncate(r.full_name || '?', Math.max(8, Math.min(24, rightW - 2))), gi === sel ? color('selection') : color('repoName'));
+      if (r.description) {
+        screen.writeStr(rightX + 28, ry, truncate(r.description, Math.max(4, rightW - 28)), gi === sel ? color('selection') : color('dim'));
+      }
+      ry++;
+      gi++;
+    }
+    bounds.recent = { x: rightX, y, count: recentCount, startIdx: gi - recentCount };
+  }
+
+  appState._exploreBounds = bounds;
 }
 
 export function renderResultsList(screen, y, h) {

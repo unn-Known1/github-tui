@@ -401,6 +401,11 @@ export const appState = {
   bookmarksScroll: 0,
   savedSearches: [],     // [{ id, label, query }]
 
+  // ── Explore base-view landing (search mode) ──
+  exploreSel: 0,               // cursor over the merged trending/saved/recent list
+  _exploreTrendingLoaded: false, // one-shot guard for lazy trending fetch
+  _exploreBounds: null,        // { trending:{y,x,count,startIdx}, saved:{...}, recent:{...} }
+
   // ── Rate-limit mirror (also lives in github.mjs but mirrored for render)
   rateLimit: { remaining: null, limit: null, reset: null },
 

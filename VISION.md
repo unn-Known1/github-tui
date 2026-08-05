@@ -35,7 +35,7 @@
 | **Actions/CI tab** — repos → runs → expandable jobs/steps, re-run, cancel | ✅ |
 | **Bookmarks** — `b` toggle, `B` browse overlay, export to Markdown | ✅ |
 | **Command palette** — `Ctrl-P` / `:`, fuzzy match, ~30 actions | ✅ |
-| **Themes** — 8 themes: default, highContrast, dracula, solarized, nord, monokai, gruvbox, light | ✅ |
+| **Themes** — 2 themes: default (dark) and light | ✅ |
 | **Mouse support** — click tabs/panes/items, scroll wheel, hover effects | ✅ |
 | **Collapsible sections** — `z`/`Z`/`X` keys, disk persistence | ✅ |
 | **Saved searches** — `Ctrl-P` → "Save current search" | ✅ |

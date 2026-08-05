@@ -321,12 +321,14 @@ export function renderDashboard(screen, y, h) {
     ? ((Date.now() - new Date(user.created_at).getTime()) / (365.25 * 86400 * 1000)).toFixed(1)
     : '?';
 
-  // Responsive card layout based on terminal width
+  // Responsive card layout based on terminal width. Cards spread across the
+  // full width on md+ (capped + centered on very wide terminals) and wrap to
+  // a second row on xs/sm breakpoints.
   const cardLayout = getStatCardLayout(W, 5);
   const cardW = cardLayout.cardWidth;
   const gap = cardLayout.gap;
+  const cardsPerRow = cardLayout.cardsPerRow;
   const cardH = 4;
-  const margin = 2;
   const cards = [
     { label: 'STARS',         value: shortNum(totalStars),                            style: { fg: 'yellow', bold: true } },
     { label: 'FORKS',         value: shortNum(totalForks),                            style: { fg: 'cyan', bold: true } },
@@ -334,21 +336,25 @@ export function renderDashboard(screen, y, h) {
     { label: 'ACCOUNT AGE',   value: accountAgeYears + 'y',                           style: { fg: 'green', bold: true } },
     { label: 'STALE',         value: String(appState.dashboardStaleCount),            style: appState.dashboardStaleCount > 0 ? { fg: 'yellow', bold: true } : { dim: true } },
   ];
+  const cardRows = Math.ceil(cards.length / cardsPerRow);
   const cardsFocus = appState.dashboardCardsFocus;
   cards.forEach((c, i) => {
-    const cx = margin + i * (cardW + gap);
-    if (cardY + cardH >= y + h) return;
+    const row = Math.floor(i / cardsPerRow);
+    const col = i % cardsPerRow;
+    const cx = cardLayout.startX + col * (cardW + gap);
+    const cy = cardY + row * (cardH + 1);
+    if (cy + cardH >= y + h) return;
     const focused = cardsFocus && i === appState.dashboardSelectedCard;
     const fillStyle = focused ? { bg: 'blue', fg: 'white' } : null;
     const borderStyle = focused ? { fg: 'cyan', bold: true } : { fg: 'gray', dim: true };
-    screen.card(cx, cardY, cardW, cardH, c.label, fillStyle, borderStyle);
+    screen.card(cx, cy, cardW, cardH, c.label, fillStyle, borderStyle);
     const valStr = c.value;
     const valX = cx + Math.floor((cardW - valStr.length) / 2);
-    screen.writeStr(valX, cardY + 2, valStr, focused ? { fg: 'white', bold: true } : c.style);
+    screen.writeStr(valX, cy + 2, valStr, focused ? { fg: 'white', bold: true } : c.style);
   });
 
   // ── Body: 2 columns ────────────────────────────────────────
-  const bodyY = cardY + cardH + 2;
+  const bodyY = cardY + cardRows * (cardH + 1) + 1;
   if (bodyY >= y + h) return;
   const splitX = Math.floor(W / 2);
   const leftX = 2;

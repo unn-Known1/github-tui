@@ -841,15 +841,9 @@ function handleUp() {
   if (t === 0) { dashboard.dashboardUp(); return; }
   if (t === 1) repos.up(screen);
   else if (t === 2) {
-    // keyboard nav for recent repos when Explore is in search mode.
-    // The list is visible only when appState.recentRepos.length > 0;
-    // j/k/Enter mirror the mouse _recentReposBounds dispatch.
-    if (appState.analyzeView === 'search' && appState.recentRepos.length > 0) {
-      const cur = appState._recentReposCursor || 0;
-      appState._recentReposCursor = Math.max(0, cur - 1);
-      render();
-      return;
-    }
+    // Explore base view (search mode): up/down move through the merged
+    // trending / saved-search / recent landing list.
+    if (appState.analyzeView === 'search') { analyze.exploreUp(); return; }
     analyze.up(screen);
     return;
   }
@@ -863,14 +857,7 @@ function handleDown() {
   if (t === 0) { dashboard.dashboardDown(); return; }
   if (t === 1) repos.down(screen);
   else if (t === 2) {
-    // keyboard nav for recent repos when Explore is in search mode.
-    if (appState.analyzeView === 'search' && appState.recentRepos.length > 0) {
-      const max = Math.max(0, appState.recentRepos.length - 1);
-      const cur = appState._recentReposCursor || 0;
-      appState._recentReposCursor = Math.min(max, cur + 1);
-      render();
-      return;
-    }
+    if (appState.analyzeView === 'search') { analyze.exploreDown(); return; }
     analyze.down(screen);
     return;
   }

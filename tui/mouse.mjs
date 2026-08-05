@@ -1,7 +1,7 @@
 // Mouse support — parse terminal mouse events and dispatch to handlers.
 
 import { appState, tabState, setTab, render, TABS, toggleCollapse, showMessage, upsertEntity } from './state.mjs';
-import { getScreen, HEADER_HEIGHT, TAB_CONTENT_Y } from './render.mjs';
+import { getScreen, HEADER_HEIGHT, TAB_CONTENT_Y, getStatCardLayout } from './render.mjs';
 import { setTheme } from './theme.mjs';
 import { openUrl, copyToClipboard, getClipboardTempFilePath, getLastClipboardMethod, wrapTextWithMap } from './utils.mjs';
 import { dismissConfirm } from './state.mjs';
@@ -780,19 +780,25 @@ function dispatchDashboardClick(sx, sy) {
   const W = screen.width, H = screen.height;
   const y = TAB_CONTENT_Y[0];
   const h = H - HEADER_HEIGHT - 2 - 2;
-  const cardW = Math.min(16, Math.max(10, Math.floor((W - 2) / 5) - 2));
-  const gap = 2;
-  const cardY = y + 1;
+  const cardLayout = getStatCardLayout(W, 5);
+  const cardW = cardLayout.cardWidth;
+  const gap = cardLayout.gap;
+  const cardsPerRow = cardLayout.cardsPerRow;
+  const startX = cardLayout.startX;
+  const cardY = y + 3;
   const cardH = 4;
-  const bodyY = cardY + cardH + 2;
+  const cardRows = Math.ceil(5 / cardsPerRow);
+  const bodyY = cardY + cardRows * (cardH + 1) + 1;
   const splitX = Math.floor(W / 2);
   const rightX = splitX + 2;
 
   // Check if click is in the stat-card area.
-  if (sy >= cardY && sy < cardY + cardH) {
-    const col = Math.floor((sx - 1) / (cardW + gap));
-    if (col >= 0 && col < 5) {
-      appState.dashboardSelectedCard = col;
+  if (sy >= cardY && sy < cardY + cardRows * (cardH + 1)) {
+    const row = Math.floor((sy - cardY) / (cardH + 1));
+    const col = Math.floor((sx - startX) / (cardW + gap));
+    const i = row * cardsPerRow + col;
+    if (i >= 0 && i < 5) {
+      appState.dashboardSelectedCard = i;
       appState.dashboardCardsFocus = true;
       render();
       return;
@@ -891,7 +897,7 @@ function dispatchReposClick(sx, sy) {
 // ── Analyze tab ───────────────────────────────────────────────
 
 function dispatchAnalyzeClick(sx, sy) {
-  // ── Search view: input box + recent repos ──
+  // ── Search view: input box + two-column landing (trending / saved / recent) ──
   if (appState.analyzeView === 'search') {
     const screen = getScreen();
     const W = screen ? screen.width : 80;
@@ -904,16 +910,19 @@ function dispatchAnalyzeClick(sx, sy) {
       return;
     }
 
-    // Click on a recent repo row → open it.
-    const recent = appState._recentReposBounds;
-    if (recent && sy > recent.y && sy <= recent.y + recent.count) {
-      const idx = sy - recent.y - 1;
-      const r = appState.recentRepos[idx];
-      if (r && r.full_name) {
-        const [owner, name] = r.full_name.split('/');
-        analyze.loadRepoDetails(owner, name);
+    // Click on a landing row (trending / saved search / recent repo).
+    const b = appState._exploreBounds;
+    if (b) {
+      for (const [kind, sec] of [['trending', b.trending], ['saved', b.saved], ['recent', b.recent]]) {
+        if (!sec || sec.count === 0) continue;
+        if (sy > sec.y && sy <= sec.y + sec.count && sx >= sec.x) {
+          const rowIdx = sy - sec.y - 1;
+          appState.exploreSel = sec.startIdx + rowIdx;
+          render();
+          analyze.exploreEnter();
+          return;
+        }
       }
-      return;
     }
     return;
   }

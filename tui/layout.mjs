@@ -121,23 +121,42 @@ export function getResponsiveConfig(terminalWidth) {
 }
 
 /**
- * Calculate stat card layout for dashboard.
+ * Stat-card sizing. Cards spread across the available terminal width so they
+ * don't huddle at the left edge on wide terminals: on narrow breakpoints they
+ * wrap onto a second row (cardsPerRow), on md+ they scale up to fill the row
+ * up to MAX_STAT_CARD_WIDTH, then the row is centered. startX gives the
+ * horizontal origin for the first card so render, mouse, and tests agree.
  * @param {number} terminalWidth - Terminal width
  * @param {number} cardCount - Number of cards (default 5)
- * @returns {{ cardWidth: number, gap: number, cardsPerRow: number }}
+ * @returns {{ cardWidth: number, gap: number, cardsPerRow: number, startX: number }}
  */
+export const MAX_STAT_CARD_WIDTH = 36;
+export const STAT_CARD_MARGIN = 2;
+export const STAT_CARD_GAP = 2;
+
 export function getStatCardLayout(terminalWidth, cardCount = 5) {
   const bp = getBreakpoint(terminalWidth);
 
-  if (bp === 'xs') {
-    return { cardWidth: Math.floor((terminalWidth - 12) / 2), gap: 1, cardsPerRow: 2 };
-  }
-  if (bp === 'sm') {
-    return { cardWidth: Math.floor((terminalWidth - 16) / 3), gap: 1, cardsPerRow: 3 };
-  }
+  const wrapLayout = (cardsPerRow, gap) => {
+    const avail = terminalWidth - 2 * STAT_CARD_MARGIN;
+    const cardWidth = Math.max(1, Math.floor((avail - (cardsPerRow - 1) * gap) / cardsPerRow));
+    const totalWidth = cardWidth * cardsPerRow + gap * (cardsPerRow - 1);
+    const startX = STAT_CARD_MARGIN + Math.max(0, Math.floor((avail - totalWidth) / 2));
+    return { cardWidth, gap, cardsPerRow, startX };
+  };
 
-  const cardWidth = Math.min(18, Math.floor((terminalWidth - 2) / cardCount) - 2);
-  return { cardWidth, gap: 2, cardsPerRow: cardCount };
+  if (bp === 'xs') return wrapLayout(2, 1);
+  if (bp === 'sm') return wrapLayout(3, 1);
+
+  // md (80-99) fits 4 cards/row so each stays wide enough for the longest
+  // label ("ACCOUNT AGE"); lg/xl use a single row of 5, spread across the
+  // width, capped + centered on very wide terminals.
+  const cardsPerRow = bp === 'md' ? 4 : Math.min(cardCount, 5);
+  const avail = terminalWidth - 2 * STAT_CARD_MARGIN;
+  const cardWidth = Math.min(MAX_STAT_CARD_WIDTH, Math.floor((avail - (cardsPerRow - 1) * STAT_CARD_GAP) / cardsPerRow));
+  const totalWidth = cardWidth * cardsPerRow + STAT_CARD_GAP * (cardsPerRow - 1);
+  const startX = STAT_CARD_MARGIN + Math.max(0, Math.floor((avail - totalWidth) / 2));
+  return { cardWidth, gap: STAT_CARD_GAP, cardsPerRow, startX };
 }
 
 /**

@@ -32,6 +32,8 @@ import {
   renderSearchInput, renderResultsList,
   pageUp, pageDown, getResultList, maxVisibleResults,
   toggleUserReposSort,
+  loadExploreTrending, getExploreLanding,
+  exploreUp, exploreDown,
 } from './analyze-search.mjs';
 import { openDetail as _openDetail } from './detail.mjs';
 export { _openDetail as openDetail, submitSearch, submitUserSearch, submitCodeSearch, openUserRepos };
@@ -45,6 +47,7 @@ export { viewReadme } from './analyze-readme.mjs';
 export { cycleIssueStateFilter } from './analyze-issues.mjs';
 export { pageUp, pageDown } from './analyze-search.mjs';
 export { getResultList, maxVisibleResults } from './analyze-search.mjs';
+export { loadExploreTrending, getExploreLanding, exploreUp, exploreDown } from './analyze-search.mjs';
 
 // Clear text-selection state whenever the user leaves a text-viewing pane
 // (README / file viewer) so stale selection coordinates don't bleed into
@@ -260,7 +263,7 @@ export function renderAnalyze(screen, y, h) {
   screen.writeStr(2, y, 'EXPLORE REPOSITORY', color('title') || { fg: 'white', bold: true });
   screen.hline(y + 1, '─', { dim: true });
   const v = appState.analyzeView;
-  if (v === 'search')   { renderSearchInput(screen, y, h); return; }
+  if (v === 'search')   { loadExploreTrending(); renderSearchInput(screen, y, h); return; }
   if (v === 'results')  { renderResultsList(screen, y, h); return; }
   if (v === 'details')  { renderRepoDetails(screen, y + 2, h - 2); return; }
   if (v === 'forks')    { renderForks(screen, y + 2, h - 2); return; }
@@ -673,10 +676,26 @@ export function down(screen) {
     }
   }
 }
+export function exploreEnter() {
+  const items = getExploreLanding();
+  const item = items[appState.exploreSel];
+  if (!item) return;
+  if (item.kind === 'trending' || item.kind === 'recent') {
+    const repo = item.repo;
+    if (repo && repo.full_name) {
+      const [owner, name] = repo.full_name.split('/');
+      loadRepoDetails(owner, name);
+    }
+  } else if (item.kind === 'saved' && item.search && item.search.query) {
+    submitSearch(item.search.query);
+  }
+}
+
 export function enter() {
   if (isFilesPane()) { files.enter(); return; }
   if (isSecurityPane()) { securityEnter(); return; }
   const v = appState.analyzeView;
+  if (v === 'search') { exploreEnter(); return; }
   const type = appState.searchType || 'repos';
   if (v === 'results') {
     if (type === 'users') {

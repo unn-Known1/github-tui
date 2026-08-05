@@ -327,9 +327,7 @@ export function renderSettings(screen, y, h) {
     row++;
     const themeChips = [];
     const accentColors = {
-      default: 'cyan', highContrast: 'white', dracula: 'magenta',
-      solarized: 'blue', nord: 'cyan', monokai: 'green',
-      gruvbox: 'yellow', light: 'blue', ayu: 'yellow', catppuccin: 'magenta',
+      default: 'cyan', light: 'blue',
     };
 
     const LABEL_X   = 2;   // left margin
