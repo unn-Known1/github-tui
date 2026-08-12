@@ -2,7 +2,7 @@
 // v0.5+ polish: dismissable filter chips, cleaner density, better selected row.
 
 import { appState, render, startAsync, isStale, showMessage, setTab, upsertEntity } from '../state.mjs';
-import { getAuthenticatedUser, getUserRepositories, getStarredRepos } from '../github.mjs';
+import { getAuthenticatedUser, getUserRepositories, getStarredRepos, isStarred, starRepo, unstarRepo } from '../github.mjs';
 import { removeToken } from '../config.mjs';
 import { startInput, registerInputHandler } from '../input.mjs';
 import { shortNum, relTime, truncate } from '../utils.mjs';
@@ -200,6 +200,7 @@ function badgeChar(r) {
   if (r.fork)        return { ch: 'F', style: color('fork'),    label: 'fork' };
   if (r.archived)    return { ch: 'A', style: color('dim'),      label: 'archived' };
   if (isPinnedLocal(r.full_name)) return { ch: '★', style: color('pinned'), label: 'pinned' };
+  if (isStarredLocal(r.full_name)) return { ch: '★', style: color('star'),      label: 'starred' };
   if (isBookmarked(r.full_name)) return { ch: 'B', style: color('bookmarked'),  label: 'bookmarked' };
   return null;
 }
@@ -209,7 +210,11 @@ export function isPinnedLocal(fullName) {
   return appState.repoPins && appState.repoPins.indexOf(fullName) >= 0;
 }
 
-// ─── Render ───────────────────────────────────────────────────────
+export function isStarredLocal(fullName) {
+  return appState.entityCache[fullName]?.isStarred === true;
+}
+
+/// ─── Render ───────────────────────────────────────────────────────
 
 function renderStarredList(screen, y, h) {
   const W = screen.width;
@@ -476,6 +481,21 @@ function togglePinCurrent() {
   render();
 }
 
+export async function toggleStarCurrent() {
+  const r = currentRepo();
+  if (!r) return;
+  const fullName = r.full_name;
+  if (isStarredLocal(fullName)) {
+    await unstarRepo(appState.token, r.owner, r.name);
+    showMessage('Unstarred ' + fullName, 'info');
+  } else {
+    await starRepo(appState.token, r.owner, r.name);
+    showMessage('Starred ' + fullName, 'success');
+  }
+  upsertEntity(r, { isStarred: !isStarredLocal(fullName) });
+  render();
+}
+
 function clearAllFilters() {
   if (appState.reposView !== 'own') return;
   appState.repoFilter = '';
@@ -651,6 +671,7 @@ export const keys = {
   'x': () => { if (appState.reposView === 'own') toggleStale(); },
   'D': () => { if (appState.reposView === 'own') toggleDensity(); },
   'P': () => { if (appState.reposView === 'own') togglePinCurrent(); },
+  's': () => { if (appState.reposView === 'own') toggleStarCurrent(); },
   'V': toggleReposView,
 };
 
