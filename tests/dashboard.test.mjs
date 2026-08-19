@@ -79,6 +79,16 @@ describe('Dashboard data helpers', () => {
     assert.deepEqual(getFilteredTrending().map(r => r.full_name), ['me/alpha']);
   });
 
+  it('keeps account-wide Dashboard totals when local context is detected but disabled', () => {
+    appState.localRepo = { owner: 'me', repo: 'alpha' };
+    appState.localRepoFilter = false;
+    appState.repos = [
+      { full_name: 'me/alpha' },
+      { full_name: 'me/beta' },
+    ];
+    assert.equal(getDashboardRepos().length, 2);
+  });
+
   it('builds a compact attention summary from loaded data', () => {
     appState.notifications = [
       { unread: true, reason: 'review_requested' },

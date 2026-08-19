@@ -257,8 +257,11 @@ if (process.platform === 'win32') {
       const { detectLocalRepo } = await import('./tui/git-context.mjs');
       const local = detectLocalRepo();
       if (local) {
+        // Detect context for the optional Dashboard local-repo filter, but
+        // keep account-wide totals as the default view. Users can press [l]
+        // when they explicitly want to scope Dashboard data to this repo.
         appState.localRepo = local;
-        appState.localRepoFilter = true;
+        appState.localRepoFilter = false;
       }
     } catch {}
 
