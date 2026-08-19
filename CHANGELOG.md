@@ -8,7 +8,7 @@ All notable changes to this project will be documented in this file.
 - Repaired Dashboard keyboard focus, mouse selection, custom-section navigation, and page scrolling.
 - Added complete Dashboard refresh behavior, loading/freshness states, partial-failure preservation, retryable Trending errors, local-repository filtering, and compact Needs Attention actions.
 - Added command-palette actions for Dashboard refresh, Inbox, Actions, repository search, and issue creation.
-- Added Dashboard regression coverage; **248 / 248 tests pass** with import and syntax checks clean.
+- Added Dashboard regression coverage; **249 / 249 tests pass** with import and syntax checks clean.
 
 ### Deferred by design
 - Cross-account critical security aggregation and other advanced metrics remain deferred to preserve the Dashboard’s low-complexity information budget.

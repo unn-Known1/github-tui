@@ -352,7 +352,7 @@ A collapsed section should show only its title and a count/status summary. Enter
 
 ## Validation
 
-- `npm test`: **248 passed, 0 failed**
+- `npm test`: **249 passed, 0 failed**
 - Dashboard-related modules passed `node --check` and imported successfully.
 - Implemented across `dashboard.mjs`, `focus.mjs`, `screen.mjs`, `state.mjs`, `keys.mjs`, `mouse.mjs`, `render.mjs`, `repos.mjs`, `inbox.mjs`, `settings.mjs`, plus `tests/dashboard.test.mjs`.
 - Dashboard regression coverage now includes focus order, local filtering, attention summaries, heatmap alignment, viewport clipping, and traversal across multiple custom sections.

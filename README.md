@@ -237,7 +237,7 @@ The app is split into 30 focused modules. Adding a new tab is: create one file, 
 ├── app.mjs                          # ~70-line entrypoint — lifecycle only
 ├── README.md
 ├── VISION.md                        # Roadmap + persona-driven brainstorm
-├── tests/                           # 248 tests (Node built-in test runner, zero deps)
+├── tests/                           # 249 tests (Node built-in test runner, zero deps)
 │   ├── utils.test.mjs
 │   ├── repos-logic.test.mjs
 │   ├── theme.test.mjs
@@ -387,7 +387,7 @@ Every tab module exports `render(screen, y, h)`, an optional `keys` map for tab-
 **Shipped in v0.7.0:**
 - **Dashboard gap closeout** — repaired keyboard/mouse focus, custom-section navigation, page scrolling, refresh freshness, local filtering, partial-failure handling, retryable Trending errors, and compact Needs Attention actions.
 - **Quick actions** — added low-complexity command-palette actions for Dashboard refresh, Inbox, Actions, repository search, and issue creation.
-- **Regression coverage** — **248 / 248 tests pass** with import and syntax checks clean.
+- **Regression coverage** — **249 / 249 tests pass** with import and syntax checks clean.
 
 **Shipped in v0.6.7:**
 - **Audit hardening** — fixed lifecycle cleanup, upgrade-note gating, account-safe logout/reset, token-partitioned ETag caching, secure streamed downloads, stale-request cancellation, filtered Inbox actions, Settings navigation, starred pagination, and Unicode input cursor handling.
