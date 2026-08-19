@@ -12,7 +12,7 @@ import {
 } from '../github.mjs';
 import { startInput, registerInputHandler } from '../input.mjs';
 import { color, listThemes, getThemeName, setTheme } from '../theme.mjs';
-import { refreshDashboard } from './dashboard.mjs';
+import { refreshDashboard, loadDashboardWidgets } from './dashboard.mjs';
 import { loadUserData } from './repos.mjs';
 import { openUrl } from '../utils.mjs';
 import { starRepo as apiStarRepo } from '../github.mjs';
