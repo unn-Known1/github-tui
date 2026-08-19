@@ -13,7 +13,7 @@ import {
 import { startInput, registerInputHandler } from '../input.mjs';
 import { color, listThemes, getThemeName, setTheme } from '../theme.mjs';
 import { refreshDashboard, loadDashboardWidgets } from './dashboard.mjs';
-import { loadUserData } from './repos.mjs';
+import { loadUserData, loadAllReposBackground } from './repos.mjs';
 import { openUrl } from '../utils.mjs';
 import { starRepo as apiStarRepo } from '../github.mjs';
 import { execFile } from 'child_process';
@@ -71,6 +71,7 @@ export async function loginWithGh() {
       appState.reposPage = 1;
       appState.reposHasMore = appState.repos.length >= REPOS_PER_PAGE;
       appState.dashboardLoaded = false;
+      loadAllReposBackground(gen);
       loadDashboardWidgets().catch(() => {});
       showMessage('✓ Logged in via GitHub CLI as ' + user.login, 'success');
     } else {
@@ -118,6 +119,7 @@ export async function submitLogin(value) {
       appState.reposPage = 1;
       appState.reposHasMore = appState.repos.length >= REPOS_PER_PAGE;
       appState.dashboardLoaded = false;
+      loadAllReposBackground(gen);
       loadDashboardWidgets().catch(() => {});
       showMessage('✓ Logged in as ' + user.login, 'success');
     } else {

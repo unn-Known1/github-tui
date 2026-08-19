@@ -118,7 +118,7 @@ export async function loadUserData({ loadDashboard = true } = {}) {
   if (!isStale(gen, 'repos')) render();
 }
 
-async function loadAllReposBackground(gen) {
+export async function loadAllReposBackground(gen) {
   // Load the complete account repository list in the background. Keep a
   // very high safety ceiling for malformed pagination responses, while
   // avoiding the old 300-repository truncation in normal accounts.
