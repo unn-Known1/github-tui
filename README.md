@@ -2,7 +2,7 @@
 
 A fast, zero-dependency terminal user interface for GitHub — six tabs, a command palette, an in-terminal file explorer that can clone or save anything to your CWD, an inbox triage workflow, themes, persistent bookmarks & pins, OSC-52 clipboard, ETag-aware caching, mouse support, collapsible sections, and comprehensive repo analytics. All driven by your keyboard (and mouse).
 
-![status](https://img.shields.io/badge/status-active-success) ![node](https://img.shields.io/badge/node-%E2%89%A518-blue) ![deps](https://img.shields.io/badge/deps-0-green) [![Socket Badge](https://badge.socket.dev/npm/package/github-tui/0.6.7)](https://badge.socket.dev/npm/package/github-tui/0.6.7) ![license](https://img.shields.io/badge/license-MIT-blue)
+![status](https://img.shields.io/badge/status-active-success) ![node](https://img.shields.io/badge/node-%E2%89%A518-blue) ![deps](https://img.shields.io/badge/deps-0-green) [![Socket Badge](https://badge.socket.dev/npm/package/github-tui/0.7.0)](https://badge.socket.dev/npm/package/github-tui/0.7.0) ![license](https://img.shields.io/badge/license-MIT-blue)
 
 ![GitHub TUI Screenshot](https://raw.githubusercontent.com/unn-Known1/github-tui/main/Screenshot.png)
 
@@ -237,7 +237,7 @@ The app is split into 30 focused modules. Adding a new tab is: create one file, 
 ├── app.mjs                          # ~70-line entrypoint — lifecycle only
 ├── README.md
 ├── VISION.md                        # Roadmap + persona-driven brainstorm
-├── tests/                           # 222 tests (Node built-in test runner, zero deps)
+├── tests/                           # 248 tests (Node built-in test runner, zero deps)
 │   ├── utils.test.mjs
 │   ├── repos-logic.test.mjs
 │   ├── theme.test.mjs
@@ -324,7 +324,7 @@ Every tab module exports `render(screen, y, h)`, an optional `keys` map for tab-
 ### 5 · Settings
 - **Authentication:** Login (GitHub CLI) — uses `gh auth token` if `gh` is installed; Login (PAT) — paste a Personal Access Token; Logout.
 - **Actions:** Refresh Dashboard, Refresh User Data, Auto-Refresh, **Change Theme**, Clear Token File, Token display.
-- **System panel:** app version (`0.6.7`), config dir, token file path, Node version, platform/arch, terminal size, **API remaining / limit / reset-in minutes**, **token scopes**, active keychain backend.
+- **System panel:** app version (`0.7.0`), config dir, token file path, Node version, platform/arch, terminal size, **API remaining / limit / reset-in minutes**, **token scopes**, active keychain backend.
 
 ### 6 · Inbox
 - Per-row: ▶ selection, ● yellow unread dot, color-coded subject type (PR/cyan, Issue/yellow, Release/green, Discussion/magenta, Commit/blue, CheckSuite/red), repo·title, reason, relative time.
@@ -383,6 +383,11 @@ Every tab module exports `render(screen, y, h)`, an optional `keys` map for tab-
 **Shipped in v0.4:** Dashboard enhancements — contribution heatmap (15-week grid), star history sparkline (30-day trend), recent issues/PRs activity, stale repos alert (60+ days), quick actions bar.
 
 **Shipped in v0.5:** Issue/PR detail popup with rendered body, labels, comments, and file diffs. Comment from TUI, emoji reactions, close/reopen, merge PRs with confirmation. PR diff viewer with unified diff and syntax coloring. Inbox notifications open detail popup for issues/PRs.
+
+**Shipped in v0.7.0:**
+- **Dashboard gap closeout** — repaired keyboard/mouse focus, custom-section navigation, page scrolling, refresh freshness, local filtering, partial-failure handling, retryable Trending errors, and compact Needs Attention actions.
+- **Quick actions** — added low-complexity command-palette actions for Dashboard refresh, Inbox, Actions, repository search, and issue creation.
+- **Regression coverage** — **248 / 248 tests pass** with import and syntax checks clean.
 
 **Shipped in v0.6.7:**
 - **Audit hardening** — fixed lifecycle cleanup, upgrade-note gating, account-safe logout/reset, token-partitioned ETag caching, secure streamed downloads, stale-request cancellation, filtered Inbox actions, Settings navigation, starred pagination, and Unicode input cursor handling.

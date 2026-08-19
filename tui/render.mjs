@@ -325,7 +325,8 @@ export function collapsibleHeader(screen, x, y, section, label, hint) {
   }
   // Record position for mouse click detection. Include full text width so the
   // click target covers the entire header (arrow + space + label).
-  appState._sectionHeaders[section] = { x, y, w: text.length };
+  const renderedY = typeof screen.mapViewportY === 'function' ? screen.mapViewportY(y) : y;
+  if (renderedY >= 0) appState._sectionHeaders[section] = { x, y: renderedY, w: text.length };
   return !collapsed;
 }
 
@@ -593,8 +594,10 @@ function statusLine() {
   const sep = '   ';
   switch (tabState.current) {
     case 0: {
-      const cardNav = appState.dashboardCardsFocus ? '   [Enter] Open' : '';
-      return ' [1-6] Tabs' + sep + '[r] Refresh' + sep + '[?] Help' + sep + '[Ctrl-P] Palette' + cardNav;
+      const focusHint = appState.dashboardCardsFocus
+        ? '   [Tab] Widgets   [←→] Cards   [Enter] Open'
+        : '   [Tab] Focus widgets';
+      return ' [1-6] Tabs' + sep + '[r] Refresh' + sep + '[PgUp/PgDn] Scroll' + sep + '[n] New issue' + sep + '[Ctrl-P] Quick actions' + sep + '[?] Help' + focusHint;
     }
     case 1: {
       if (appState.reposView === 'starred') {

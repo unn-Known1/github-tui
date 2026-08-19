@@ -8,7 +8,7 @@ import { startInput, registerInputHandler } from '../input.mjs';
 import { shortNum, relTime, truncate } from '../utils.mjs';
 import { color } from '../theme.mjs';
 import { emptyState, scrollIndicators, errorState, getBreakpoint } from '../render.mjs';
-import { loadDashboardWidgets } from './dashboard.mjs';
+import { loadDashboardWidgets, recomputeDashboardDerived } from './dashboard.mjs';
 import { isBookmarked } from '../store.mjs';
 import { togglePin } from '../store.mjs';
 import { loadRepoDetails } from './analyze.mjs';
@@ -83,7 +83,7 @@ function clearFilterChip(kind) {
 
 // ─── Loaders ──────────────────────────────────────────────────────
 
-export async function loadUserData() {
+export async function loadUserData({ loadDashboard = true } = {}) {
   if (!appState.token) return;
   const gen = startAsync('repos');
   appState.loading = true;
@@ -97,7 +97,7 @@ export async function loadUserData() {
       appState.reposHasMore = appState.repos.length >= REPOS_PER_PAGE;
       if (isStale(gen, 'repos')) { appState.loading = false; return; }
       loadAllReposBackground(gen);
-      loadDashboardWidgets().catch(() => {});
+      if (loadDashboard) loadDashboardWidgets().catch(() => {});
     }
   } catch (e) {
     if (!isStale(gen, 'repos')) {
@@ -119,7 +119,10 @@ export async function loadUserData() {
 }
 
 async function loadAllReposBackground(gen) {
-  const MAX_PAGES = 10;
+  // Load the complete account repository list in the background. Keep a
+  // very high safety ceiling for malformed pagination responses, while
+  // avoiding the old 300-repository truncation in normal accounts.
+  const MAX_PAGES = 1000;
   let page = 2;
   let capped = false;
   while (appState.reposHasMore && page <= MAX_PAGES) {
@@ -129,6 +132,7 @@ async function loadAllReposBackground(gen) {
       appState.repos = [...appState.repos, ...more];
       appState.reposPage = page;
       appState.reposHasMore = more.length >= REPOS_PER_PAGE;
+      recomputeDashboardDerived();
       page++;
     } catch (e) {
       if (!isStale(gen, 'repos')) showError(((e && e.message) || 'unknown'), 'Background repo load', { retry: () => loadAllReposBackground(gen) });
@@ -163,6 +167,7 @@ export async function loadMoreRepos() {
     appState.repos = [...appState.repos, ...more];
     appState.reposPage = page;
     appState.reposHasMore = more.length >= REPOS_PER_PAGE;
+    recomputeDashboardDerived();
     showMessage('Loaded ' + appState.repos.length + ' repos total', 'info');
   } catch (e) {
     if (!isStale(gen, 'repos')) showMessage('Failed to load more repos', 'error');
@@ -183,6 +188,7 @@ registerInputHandler('filter', (value) => {
 registerInputHandler('lang-filter', (value) => {
   const v = (value || '').trim();
   appState.reposLangFilter = v || null;
+  appState.reposShowLangFacet = false;
   appState.repoScroll = 0;
   appState.repoSelected = 0;
   showMessage(v ? 'Language: ' + v : 'Language filter cleared', 'info');
@@ -350,8 +356,24 @@ export function renderRepos(screen, y, h) {
   const issuesCol = forksCol + (bp === 'xs' ? 5 : 7);
   const pushedCol = issuesCol + (bp === 'xs' ? 6 : 8);
 
+  // Optional language facet opened by the Dashboard LANGUAGES card. Keep it
+  // compact and inline so it does not create a second navigation surface.
+  let headerY = y + 4;
+  if (appState.reposShowLangFacet) {
+    const languageCounts = {};
+    for (const repo of appState.repos) {
+      if (repo.language) languageCounts[repo.language] = (languageCounts[repo.language] || 0) + 1;
+    }
+    const languageText = Object.entries(languageCounts)
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 6)
+      .map(([language, count]) => language + '(' + count + ')')
+      .join('  ');
+    screen.writeStr(2, y + 3, 'LANGUAGES: ' + (languageText || 'none') + '   [L] filter exact', { fg: 'magenta' });
+    headerY = y + 5;
+  }
+
   // Column headers.
-  const headerY = y + 4;
   screen.writeStr(nameCol, headerY, 'REPO', { fg: 'cyan', bold: true });
   screen.writeStr(langCol, headerY, 'LANG', { fg: 'cyan', bold: true });
   screen.writeStr(starsCol, headerY, 'STARS', { fg: 'cyan', bold: true });
@@ -498,6 +520,7 @@ export async function toggleStarCurrent() {
 
 function clearAllFilters() {
   if (appState.reposView !== 'own') return;
+  appState.reposShowLangFacet = false;
   appState.repoFilter = '';
   appState.repoTypeFilter = 'all';
   appState.reposLangFilter = null;

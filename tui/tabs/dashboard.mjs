@@ -1,19 +1,34 @@
 // Dashboard tab — the home screen.
 // v0.5+ design: cleaner section cards, focus-aware stat cards, breadcrumb-aware.
 
-import { appState, render, startAsync, isStale, showMessage, setTab, confirm, setWidgetLoading } from '../state.mjs';
+import { appState, render, startAsync, isStale, showMessage, setTab, confirm, setWidgetLoading, isWidgetLoading } from '../state.mjs';
 import { STALE_DAYS } from '../repos-logic.mjs';
 import { startInput, registerInputHandler } from '../input.mjs';
 import {
   getUserEvents, getTrendingRepos, getStarredRepos,
   getUserIssues, getUserPullRequests, searchRepositories,
-  getUserFollowers,
+  getUserFollowers, getNotifications,
 } from '../github.mjs';
 import { relTime, eventGlyph, greeting, shortNum, truncate, openUrl } from '../utils.mjs';
 import { color } from '../theme.mjs';
 import { emptyState, collapsibleHeader, loadingIndicator, getScreen, errorState, getBreakpoint, getStatCardLayout } from '../render.mjs';
 import { loadRepoDetails } from './analyze.mjs';
 import { showError } from '../error-recovery.mjs';
+
+// Refresh the complete Dashboard-owned snapshot. Repository metadata is
+// loaded first because cards, stale counts, languages, and the heatmap all
+// depend on it; widget requests then update the same snapshot boundary.
+export async function refreshDashboard() {
+  if (!appState.token) return;
+  appState.dashboardLoaded = false;
+  try {
+    const repos = await import('./repos.mjs');
+    await repos.loadUserData({ loadDashboard: false });
+    await loadDashboardWidgets(true);
+  } catch (error) {
+    showError(error.message || 'Dashboard refresh failed', 'Dashboard', { retry: () => refreshDashboard() });
+  }
+}
 
 export async function loadDashboardWidgets(force = false) {
   if (!appState.token || !appState.user) return;
@@ -28,6 +43,7 @@ export async function loadDashboardWidgets(force = false) {
   setWidgetLoading('issues', true);
   setWidgetLoading('prs', true);
   setWidgetLoading('followers', true);
+  setWidgetLoading('notifications', true);
   render();
 
   try {
@@ -39,15 +55,16 @@ export async function loadDashboardWidgets(force = false) {
       getUserIssues(appState.token, 1, 10, gen.signal),
       getUserPullRequests(appState.token, 1, 10, gen.signal),
       getUserFollowers(appState.token, 1, 10, gen.signal),
+      getNotifications(appState.token, 1, 50, gen.signal),
     ]);
     const extract = (r) => r.status === 'fulfilled' ? r.value : null;
-    const [events, trending, starred, issues, prs, followers] = results.map(extract);
+    const [events, trending, starred, issues, prs, followers, notifications] = results.map(extract);
     // Surface silent per-widget failures. Previously the code mapped every
     // rejection to null, leaving the user with no signal that a widget
     // vanished because the API failed. Count failures and remember the
     // timestamp so the greeting row can render an "N widgets failed" banner
     // and a freshness badge.
-    const widgetLabels = ['events', 'trending', 'starred', 'issues', 'prs', 'followers'];
+    const widgetLabels = ['events', 'trending', 'starred', 'issues', 'prs', 'followers', 'notifications'];
     let failCount = 0;
     for (let i = 0; i < results.length; i++) {
       if (results[i].status === 'rejected') {
@@ -70,33 +87,52 @@ export async function loadDashboardWidgets(force = false) {
       setWidgetLoading('issues', false);
       setWidgetLoading('prs', false);
       setWidgetLoading('followers', false);
+      setWidgetLoading('notifications', false);
       appState.loading = false;
       return;
     }
-    appState.events = Array.isArray(events) ? events : [];
+    // Preserve the last known good value when one widget fails. A transient
+    // network error must not turn a populated widget into a false empty state.
+    if (results[0].status === 'fulfilled') appState.events = Array.isArray(events) ? events : [];
     setWidgetLoading('events', false);
-    appState.trending = Array.isArray(trending) ? trending : [];
-    appState.trendingPage = 1;
-    appState.trendingScroll = 0;
-    appState.trendingSelected = 0;
-    appState.trendingHasMore = appState.trending.length >= 100;
+    if (results[1].status === 'fulfilled') {
+      appState.trending = Array.isArray(trending) ? trending : [];
+      appState.trendingPage = 1;
+      appState.trendingScroll = 0;
+      appState.trendingSelected = 0;
+      appState.trendingHasMore = appState.trending.length >= 100;
+    }
     setWidgetLoading('trending', false);
-    appState.starred = Array.isArray(starred) ? starred.map(s => ({
-      ...(s.repo || s),
-      starred_at: s.starred_at,
-    })) : [];
+    if (results[2].status === 'fulfilled') {
+      appState.starred = Array.isArray(starred) ? starred.map(s => ({
+        ...(s.repo || s),
+        starred_at: s.starred_at,
+      })) : [];
+    }
     setWidgetLoading('starred', false);
-    appState.dashboardRecentIssues = Array.isArray(issues) ? issues : [];
+    if (results[3].status === 'fulfilled') {
+      // `/issues` includes PR-shaped records; keep only actual issues here.
+      appState.dashboardRecentIssues = Array.isArray(issues)
+        ? issues.filter(item => !item.pull_request)
+        : [];
+    }
     setWidgetLoading('issues', false);
-    appState.dashboardRecentPRs = Array.isArray(prs) ? (prs.items || prs) : [];
+    if (results[4].status === 'fulfilled') {
+      const prItems = Array.isArray(prs) ? prs : (prs && prs.items);
+      appState.dashboardRecentPRs = Array.isArray(prItems) ? prItems : [];
+    }
     setWidgetLoading('prs', false);
-    appState.userFollowers = Array.isArray(followers) ? followers : [];
+    if (results[5].status === 'fulfilled') appState.userFollowers = Array.isArray(followers) ? followers : [];
     setWidgetLoading('followers', false);
-    appState.dashboardContributions = buildHeatmap(appState.events);
-    const staleResult = findStaleRepos(appState.repos);
-    appState.dashboardStaleCount = staleResult.count;
-    appState.dashboardStaleRepos = staleResult.repos;
-    appState.dashboardStarHistory = buildStarHistory(appState.starred);
+    if (results[6].status === 'fulfilled') {
+      appState.notifications = Array.isArray(notifications) ? notifications : [];
+      appState.inboxPage = 1;
+      appState.inboxHasMore = appState.notifications.length >= 50;
+      appState.inboxScroll = Math.min(appState.inboxScroll, Math.max(0, appState.notifications.length - 1));
+      appState.selectedNotification = Math.min(appState.selectedNotification, Math.max(0, appState.notifications.length - 1));
+    }
+    setWidgetLoading('notifications', false);
+    recomputeDashboardDerived();
     appState.dashboardLoaded = true;
 
     // Load custom user-defined sections (non-blocking — don't fail the dashboard).
@@ -116,14 +152,38 @@ export async function loadDashboardWidgets(force = false) {
       }
     }
 
+    if (results[2].status === 'fulfilled' && appState.starred.length >= 100) {
+      loadDashboardStarredPages(gen).catch(() => {});
+    }
     render();
   } catch (e) {
     if (!isStale(gen, 'dashboard-widgets')) showError(e.message, 'Dashboard widgets', { retry: () => loadDashboardWidgets(true) });
   }
 }
 
+async function loadDashboardStarredPages(gen) {
+  setWidgetLoading('starred', true);
+  let page = 2;
+  try {
+    while (appState.starred.length >= (page - 1) * 100 && !isStale(gen, 'dashboard-widgets')) {
+      const more = await getStarredRepos(appState.token, page, 100, gen.signal);
+      if (isStale(gen, 'dashboard-widgets') || !Array.isArray(more) || more.length === 0) break;
+      const mapped = more.map(s => ({ ...(s.repo || s), starred_at: s.starred_at || s.created_at }));
+      appState.starred = [...appState.starred, ...mapped];
+      recomputeDashboardDerived();
+      page++;
+      if (more.length < 100) break;
+    }
+  } catch (error) {
+    if (!isStale(gen, 'dashboard-widgets')) showError(error.message || 'Failed to load starred repositories', 'Dashboard stars');
+  } finally {
+    setWidgetLoading('starred', false);
+    if (!isStale(gen, 'dashboard-widgets')) render();
+  }
+}
+
 // ─── Heatmap builder ──────────────────────────────────────────────────
-function buildHeatmap(events) {
+export function buildHeatmap(events, repos = appState.repos) {
   const dayMs = 86400000;
   const weeks = 15;
   const grid = Array.from({ length: 7 }, () => new Array(weeks).fill(0));
@@ -131,7 +191,9 @@ function buildHeatmap(events) {
   const today = new Date();
   today.setHours(0, 0, 0, 0);
   const todayDay = today.getDay();
-  const gridStartMs = today.getTime() - (weeks * 7 - 1 + todayDay) * dayMs;
+  // Start on Sunday of the first displayed week and include the current
+  // partial week. This keeps row 0 aligned with the Sunday label.
+  const gridStartMs = today.getTime() - ((weeks - 1) * 7 + todayDay) * dayMs;
 
   function addDay(isoDate) {
     if (!isoDate) return;
@@ -149,22 +211,92 @@ function buildHeatmap(events) {
   }
 
   const activityTypes = new Set([
-    'PushEvent', 'IssuesEvent', 'PullRequestEvent', 'CreateEvent',
-    'PullRequestReviewEvent', 'ReleaseEvent', 'ForkEvent',
-    'WatchEvent', 'MemberEvent', 'PublicEvent',
+    'PushEvent', 'IssuesEvent', 'PullRequestEvent',
+    'PullRequestReviewEvent', 'ReleaseEvent',
   ]);
   for (const ev of events) {
     if (!activityTypes.has(ev.type) || !ev.created_at) continue;
     addDay(ev.created_at);
   }
 
-  for (const repo of (appState.repos || [])) {
-    addDay(repo.pushed_at);
-  }
-
   let max = 0;
   for (const row of grid) for (const v of row) if (v > max) max = v;
   return { weeks, grid, max };
+}
+
+function localRepoName() {
+  if (!appState.localRepo || !appState.localRepoFilter) return null;
+  return appState.localRepo.owner + '/' + appState.localRepo.repo;
+}
+
+function itemRepoName(item) {
+  if (!item) return '';
+  if (item.repo && item.repo.name) return item.repo.name;
+  if (item.full_name) return item.full_name;
+  if (item.repository && item.repository.full_name) return item.repository.full_name;
+  if (item.repository_url) return item.repository_url.split('/').slice(-2).join('/');
+  if (item.html_url) {
+    const match = item.html_url.match(/github\.com\/([^/]+)\/([^/]+)/);
+    if (match) return match[1] + '/' + match[2];
+  }
+  return '';
+}
+
+function matchesLocalRepo(item) {
+  const local = localRepoName();
+  return !local || itemRepoName(item) === local;
+}
+
+export function getDashboardRepos() {
+  const local = localRepoName();
+  return local ? (appState.repos || []).filter(r => r.full_name === local) : (appState.repos || []);
+}
+
+export function getDashboardEvents() {
+  return (appState.events || []).filter(matchesLocalRepo);
+}
+
+export function getDashboardIssues() {
+  return (appState.dashboardRecentIssues || []).filter(matchesLocalRepo);
+}
+
+export function getDashboardPRs() {
+  return (appState.dashboardRecentPRs || []).filter(matchesLocalRepo);
+}
+
+export function getDashboardStarred() {
+  return (appState.starred || []).filter(matchesLocalRepo);
+}
+
+export function getNeedsAttention(repos = getDashboardRepos(), staleCount = null) {
+  const items = [];
+  const notes = Array.isArray(appState.notifications) ? appState.notifications : [];
+  const mentions = notes.filter(n => n.unread && n.reason === 'mention').length;
+  const reviews = notes.filter(n => n.unread && n.reason === 'review_requested').length;
+  const unread = notes.filter(n => n.unread).length;
+  const failedRuns = (appState.actionsRuns || []).filter(run =>
+    matchesLocalRepo(run) &&
+    (run.conclusion === 'failure' || run.status === 'failure')
+  ).length;
+  const stale = staleCount == null ? findStaleRepos(repos).count : staleCount;
+
+  if (reviews > 0) items.push({ id: 'reviews', label: 'Review requests', count: reviews, kind: 'inbox', filter: 'review' });
+  if (mentions > 0) items.push({ id: 'mentions', label: 'Unread mentions', count: mentions, kind: 'inbox', filter: 'mentions' });
+  if (failedRuns > 0) items.push({ id: 'ci', label: 'Failed workflow runs', count: failedRuns, kind: 'actions' });
+  if (stale > 0) items.push({ id: 'stale', label: 'Stale repositories', count: stale, kind: 'stale' });
+  if (items.length === 0 && unread > 0) items.push({ id: 'unread', label: 'Unread notifications', count: unread, kind: 'inbox', filter: 'unread' });
+  return items.slice(0, 4);
+}
+
+export function recomputeDashboardDerived() {
+  const repos = getDashboardRepos();
+  const staleResult = findStaleRepos(repos);
+  appState.dashboardContributions = buildHeatmap(getDashboardEvents(), repos);
+  appState.dashboardStaleCount = staleResult.count;
+  appState.dashboardStaleRepos = staleResult.repos;
+  appState.dashboardStarHistory = buildStarHistory(getDashboardStarred());
+  appState.dashboardAttentionItems = getNeedsAttention(repos, staleResult.count);
+  render();
 }
 
 function findStaleRepos(repos) {
@@ -236,9 +368,22 @@ function sectionHeader(screen, x, y, text, hint, section) {
   return true;
 }
 
+function ensureDashboardCollapseDefaults() {
+  const defaults = ['stars', 'topRepos', 'contributions', 'languages', 'issues', 'prs', 'stale', 'trending'];
+  for (const section of defaults) {
+    const key = 'dashboard:' + section;
+    if (!(key in appState.collapsed)) appState.collapsed[key] = true;
+  }
+  for (let i = 0; i < (appState.customSections || []).length; i++) {
+    const key = 'dashboard:custom-' + i;
+    if (!(key in appState.collapsed)) appState.collapsed[key] = true;
+  }
+}
+
 export function renderDashboard(screen, y, h) {
   const W = screen.width;
   const user = appState.user;
+  ensureDashboardCollapseDefaults();
 
   // Self-heal stale keyboard selections on every render: if a fetch
   // (or auto-refresh tick) shrinks a list, the previously-selected index
@@ -257,10 +402,16 @@ export function renderDashboard(screen, y, h) {
     if (appState[selKey] >= arr.length) appState[selKey] = arr.length - 1;
     if (appState[scrollKey] >= arr.length) appState[scrollKey] = arr.length - 1;
   }
-  clampList(appState.events,                'dashboardActivitySelected', 'dashboardActivityScroll');
-  clampList(appState.trending,              'trendingSelected',         'trendingScroll');
-  clampList(appState.dashboardRecentIssues, 'dashboardIssueSelected',   'dashboardIssueScroll');
-  clampList(appState.dashboardRecentPRs,    'dashboardPRSelected',      'dashboardPRScroll');
+  const dashboardEvents = getDashboardEvents();
+  const dashboardIssues = getDashboardIssues();
+  const dashboardPRs = getDashboardPRs();
+  const attentionItems = getNeedsAttention();
+  appState.dashboardAttentionItems = attentionItems;
+  clampList(attentionItems, 'dashboardAttentionSelected', 'dashboardAttentionScroll');
+  clampList(dashboardEvents, 'dashboardActivitySelected', 'dashboardActivityScroll');
+  clampList(getFilteredTrending(), 'trendingSelected', 'trendingScroll');
+  clampList(dashboardIssues, 'dashboardIssueSelected', 'dashboardIssueScroll');
+  clampList(dashboardPRs, 'dashboardPRSelected', 'dashboardPRScroll');
 
   if (!user) {
     emptyState(screen, y, h, {
@@ -297,10 +448,17 @@ export function renderDashboard(screen, y, h) {
   // whether the dashboard is 30s or 30m stale. Both can coexist on the
   // same row without colliding (error badge starts at x=2, age badge
   // right-aligned).
+  let bannerX = 2;
   if (appState.dashboardWidgetErrorCount > 0) {
     const errBadge = '⚠ ' + appState.dashboardWidgetErrorCount +
       ' widget' + (appState.dashboardWidgetErrorCount === 1 ? '' : 's') + ' failed';
-    screen.writeStr(2, y + 2, errBadge, { fg: 'red', bold: true });
+    screen.writeStr(bannerX, y + 2, errBadge, { fg: 'red', bold: true });
+    bannerX += errBadge.length + 2;
+  }
+  const loadingCount = Object.values(appState.dashboardLoadingWidgets || {}).filter(Boolean).length;
+  if (loadingCount > 0) {
+    const loadingBadge = '⟳ ' + loadingCount + ' loading';
+    screen.writeStr(bannerX, y + 2, loadingBadge, { fg: 'cyan', dim: true });
   }
   if (appState.dashboardLastFetched) {
     const ageMs = Math.max(0, Date.now() - appState.dashboardLastFetched);
@@ -314,9 +472,10 @@ export function renderDashboard(screen, y, h) {
 
   // ── Stat cards ──────────────────────────────────────────────
   const cardY = y + 3;
-  const totalStars = appState.repos.reduce((a, r) => a + (r.stargazers_count || 0), 0);
-  const totalForks = appState.repos.reduce((a, r) => a + (r.forks_count || 0), 0);
-  const langSet = new Set(appState.repos.map(r => r.language).filter(Boolean));
+  const dashboardRepos = getDashboardRepos();
+  const totalStars = dashboardRepos.reduce((a, r) => a + (r.stargazers_count || 0), 0);
+  const totalForks = dashboardRepos.reduce((a, r) => a + (r.forks_count || 0), 0);
+  const langSet = new Set(dashboardRepos.map(r => r.language).filter(Boolean));
   const accountAgeYears = user.created_at
     ? ((Date.now() - new Date(user.created_at).getTime()) / (365.25 * 86400 * 1000)).toFixed(1)
     : '?';
@@ -356,6 +515,11 @@ export function renderDashboard(screen, y, h) {
   // ── Body: 2 columns ────────────────────────────────────────
   const bodyY = cardY + cardRows * (cardH + 1) + 1;
   if (bodyY >= y + h) return;
+  // Keep cards/header fixed while allowing the larger body to scroll inside
+  // the content viewport. Screen handles clipping for body writes.
+  const bodyViewportBottom = y + h;
+  const bodyScroll = Math.max(0, Math.min(appState.dashboardScroll || 0, appState.dashboardMaxScroll || 0));
+  screen.pushViewport(bodyY, bodyViewportBottom, bodyScroll);
   const splitX = Math.floor(W / 2);
   const leftX = 2;
   const rightX = splitX + 2;
@@ -416,7 +580,7 @@ export function renderDashboard(screen, y, h) {
     const topReposVisible = sectionHeader(screen, leftX, ly, 'TOP REPOS', null, 'dashboard:topRepos');
     ly++;
     if (topReposVisible) {
-      const top = [...appState.repos]
+      const top = [...dashboardRepos]
         .sort((a, b) => (b.stargazers_count || 0) - (a.stargazers_count || 0))
         .slice(0, 5);
       if (top.length === 0) {
@@ -448,9 +612,9 @@ export function renderDashboard(screen, y, h) {
       const dayLabels = ['S', 'M', 'T', 'W', 'T', 'F', 'S'];
       const heatW = heatRightX - leftX - 4;
       const cellW = Math.max(1, Math.min(2, Math.floor(heatW / hm.weeks)));
-      const commitCount = appState.events
+      const commitCount = dashboardEvents
         .filter(ev => ev.type === 'PushEvent')
-        .reduce((sum, ev) => sum + (ev.payload.size || ev.payload.distinct_size || 0), 0);
+        .reduce((sum, ev) => sum + ((ev.payload && (ev.payload.size || ev.payload.distinct_size)) || 0), 0);
       const totalEvents = hm.grid.flat().reduce((a, b) => a + b, 0);
 
       const activityLabel = commitCount === 0
@@ -504,11 +668,11 @@ export function renderDashboard(screen, y, h) {
   }
 
   // ── Languages (right sub-column, aligned with heatmap top) ──
-  if (appState.repos.length > 0 && heatTopY < y + h - 2) {
+  if (dashboardRepos.length > 0 && heatTopY < y + h - 2) {
     const langVisible = sectionHeader(screen, langLeftX, heatTopY, 'LANGUAGES', null, 'dashboard:languages');
     if (langVisible) {
       const langCount = {};
-      for (const r of appState.repos) {
+      for (const r of dashboardRepos) {
         if (r.language) langCount[r.language] = (langCount[r.language] || 0) + 1;
       }
       const total = Object.values(langCount).reduce((a, b) => a + b, 0);
@@ -535,6 +699,30 @@ export function renderDashboard(screen, y, h) {
   // RIGHT COLUMN ────────────────────────────────────────────
   let ry = bodyY;
 
+  if (attentionItems.length > 0) {
+    const attentionFocused = appState.dashboardFocusZone === 'attention';
+    const attentionHint = attentionFocused ? '[Enter] open' : null;
+    const attentionVisible = sectionHeader(screen, rightX, ry, 'NEEDS ATTENTION', attentionHint, 'dashboard:attention');
+    ry++;
+    if (attentionVisible) {
+      const start = appState.dashboardAttentionScroll || 0;
+      const end = Math.min(start + 4, attentionItems.length);
+      for (let ai = start; ai < end; ai++) {
+        const item = attentionItems[ai];
+        const selected = attentionFocused && ai === appState.dashboardAttentionSelected;
+        if (selected) {
+          for (let x = rightX; x < rightX + rightW; x++) screen.setStyle(x, ry, { bg: 'blue', fg: 'white', bold: true });
+        }
+        screen.writeStr(rightX, ry, selected ? '▶ ' : '  ', selected ? { bg: 'blue', fg: 'white' } : null);
+        screen.writeStr(rightX + 2, ry, truncate(item.label, Math.max(10, rightW - 12)), selected ? { bg: 'blue', fg: 'white' } : { dim: true });
+        const count = String(item.count);
+        screen.writeStr(rightX + rightW - count.length, ry, count, selected ? { bg: 'blue', fg: 'yellow', bold: true } : { fg: 'yellow', bold: true });
+        ry++;
+      }
+      ry++;
+    }
+  }
+
   const activityFocused = appState.dashboardFocusZone === 'activity';
   // When the activity zone is focused, advertise a working key. The previous
   // "[Enter] open first" was misleading — pressing Enter used to fall through
@@ -543,7 +731,7 @@ export function renderDashboard(screen, y, h) {
   const activityVisible = sectionHeader(screen, rightX, ry, 'RECENT ACTIVITY', activityHint, 'dashboard:recentActivity');
   ry++;
   if (activityVisible) {
-    if (appState.events.length === 0) {
+    if (dashboardEvents.length === 0) {
       if (!appState.dashboardLoaded) {
         loadingIndicator(screen, rightX, ry, 'loading events');
         ry++;
@@ -553,11 +741,11 @@ export function renderDashboard(screen, y, h) {
     } else {
       const maxEvents = Math.min(7, Math.max(1, Math.floor((y + h - bodyY) * 0.30)));
       // Honour keyboard scroll: viewport starts at dashboardActivityScroll.
-      const activityStart = Math.min(appState.dashboardActivityScroll, appState.events.length);
-      const activityEnd = Math.min(activityStart + maxEvents, appState.events.length);
+      const activityStart = Math.min(appState.dashboardActivityScroll, dashboardEvents.length);
+      const activityEnd = Math.min(activityStart + maxEvents, dashboardEvents.length);
       for (let i = activityStart; i < activityEnd; i++) {
         if (ry >= y + h - 1) break;
-        const ev = appState.events[i];
+        const ev = dashboardEvents[i];
         const sel = activityFocused && i === appState.dashboardActivitySelected;
         const [icon, c, label] = eventGlyph(ev.type);
         const repo = (ev.repo && ev.repo.name ? ev.repo.name : '?').substring(0, Math.max(10, rightW - 22));
@@ -566,7 +754,7 @@ export function renderDashboard(screen, y, h) {
           // Background highlight across the full right-column width so the
           // selection is unmistakable, mirroring how Issues/PRs are rendered
           // when selected.
-          for (let x = rightX; x < rightX + rightW; x++) screen.styleBuf[ry][x] = { bg: 'blue', fg: 'white', bold: true };
+          for (let x = rightX; x < rightX + rightW; x++) screen.setStyle(x, ry, { bg: 'blue', fg: 'white', bold: true });
         }
         screen.writeStr(rightX, ry, icon, sel ? { bg: 'blue', fg: 'white', bold: true } : c);
         screen.writeStr(rightX + 2, ry, label.substring(0, 11).padEnd(11), sel ? { bg: 'blue', fg: 'white', bold: true } : { dim: true });
@@ -578,21 +766,25 @@ export function renderDashboard(screen, y, h) {
     ry++;
   }
 
-  if (ry < y + h - 3 && appState.dashboardRecentIssues.length > 0) {
+  if (ry < y + h - 3 && (dashboardIssues.length > 0 || (appState.dashboardLoaded && !isWidgetLoading('issues')))) {
     const issueFocused = appState.dashboardFocusZone === 'issues';
     const issueHint = issueFocused ? '[Enter] open' : null;
     const issuesVisible = sectionHeader(screen, rightX, ry, 'RECENT ISSUES', issueHint, 'dashboard:issues');
     ry++;
     if (issuesVisible) {
+      if (dashboardIssues.length === 0) {
+        screen.writeStr(rightX, ry++, 'No recent issues', { dim: true });
+        ry++;
+      }
       const maxIssues = Math.min(4, Math.max(1, Math.floor((y + h - bodyY) * 0.20)));
       const issueScroll = appState.dashboardIssueScroll;
-      const issueEnd = Math.min(issueScroll + maxIssues, appState.dashboardRecentIssues.length);
+      const issueEnd = Math.min(issueScroll + maxIssues, dashboardIssues.length);
       for (let ii = issueScroll; ii < issueEnd; ii++) {
         if (ry >= y + h - 1) break;
-        const issue = appState.dashboardRecentIssues[ii];
+        const issue = dashboardIssues[ii];
         const sel = issueFocused && ii === appState.dashboardIssueSelected;
         if (sel) {
-          for (let x = rightX; x < rightX + rightW; x++) screen.styleBuf[ry][x] = { bg: 'blue', fg: 'white', bold: true };
+          for (let x = rightX; x < rightX + rightW; x++) screen.setStyle(x, ry, { bg: 'blue', fg: 'white', bold: true });
         }
         const num = '#' + (issue.number || '?');
         const titleMax = rightW - 14;
@@ -607,21 +799,25 @@ export function renderDashboard(screen, y, h) {
     }
   }
 
-  if (ry < y + h - 3 && appState.dashboardRecentPRs.length > 0) {
+  if (ry < y + h - 3 && (dashboardPRs.length > 0 || (appState.dashboardLoaded && !isWidgetLoading('prs')))) {
     const prFocused = appState.dashboardFocusZone === 'prs';
     const prHint = prFocused ? '[Enter] open' : null;
     const prsVisible = sectionHeader(screen, rightX, ry, 'RECENT PRs', prHint, 'dashboard:prs');
     ry++;
     if (prsVisible) {
+      if (dashboardPRs.length === 0) {
+        screen.writeStr(rightX, ry++, 'No recent pull requests', { dim: true });
+        ry++;
+      }
       const maxPRs = Math.min(4, Math.max(1, Math.floor((y + h - bodyY) * 0.20)));
       const prScroll = appState.dashboardPRScroll;
-      const prEnd = Math.min(prScroll + maxPRs, appState.dashboardRecentPRs.length);
+      const prEnd = Math.min(prScroll + maxPRs, dashboardPRs.length);
       for (let pi = prScroll; pi < prEnd; pi++) {
         if (ry >= y + h - 1) break;
-        const pr = appState.dashboardRecentPRs[pi];
+        const pr = dashboardPRs[pi];
         const sel = prFocused && pi === appState.dashboardPRSelected;
         if (sel) {
-          for (let x = rightX; x < rightX + rightW; x++) screen.styleBuf[ry][x] = { bg: 'blue', fg: 'white', bold: true };
+          for (let x = rightX; x < rightX + rightW; x++) screen.setStyle(x, ry, { bg: 'blue', fg: 'white', bold: true });
         }
         const num = '#' + (pr.number || '?');
         const draft = pr.draft ? '[draft] ' : '';
@@ -659,7 +855,8 @@ export function renderDashboard(screen, y, h) {
       const sec = appState.customSections[si];
       if (ry >= y + h - 3 || sec.items.length === 0) continue;
       const secKey = 'dashboard:custom-' + si;
-      const secVisible = sectionHeader(screen, rightX, ry, sec.title.toUpperCase(), null, secKey);
+      const customFocused = appState.dashboardFocusZone === 'custom' && appState.dashboardCustomSectionSelected === si;
+      const secVisible = sectionHeader(screen, rightX, ry, sec.title.toUpperCase(), customFocused ? '[Enter] open' : null, secKey);
       ry++;
       if (secVisible) {
         const maxItems = Math.min(4, sec.items.length);
@@ -670,12 +867,17 @@ export function renderDashboard(screen, y, h) {
           const titleMax = rightW - 14;
           const title = truncate(item.title || '?', titleMax);
           const isPR = item.pull_request != null;
-          const numStyle = isPR ? { fg: 'cyan' } : { fg: 'yellow' };
+          const selected = customFocused && ii === appState.dashboardCustomItemSelected;
+          if (selected) {
+            for (let x = rightX; x < rightX + rightW; x++) screen.setStyle(x, ry, { bg: 'blue', fg: 'white', bold: true });
+          }
+          const numStyle = selected ? { bg: 'blue', fg: isPR ? 'cyan' : 'yellow', bold: true } : (isPR ? { fg: 'cyan' } : { fg: 'yellow' });
           const titleStyle = item.state === 'open'
             ? (isPR ? { fg: 'cyan' } : { fg: 'green' })
             : { dim: true };
+          screen.writeStr(rightX, ry, selected ? '▶ ' : '  ', selected ? { bg: 'blue', fg: 'white' } : null);
           screen.writeStr(rightX + 2, ry, num, numStyle);
-          screen.writeStr(rightX + 8, ry, title, titleStyle);
+          screen.writeStr(rightX + 8, ry, title, selected ? { bg: 'blue', fg: 'white', bold: true } : titleStyle);
           ry++;
         }
         ry++;
@@ -707,7 +909,7 @@ export function renderDashboard(screen, y, h) {
         const r = trendingList[i];
         const sel = i === appState.trendingSelected;
         if (sel) {
-          for (let x = rightX; x < rightX + rightW; x++) screen.styleBuf[ry][x] = { bg: 'blue', fg: 'white', bold: true };
+          for (let x = rightX; x < rightX + rightW; x++) screen.setStyle(x, ry, { bg: 'blue', fg: 'white', bold: true });
         }
         const name = truncate(r.full_name || '?', rightW - 8);
         const stars = '★ ' + shortNum(r.stargazers_count || 0);
@@ -727,9 +929,11 @@ export function renderDashboard(screen, y, h) {
   // Column divider line.
   const colBot = Math.max(ly, ry);
   const bodyH = Math.max(0, colBot - bodyY);
+  appState.dashboardMaxScroll = Math.max(0, bodyH - (bodyViewportBottom - bodyY));
   for (let dy = 0; dy < bodyH; dy++) {
     screen.setCell(splitX, bodyY + dy, '│', { dim: true });
   }
+  screen.popViewport();
 }
 
 // ── Trending fetch helpers — deduped from the three originally near-clone
@@ -768,8 +972,9 @@ async function _setTrendingPage(page, replace) {
   const { stale, list, error } = await _fetchTrendingPage(page);
   if (stale) { appState.loading = false; render(); return; }
   if (error) {
-    appState.trendingHasMore = false;
-    showMessage('Failed to load trending page ' + page, 'error');
+    showError(error.message || 'Failed to load trending page ' + page, 'Trending', {
+      retry: () => _setTrendingPage(page, replace),
+    });
   } else if (Array.isArray(list) && list.length > 0) {
     if (replace) {
       appState.trending = list;
@@ -830,15 +1035,15 @@ export function trendingDown() {
 }
 
 export function pageUp() {
-  if (appState.trendingPage > 1 && !appState.loading) {
-    _setTrendingPage(appState.trendingPage - 1, true);
-  }
+  const step = Math.max(1, Math.floor((getScreen()?.height || 24) * 0.6));
+  appState.dashboardScroll = Math.max(0, (appState.dashboardScroll || 0) - step);
+  render();
 }
 
 export function pageDown() {
-  if (appState.trendingHasMore && !appState.loading) {
-    _setTrendingPage(appState.trendingPage + 1, false);
-  }
+  const step = Math.max(1, Math.floor((getScreen()?.height || 24) * 0.6));
+  appState.dashboardScroll = Math.min(appState.dashboardMaxScroll || 0, (appState.dashboardScroll || 0) + step);
+  render();
 }
 
 // Open the focused stat card. Maps each of the 5 cards to a sensible action:
@@ -853,6 +1058,7 @@ export function openFocusedCard() {
   if (i === 4) {
     // STALE → Repos with stale-only filter on
     setTab(1);
+    appState.reposView = 'own';
     appState.repoStaleOnly = true;
     appState.repoScroll = 0;
     appState.repoSelected = 0;
@@ -870,6 +1076,7 @@ export function openFocusedCard() {
     // on the right; the user can then press L to filter by a chosen
     // language from there.
     setTab(1);
+    appState.reposView = 'own';
     appState.reposShowLangFacet = true;
     appState.repoScroll = 0;
     appState.repoSelected = 0;
@@ -897,19 +1104,29 @@ export function openFocusedCard() {
 registerInputHandler('dashboard-filter', (value) => {
   appState.dashboardFilter = (value || '').trim();
   appState.trendingSelected = 0;
+  appState.trendingScroll = 0;
   showMessage(appState.dashboardFilter
     ? 'Filtering trending: "' + appState.dashboardFilter + '"'
     : 'Trending filter cleared', 'info');
   render();
 });
 
-function getFilteredTrending() {
+export function getFilteredTrending() {
   const q = (appState.dashboardFilter || '').trim().toLowerCase();
-  if (!q) return appState.trending;
-  return appState.trending.filter(r => (r.full_name || '').toLowerCase().includes(q));
+  const local = localRepoName();
+  return (appState.trending || []).filter(r => {
+    if (local && r.full_name !== local) return false;
+    if (!q) return true;
+    const haystack = [
+      r.full_name, r.name, r.description, r.language,
+      r.owner && (r.owner.login || r.owner.login),
+      ...(Array.isArray(r.topics) ? r.topics : []),
+    ].filter(Boolean).join(' ').toLowerCase();
+    return haystack.includes(q);
+  });
 }
 
-function reloadTrending() {
+function reloadTrending(previousPeriod = appState.trendingPeriod) {
   if (!appState.token) return;
   const days = appState.trendingPeriod;
   const gen = startAsync('dashboard-trending');
@@ -924,16 +1141,24 @@ function reloadTrending() {
     appState.trendingHasMore = appState.trending.length >= 100;
     appState.loading = false;
     render();
-  }).catch(() => { appState.loading = false; render(); });
+  }).catch((error) => {
+    if (!isStale(gen, 'dashboard-trending')) {
+      appState.trendingPeriod = previousPeriod;
+      showError(error.message || 'Trending refresh failed', 'Trending', { retry: () => reloadTrending(previousPeriod) });
+      appState.loading = false;
+      render();
+    }
+  });
 }
 
 export const keys = {
   't': () => {
     const cycle = { 1: 7, 7: 30, 30: 1 };
+    const previousPeriod = appState.trendingPeriod;
     appState.trendingPeriod = cycle[appState.trendingPeriod] || 7;
     const labels = { 1: 'today', 7: 'this week', 30: 'this month' };
     showMessage('Trending: ' + labels[appState.trendingPeriod], 'info');
-    reloadTrending();
+    reloadTrending(previousPeriod);
   },
   '/': () => startInput('Filter trending: ', 'dashboard-filter'),
   'n': () => {
@@ -945,10 +1170,19 @@ export const keys = {
       return;
     }
     appState.localRepoFilter = !appState.localRepoFilter;
+    appState.dashboardScroll = 0;
+    appState.trendingScroll = 0;
+    appState.trendingSelected = 0;
+    appState.dashboardActivityScroll = 0;
+    appState.dashboardActivitySelected = 0;
+    appState.dashboardIssueScroll = 0;
+    appState.dashboardIssueSelected = 0;
+    appState.dashboardPRScroll = 0;
+    appState.dashboardPRSelected = 0;
+    recomputeDashboardDerived();
     showMessage(appState.localRepoFilter
       ? 'Filtering to ' + appState.localRepo.owner + '/' + appState.localRepo.repo
       : 'Local repo filter cleared', 'info');
-    render();
   },
 };
 
@@ -957,11 +1191,50 @@ export const keys = {
 // and Tab/Shift+Tab through `focusNext/focusPrev`. There were zero
 // callers of `cycleDashboardZone` anywhere in the codebase.)
 
+function dashboardCustomSectionsWithItems() {
+  return appState.customSections || [];
+}
+
+function firstCustomSectionIndex(from = 0, direction = 1) {
+  const sections = dashboardCustomSectionsWithItems();
+  for (let i = from; i >= 0 && i < sections.length; i += direction) {
+    if (sections[i]?.items?.length > 0) return i;
+  }
+  return -1;
+}
+
 export function dashboardUp() {
   const zone = appState.dashboardFocusZone;
+  if (zone === 'attention') {
+    if (!appState.dashboardAttentionItems?.length) return;
+    appState.dashboardAttentionSelected = Math.max(0, appState.dashboardAttentionSelected - 1);
+    if (appState.dashboardAttentionSelected < appState.dashboardAttentionScroll) appState.dashboardAttentionScroll = appState.dashboardAttentionSelected;
+    render();
+    return;
+  }
+  if (zone === 'cards') return;
+  if (zone === 'custom') {
+    const sections = dashboardCustomSectionsWithItems();
+    let sectionIndex = appState.dashboardCustomSectionSelected;
+    if (!sections[sectionIndex]?.items?.length) sectionIndex = firstCustomSectionIndex(0);
+    const sec = sections[sectionIndex];
+    if (!sec) return;
+    if (appState.dashboardCustomItemSelected > 0) {
+      appState.dashboardCustomItemSelected--;
+    } else {
+      const previous = firstCustomSectionIndex(sectionIndex - 1, -1);
+      if (previous >= 0) {
+        appState.dashboardCustomSectionSelected = previous;
+        appState.dashboardCustomItemSelected = sections[previous].items.length - 1;
+      }
+    }
+    render();
+    return;
+  }
   if (zone === 'trending') { trendingUp(); return; }
   if (zone === 'activity') {
-    if (appState.events.length === 0) return;
+    const events = getDashboardEvents();
+    if (events.length === 0) return;
     appState.dashboardActivitySelected = Math.max(0, appState.dashboardActivitySelected - 1);
     if (appState.dashboardActivitySelected < appState.dashboardActivityScroll) {
       appState.dashboardActivityScroll = appState.dashboardActivitySelected;
@@ -970,7 +1243,8 @@ export function dashboardUp() {
     return;
   }
   if (zone === 'issues') {
-    if (appState.dashboardRecentIssues.length === 0) return;
+    const issues = getDashboardIssues();
+    if (issues.length === 0) return;
     appState.dashboardIssueSelected = Math.max(0, appState.dashboardIssueSelected - 1);
     if (appState.dashboardIssueSelected < appState.dashboardIssueScroll) {
       appState.dashboardIssueScroll = appState.dashboardIssueSelected;
@@ -979,7 +1253,8 @@ export function dashboardUp() {
     return;
   }
   if (zone === 'prs') {
-    if (appState.dashboardRecentPRs.length === 0) return;
+    const prs = getDashboardPRs();
+    if (prs.length === 0) return;
     appState.dashboardPRSelected = Math.max(0, appState.dashboardPRSelected - 1);
     if (appState.dashboardPRSelected < appState.dashboardPRScroll) {
       appState.dashboardPRScroll = appState.dashboardPRSelected;
@@ -991,14 +1266,42 @@ export function dashboardUp() {
 
 export function dashboardDown() {
   const zone = appState.dashboardFocusZone;
+  if (zone === 'attention') {
+    const items = appState.dashboardAttentionItems || [];
+    if (!items.length) return;
+    appState.dashboardAttentionSelected = Math.min(items.length - 1, appState.dashboardAttentionSelected + 1);
+    if (appState.dashboardAttentionSelected >= appState.dashboardAttentionScroll + 4) appState.dashboardAttentionScroll++;
+    render();
+    return;
+  }
+  if (zone === 'cards') return;
+  if (zone === 'custom') {
+    const sections = dashboardCustomSectionsWithItems();
+    let sectionIndex = appState.dashboardCustomSectionSelected;
+    if (!sections[sectionIndex]?.items?.length) sectionIndex = firstCustomSectionIndex(0);
+    const sec = sections[sectionIndex];
+    if (!sec) return;
+    if (appState.dashboardCustomItemSelected < sec.items.length - 1) {
+      appState.dashboardCustomItemSelected++;
+    } else {
+      const next = firstCustomSectionIndex(sectionIndex + 1, 1);
+      if (next >= 0) {
+        appState.dashboardCustomSectionSelected = next;
+        appState.dashboardCustomItemSelected = 0;
+      }
+    }
+    render();
+    return;
+  }
   if (zone === 'trending') { trendingDown(); return; }
   if (zone === 'activity') {
-    if (appState.events.length === 0) return;
+    const events = getDashboardEvents();
+    if (events.length === 0) return;
     const screen = getScreen();
     const H = screen ? screen.height : 24;
     const maxVisible = Math.min(7, Math.max(1, Math.floor((H - 17) * 0.30)));
     appState.dashboardActivitySelected = Math.min(
-      appState.events.length - 1,
+      events.length - 1,
       appState.dashboardActivitySelected + 1
     );
     if (appState.dashboardActivitySelected >= appState.dashboardActivityScroll + maxVisible) {
@@ -1008,9 +1311,10 @@ export function dashboardDown() {
     return;
   }
   if (zone === 'issues') {
-    if (appState.dashboardRecentIssues.length === 0) return;
+    const issues = getDashboardIssues();
+    if (issues.length === 0) return;
     appState.dashboardIssueSelected = Math.min(
-      appState.dashboardRecentIssues.length - 1,
+      issues.length - 1,
       appState.dashboardIssueSelected + 1
     );
     const screen = getScreen();
@@ -1023,9 +1327,10 @@ export function dashboardDown() {
     return;
   }
   if (zone === 'prs') {
-    if (appState.dashboardRecentPRs.length === 0) return;
+    const prs = getDashboardPRs();
+    if (prs.length === 0) return;
     appState.dashboardPRSelected = Math.min(
-      appState.dashboardRecentPRs.length - 1,
+      prs.length - 1,
       appState.dashboardPRSelected + 1
     );
     const screen = getScreen();
@@ -1039,11 +1344,68 @@ export function dashboardDown() {
   }
 }
 
+export function openNeedsAttention() {
+  const item = (appState.dashboardAttentionItems || [])[appState.dashboardAttentionSelected];
+  if (!item) return;
+  if (item.kind === 'inbox') {
+    appState.inboxFilter = item.filter || 'all';
+    appState.inboxTextFilter = '';
+    setTab(4);
+    if (appState.notifications.length === 0 && appState.token) {
+      import('./inbox.mjs').then(m => m.loadNotifications()).catch(() => {});
+    } else {
+      render();
+    }
+    return;
+  }
+  if (item.kind === 'actions') {
+    setTab(3);
+    if (appState.actionsRepos.length === 0 && appState.token) {
+      import('./actions.mjs').then(m => m.loadActionsRepos()).catch(() => {});
+    } else {
+      render();
+    }
+    return;
+  }
+  if (item.kind === 'stale') {
+    appState.reposView = 'own';
+    appState.repoStaleOnly = true;
+    appState.repoScroll = 0;
+    appState.repoSelected = 0;
+    setTab(1);
+    return;
+  }
+}
+
 export function openDashboardItem() {
   const zone = appState.dashboardFocusZone;
+  if (zone === 'attention') { openNeedsAttention(); return; }
+  if (zone === 'cards') { openFocusedCard(); return; }
   if (zone === 'trending') { openTrendingRepo(); return; }
+  if (zone === 'custom') {
+    const sections = dashboardCustomSectionsWithItems();
+    const sec = sections[appState.dashboardCustomSectionSelected];
+    const item = sec?.items?.[appState.dashboardCustomItemSelected];
+    if (!item) return;
+    let owner, repo;
+    if (item.repository_url) {
+      const parts = item.repository_url.split('/');
+      owner = parts[parts.length - 2];
+      repo = parts[parts.length - 1];
+    } else if (item.html_url) {
+      const match = item.html_url.match(/github\.com\/([^/]+)\/([^/]+)/);
+      if (match) { owner = match[1]; repo = match[2]; }
+    }
+    if (owner && repo) {
+      const type = item.pull_request != null || sec.type === 'prs' ? 'pull_request' : 'issue';
+      import('./detail.mjs').then(m => m.openDetail(type, owner, repo, item.number)).catch(() => showMessage('Unable to open custom item', 'error'));
+    } else {
+      showMessage('No repository URL for this custom item', 'warning');
+    }
+    return;
+  }
   if (zone === 'activity') {
-    const ev = appState.events[appState.dashboardActivitySelected];
+    const ev = getDashboardEvents()[appState.dashboardActivitySelected];
     if (!ev) return;
     // GitHub events have no single stable browser URL across all event
     // types; the most useful drill-in is the affected repo. We switch to
@@ -1065,7 +1427,7 @@ export function openDashboardItem() {
     return;
   }
   if (zone === 'issues') {
-    const issue = appState.dashboardRecentIssues[appState.dashboardIssueSelected];
+    const issue = getDashboardIssues()[appState.dashboardIssueSelected];
     if (!issue) return;
     // Extract owner/repo from issue.repository_url or html_url
     let owner, repo;
@@ -1078,12 +1440,14 @@ export function openDashboardItem() {
       if (match) { owner = match[1]; repo = match[2]; }
     }
     if (owner && repo) {
-      import('./detail.mjs').then(m => m.openDetail('issue', owner, repo, issue.number));
+      import('./detail.mjs').then(m => m.openDetail('issue', owner, repo, issue.number)).catch(() => showMessage('Unable to open issue detail', 'error'));
+    } else {
+      showMessage('No repository URL for this issue', 'warning');
     }
     return;
   }
   if (zone === 'prs') {
-    const pr = appState.dashboardRecentPRs[appState.dashboardPRSelected];
+    const pr = getDashboardPRs()[appState.dashboardPRSelected];
     if (!pr) return;
     let owner, repo;
     if (pr.repository_url) {
@@ -1095,7 +1459,9 @@ export function openDashboardItem() {
       if (match) { owner = match[1]; repo = match[2]; }
     }
     if (owner && repo) {
-      import('./detail.mjs').then(m => m.openDetail('pull_request', owner, repo, pr.number));
+      import('./detail.mjs').then(m => m.openDetail('pull_request', owner, repo, pr.number)).catch(() => showMessage('Unable to open PR detail', 'error'));
+    } else {
+      showMessage('No repository URL for this pull request', 'warning');
     }
     return;
   }
@@ -1104,10 +1470,12 @@ export function openDashboardItem() {
 // Card focus navigation (Tab on dashboard).
 export function focusCards() {
   appState.dashboardCardsFocus = true;
+  appState.dashboardFocusZone = 'cards';
   render();
 }
 export function unfocusCards() {
   appState.dashboardCardsFocus = false;
+  appState.dashboardFocusZone = 'trending';
   render();
 }
 export function leftCard() {
@@ -1122,17 +1490,21 @@ export function rightCard() {
 }
 
 // ── Collapsible sections ──
-const DASHBOARD_SECTIONS = ['profile', 'stars', 'topRepos', 'contributions', 'languages', 'recentActivity', 'issues', 'prs', 'stale', 'trending'];
+const DASHBOARD_SECTIONS = ['profile', 'stars', 'topRepos', 'contributions', 'languages', 'attention', 'recentActivity', 'issues', 'prs', 'stale', 'trending'];
 
 export function getSections() {
-  return DASHBOARD_SECTIONS.map(s => 'dashboard:' + s);
+  const base = DASHBOARD_SECTIONS.map(s => 'dashboard:' + s);
+  const custom = (appState.customSections || []).map((_, i) => 'dashboard:custom-' + i);
+  return [...base, ...custom];
 }
 
 export function getCurrentSection() {
   const zone = appState.dashboardFocusZone;
   if (zone === 'trending') return 'dashboard:trending';
+  if (zone === 'attention') return 'dashboard:attention';
   if (zone === 'activity') return 'dashboard:recentActivity';
   if (zone === 'issues') return 'dashboard:issues';
   if (zone === 'prs') return 'dashboard:prs';
+  if (zone === 'custom') return 'dashboard:custom-' + appState.dashboardCustomSectionSelected;
   return 'dashboard:profile';
 }

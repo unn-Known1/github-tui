@@ -105,6 +105,10 @@ export function pageDown() {
 
 function filtered() {
   let list = appState.notifications;
+  if (appState.localRepo && appState.localRepoFilter) {
+    const fullName = appState.localRepo.owner + '/' + appState.localRepo.repo;
+    list = list.filter(n => n.repository && n.repository.full_name === fullName);
+  }
   switch (appState.inboxFilter) {
     case 'unread':   list = list.filter(n => n.unread); break;
     case 'mentions': list = list.filter(n => n.reason === 'mention'); break;

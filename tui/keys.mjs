@@ -214,8 +214,7 @@ function refreshCurrent() {
   const t = tabState.current;
   if (t === 0) {
     appState.dashboardLoaded = false;
-    dashboard.loadDashboardWidgets(true);
-    repos.loadUserData();
+    dashboard.refreshDashboard();
     showMessage('Refreshing dashboard...', 'info');
   } else if (t === 1) {
     repos.loadUserData();
@@ -431,8 +430,10 @@ export function handleKey(key) {
     }
     case 'q': quit(); return;
     case '\t': {
-      // Tab: if overlays are open, cycle focus zones; otherwise switch tabs.
-      if (appState.showHelp || appState.showPalette || appState.showBookmarks || appState.showDetail) {
+      // Dashboard uses Tab for in-page focus because its cards and widgets
+      // are interactive. Other tabs retain Tab as tab navigation.
+      if (appState.showHelp || appState.showPalette || appState.showBookmarks || appState.showDetail
+          || tabState.current === 0) {
         focusNext();
       } else {
         const target = (tabState.current + 1) % TABS.length;
@@ -442,8 +443,8 @@ export function handleKey(key) {
       return;
     }
     case '\x1b[Z': {
-      // Shift+Tab: if overlays are open, cycle focus zones backward; otherwise switch tabs.
-      if (appState.showHelp || appState.showPalette || appState.showBookmarks || appState.showDetail) {
+      if (appState.showHelp || appState.showPalette || appState.showBookmarks || appState.showDetail
+          || tabState.current === 0) {
         focusPrev();
       } else {
         const target = (tabState.current - 1 + TABS.length) % TABS.length;
@@ -669,7 +670,7 @@ export function handleKey(key) {
 
 function handleSpace() {
   const t = tabState.current;
-  if (t === 0) dashboard.pageDown();
+  if (t === 0) dashboard.loadMoreTrending();
   else if (t === 1) repos.space();
   else if (t === 2) analyze.pageDown();
   else if (t === 3) actions.enter();
@@ -697,12 +698,12 @@ function handleTop() {
   if (t === 0) {
     if (appState.dashboardCardsFocus) {
       appState.dashboardSelectedCard = 0;
-      render();
     } else {
+      appState.dashboardScroll = 0;
       appState.trendingSelected = 0;
       appState.trendingScroll = 0;
-      render();
     }
+    render();
     return;
   }
   if (t === 1) {
@@ -735,17 +736,10 @@ function handleBottom() {
   if (t === 0) {
     if (appState.dashboardCardsFocus) {
       appState.dashboardSelectedCard = 4;
-      render();
     } else {
-      const trendingList = appState.trending || [];
-      if (trendingList.length > 0) {
-        appState.trendingSelected = trendingList.length - 1;
-        const H = screen ? screen.height : 24;
-        const maxTrending = Math.max(3, Math.floor((H - 17) * 0.30));
-        appState.trendingScroll = Math.max(0, trendingList.length - maxTrending);
-      }
-      render();
+      appState.dashboardScroll = appState.dashboardMaxScroll || 0;
     }
+    render();
     return;
   }
   if (t === 1) repos.bottom(screen);
@@ -876,6 +870,7 @@ function handleBack() {
     // actually lives.
     if (appState.dashboardCardsFocus) {
       dashboard.unfocusCards();
+      resetFocus(0);
       return;
     }
     if (appState.confirmAction) return; // don't stack confirms
@@ -973,8 +968,22 @@ export function registerCoreActions() {
   reg({ id: 'settings.theme',  label: 'Change theme...',
         run: () => { setTab(5); appState.settingsCursor = 6; render(); settings.enter(); } });
   reg({ id: 'settings.logout', label: 'Log out', run: () => confirm('Log out of GitHub?', settings.handleLogout, 'Log Out') });
-  reg({ id: 'dashboard.refresh', label: 'Refresh dashboard widgets',
-        run: () => dashboard.loadDashboardWidgets(true) });
+  reg({ id: 'dashboard.refresh', label: 'Refresh dashboard data',
+        run: () => dashboard.refreshDashboard() });
+  reg({ id: 'dashboard.inbox', label: 'Open Inbox',
+        run: () => {
+          setTab(4);
+          if (appState.notifications.length === 0 && appState.token) inbox.loadNotifications();
+          else render();
+        } });
+  reg({ id: 'dashboard.actions', label: 'Open Actions',
+        run: () => {
+          setTab(3);
+          if (appState.actionsRepos.length === 0 && appState.token) actions.loadActionsRepos();
+          else render();
+        } });
+  reg({ id: 'dashboard.search', label: 'Search repositories',
+        run: () => { setTab(2); analyze.keys.i(); } });
   reg({ id: 'dashboard.new-issue', label: 'Create new issue from TUI',
         run: () => import('./issue-create.mjs').then(m => m.startCreateIssue()) });
 

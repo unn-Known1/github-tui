@@ -113,7 +113,9 @@ export const SECURITY_SUB_PANES = ['dependabot', 'secret', 'codescan', 'advisori
 // resolved only when invoked, after both module records have fully evaluated.
 export const TABS = [
   { key: '1', label: 'Dash',
-    refresh: () => import('./tabs/dashboard.mjs').then(m => m.loadDashboardWidgets(true)) },
+    // Dashboard refresh must refresh repository metadata first so aggregate
+    // cards, stale counts, and language totals share one freshness boundary.
+    refresh: () => import('./tabs/dashboard.mjs').then(m => m.refreshDashboard()) },
   { key: '2', label: 'Repos',
     refresh: () => import('./tabs/repos.mjs').then(m => m.loadUserData()) },
   { key: '3', label: 'Explore',
@@ -162,6 +164,7 @@ export const appState = {
   starredScroll: 0,
   repoPins: [],                     // [full_name] — sticky at top of list
   reposShowLangFacet: false,        // toggle the language facet sidebar
+  reposLangFacetSelected: 0,
   reposLangFilter: null,            // null = no language filter
 
   // entityCache — single source of truth for repo entities.
@@ -278,18 +281,25 @@ export const appState = {
   dashboardContributions: null,  // { weeks: [[day, day, ...], ...] } heatmap data
   dashboardRecentIssues: [],     // recently opened/updated issues across repos
   dashboardRecentPRs: [],        // recently opened/updated PRs across repos
+  dashboardAttentionItems: [],   // compact actionable summary rows
   dashboardStaleCount: 0,        // repos with no push in STALE_DAYS+ (set by repos-logic)
   dashboardStaleRepos: [],       // stale repo names for display
   dashboardStarHistory: [],      // daily star counts for sparkline
   dashboardSelectedCard: 0,      // 0..4 stat-card focus for keyboard nav
   dashboardCardsFocus: false,    // true when keyboard focus is on a stat card
-  dashboardFocusZone: 'trending', // 'trending' | 'issues' | 'prs' — which list has keyboard focus
+  dashboardFocusZone: 'trending', // 'cards' | 'activity' | 'issues' | 'prs' | 'trending'
+  dashboardScroll: 0,             // page-level body scroll offset
+  dashboardMaxScroll: 0,          // computed maximum body scroll offset
   dashboardIssueSelected: 0,
   dashboardIssueScroll: 0,
+  dashboardAttentionSelected: 0,
+  dashboardAttentionScroll: 0,
   dashboardActivitySelected: 0,    // keyboard selection index inside Recent Activity list
   dashboardActivityScroll: 0,      // scroll offset when activity list exceeds viewport
   dashboardPRSelected: 0,
   dashboardPRScroll: 0,
+  dashboardCustomSectionSelected: 0,
+  dashboardCustomItemSelected: 0,
 
   // ── Auto-refresh ──
   autoRefreshEnabled: false,

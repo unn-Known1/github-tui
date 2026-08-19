@@ -12,7 +12,7 @@ import {
 } from '../github.mjs';
 import { startInput, registerInputHandler } from '../input.mjs';
 import { color, listThemes, getThemeName, setTheme } from '../theme.mjs';
-import { loadDashboardWidgets } from './dashboard.mjs';
+import { refreshDashboard } from './dashboard.mjs';
 import { loadUserData } from './repos.mjs';
 import { openUrl } from '../utils.mjs';
 import { starRepo as apiStarRepo } from '../github.mjs';
@@ -208,6 +208,7 @@ export async function handleLogout() {
   appState.securityAlertDetail = null;
   appState.dashboardRecentIssues = [];
   appState.dashboardRecentPRs = [];
+  appState.dashboardAttentionItems = [];
   appState.dashboardContributions = null;
   appState.dashboardStarHistory = [];
   appState.dashboardLoaded = false;
@@ -623,10 +624,12 @@ export function enter() {
       break;
     case 3:
       if (isLoggedIn) {
-        appState.dashboardLoaded = false;
         appState.loading = true;
         render();
-        loadDashboardWidgets(true).finally(() => { appState.loading = false; render(); });
+        refreshDashboard().finally(() => {
+          appState.loading = false;
+          render();
+        });
         showMessage('Refreshing dashboard...', 'info');
       }
       break;

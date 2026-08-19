@@ -10,6 +10,7 @@ import * as detail from './tabs/detail.mjs';
 import * as repos from './tabs/repos.mjs';
 import * as dashboard from './tabs/dashboard.mjs';
 import * as settings from './tabs/settings.mjs';
+import { focusDashboardZone } from './focus.mjs';
 
 // ── Text-selection helpers for README / file viewer ──
 
@@ -609,20 +610,26 @@ function handleDblClick(sx, sy) {
   const W = screen.width, H = screen.height;
   const y = TAB_CONTENT_Y[0];
   const h = H - HEADER_HEIGHT - 2 - 2;
-  const cardW = Math.min(16, Math.max(10, Math.floor((W - 2) / 5) - 2));
-  const gap = 2;
-  const cardY = y + 1;
+  const cardLayout = getStatCardLayout(W, 5);
+  const cardW = cardLayout.cardWidth;
+  const gap = cardLayout.gap;
+  const cardsPerRow = cardLayout.cardsPerRow;
+  const cardY = y + 3;
+  const cardRows = Math.ceil(5 / cardsPerRow);
   const cardH = 4;
-  const bodyY = cardY + cardH + 2;
+  const bodyY = cardY + cardRows * (cardH + 1) + 1;
   const splitX = Math.floor(W / 2);
   const rightX = splitX + 2;
 
   // Double-click stat card → drill in
-  if (sy >= cardY && sy < cardY + cardH) {
-    const col = Math.floor((sx - 1) / (cardW + gap));
-    if (col === 4) {
+  if (sy >= cardY && sy < cardY + cardRows * (cardH + 1)) {
+    const row = Math.floor((sy - cardY) / (cardH + 1));
+    const col = Math.floor((sx - cardLayout.startX) / (cardW + gap));
+    const cardIndex = row * cardsPerRow + col;
+    if (cardIndex === 4) {
       // Stale → repos with stale filter
       setTab(1);
+      appState.reposView = 'own';
       appState.repoStaleOnly = true;
       appState.repoScroll = 0;
       appState.repoSelected = 0;
@@ -630,7 +637,7 @@ function handleDblClick(sx, sy) {
       render();
       return true;
     }
-    if (col === 0 || col === 1) {
+    if (cardIndex === 0 || cardIndex === 1) {
       setTab(1);
       render();
       return true;
@@ -643,15 +650,41 @@ function handleDblClick(sx, sy) {
     const th = appState._sectionHeaders['dashboard:trending'];
     if (th && th.y > 0 && sy > th.y) {
       const listIdx = sy - th.y - 1;
+      const filtered = dashboard.getFilteredTrending();
       const absIdx = listIdx + appState.trendingScroll;
-      if (absIdx >= 0 && absIdx < appState.trending.length) {
-        const r = appState.trending[absIdx];
+      if (absIdx >= 0 && absIdx < filtered.length) {
+        const r = filtered[absIdx];
         if (r && r.full_name) {
           const [owner, name] = r.full_name.split('/');
           setTab(2);
           analyze.loadRepoDetails(owner, name);
           return true;
         }
+      }
+    }
+  }
+
+  // Double-clicking a Dashboard list item opens the same destination as
+  // keyboard Enter. Coordinate lookup uses rendered section headers so it
+  // remains correct while the Dashboard body is scrolled.
+  if (sx >= rightX && sy >= bodyY) {
+    const bodyRows = Math.max(1, H - 17);
+    const lists = [
+      { key: 'attention', zone: 'attention', items: dashboard.getNeedsAttention(), scroll: appState.dashboardAttentionScroll, max: 4, selected: 'dashboardAttentionSelected' },
+      { key: 'recentActivity', zone: 'activity', items: dashboard.getDashboardEvents(), scroll: appState.dashboardActivityScroll, max: Math.min(7, Math.max(1, Math.floor(bodyRows * 0.30))), selected: 'dashboardActivitySelected' },
+      { key: 'issues', zone: 'issues', items: dashboard.getDashboardIssues(), scroll: appState.dashboardIssueScroll, max: Math.min(4, Math.max(1, Math.floor(bodyRows * 0.20))), selected: 'dashboardIssueSelected' },
+      { key: 'prs', zone: 'prs', items: dashboard.getDashboardPRs(), scroll: appState.dashboardPRScroll, max: Math.min(4, Math.max(1, Math.floor(bodyRows * 0.20))), selected: 'dashboardPRSelected' },
+    ];
+    for (const list of lists) {
+      const header = appState._sectionHeaders['dashboard:' + list.key];
+      if (!header || sy <= header.y) continue;
+      const row = sy - header.y - 1;
+      const index = row + list.scroll;
+      if (row >= 0 && row < list.max && index < list.items.length) {
+        appState[list.selected] = index;
+        if (!focusDashboardZone(list.zone)) return false;
+        dashboard.openDashboardItem();
+        return true;
       }
     }
   }
@@ -805,18 +838,71 @@ function dispatchDashboardClick(sx, sy) {
     }
   }
 
-  // Right column — check trending repo click.
+  // Right column — selectable Dashboard lists. Mouse selection uses the
+  // same filtered arrays and viewport calculations as keyboard navigation.
   if (sx >= rightX && sy >= bodyY) {
+    const bodyRows = Math.max(1, H - 17);
+    const maxEvents = Math.min(7, Math.max(1, Math.floor(bodyRows * 0.30)));
+    const maxIssues = Math.min(4, Math.max(1, Math.floor(bodyRows * 0.20)));
+    const maxPRs = maxIssues;
+    const lists = [
+      { key: 'attention', zone: 'attention', length: dashboard.getNeedsAttention().length, scroll: appState.dashboardAttentionScroll, max: 4, selected: 'dashboardAttentionSelected' },
+      { key: 'recentActivity', zone: 'activity', length: dashboard.getDashboardEvents().length, scroll: appState.dashboardActivityScroll, max: maxEvents, selected: 'dashboardActivitySelected' },
+      { key: 'issues', zone: 'issues', length: dashboard.getDashboardIssues().length, scroll: appState.dashboardIssueScroll, max: maxIssues, selected: 'dashboardIssueSelected' },
+      { key: 'prs', zone: 'prs', length: dashboard.getDashboardPRs().length, scroll: appState.dashboardPRScroll, max: maxPRs, selected: 'dashboardPRSelected' },
+    ];
+    for (const list of lists) {
+      const header = appState._sectionHeaders['dashboard:' + list.key];
+      if (!header || sy <= header.y) continue;
+      const row = sy - header.y - 1;
+      if (row >= 0 && row < list.max && row + list.scroll < list.length) {
+        appState[list.selected] = row + list.scroll;
+        focusDashboardZone(list.zone);
+        return;
+      }
+    }
+
+    // Custom sections use the same bounded issue/PR rows as keyboard focus.
+    // Keep the raw section index so empty definitions do not shift selection.
+    for (let si = 0; si < (appState.customSections || []).length; si++) {
+      const section = appState.customSections[si];
+      const header = appState._sectionHeaders['dashboard:custom-' + si];
+      if (!header || !section?.items?.length || sy <= header.y) continue;
+      const row = sy - header.y - 1;
+      if (row >= 0 && row < Math.min(4, section.items.length)) {
+        appState.dashboardCustomSectionSelected = si;
+        appState.dashboardCustomItemSelected = row;
+        focusDashboardZone('custom');
+        return;
+      }
+    }
+
+    const staleHeader = appState._sectionHeaders['dashboard:stale'];
+    if (staleHeader && sy > staleHeader.y) {
+      const row = sy - staleHeader.y - 1;
+      const name = appState.dashboardStaleRepos[row];
+      const repo = dashboard.getDashboardRepos().find(r => r.name === name);
+      if (repo) {
+        const [owner, repoName] = repo.full_name.split('/');
+        setTab(2);
+        analyze.loadRepoDetails(owner, repoName);
+        return;
+      }
+    }
+
+    // Check trending repo click.
     // Find the "TRENDING THIS WEEK" header position.
     const th = appState._sectionHeaders['dashboard:trending'];
     if (th && th.y > 0 && sy > th.y) {
       const listIdx = sy - th.y - 1;  // items start after header
+      const filtered = dashboard.getFilteredTrending();
       const absIdx = listIdx + appState.trendingScroll;
-      if (absIdx >= 0 && absIdx < appState.trending.length) {
+      if (absIdx >= 0 && absIdx < filtered.length) {
         appState.trendingSelected = absIdx;
-        render();
+        focusDashboardZone('trending');
         return;
       }
+
     }
   }
 
@@ -826,7 +912,7 @@ function dispatchDashboardClick(sx, sy) {
     if (th && th.y > 0 && sy > th.y) {
       const listIdx = sy - th.y - 1;
       if (listIdx >= 0 && listIdx < 5) {
-        const reposList = [...appState.repos]
+        const reposList = [...dashboard.getDashboardRepos()]
           .sort((a, b) => (b.stargazers_count || 0) - (a.stargazers_count || 0));
         if (listIdx < reposList.length) {
           const r = reposList[listIdx];
@@ -1064,6 +1150,9 @@ function scrollUp(sx, sy) {
   if (t === 0) {
     if (inTrendingSection(sx, sy)) {
       import('./tabs/dashboard.mjs').then(m => m.trendingUp()).catch(() => {});
+    } else if (appState.dashboardScroll > 0) {
+      appState.dashboardScroll--;
+      render();
     }
   } else if (t === 1) {
     if (appState.reposView === 'starred') {
@@ -1092,6 +1181,9 @@ function scrollDown(sx, sy) {
   if (t === 0) {
     if (inTrendingSection(sx, sy)) {
       import('./tabs/dashboard.mjs').then(m => m.trendingDown()).catch(() => {});
+    } else if (appState.dashboardScroll < (appState.dashboardMaxScroll || 0)) {
+      appState.dashboardScroll++;
+      render();
     }
   } else if (t === 1) {
     const maxV = Math.max(1, Math.min(15, screen.height - 12));

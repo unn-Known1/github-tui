@@ -255,10 +255,12 @@ export class Screen {
     this.styleBuf = [];
     this.prevChar = [];
     this.prevStyle = [];
+    this._viewport = null;
     this._init();
   }
 
   _init() {
+    this._viewport = null;
     this.charBuf = [];
     this.styleBuf = [];
     for (let y = 0; y < this.height; y++) {
@@ -283,6 +285,30 @@ export class Screen {
     }
   }
 
+  // Temporarily clip and vertically offset drawing for scrollable tab bodies.
+  // Logical coordinates remain stable for tab layout calculations while
+  // writes outside the viewport are discarded.
+  pushViewport(top, bottom, offset = 0) {
+    this._viewport = { top, bottom, offset };
+  }
+
+  popViewport() {
+    this._viewport = null;
+  }
+
+  mapViewportY(y) {
+    if (!this._viewport) return y;
+    const mapped = y - this._viewport.offset;
+    if (mapped < this._viewport.top || mapped >= this._viewport.bottom) return -1;
+    return mapped;
+  }
+
+  setStyle(x, y, style) {
+    const mapped = this.mapViewportY(y);
+    if (mapped < 0 || x < 0 || x >= this.width) return;
+    this.styleBuf[mapped][x] = style;
+  }
+
   clear() {
     for (let y = 0; y < this.height; y++) {
       for (let x = 0; x < this.width; x++) {
@@ -293,6 +319,7 @@ export class Screen {
   }
 
   writeStr(x, y, str, style = null) {
+    y = this.mapViewportY(y);
     if (y < 0 || y >= this.height) return;
     const chars = Array.from(str);
     let cx = x;
@@ -315,6 +342,7 @@ export class Screen {
   // Write a string without touching existing styles at each cell.
   // Useful for drawing characters over a previously-filled background.
   writeStrNoStyle(x, y, str) {
+    y = this.mapViewportY(y);
     if (y < 0 || y >= this.height) return;
     const chars = Array.from(str);
     let cx = x;
@@ -332,12 +360,14 @@ export class Screen {
   }
 
   setCell(x, y, ch, style = null) {
+    y = this.mapViewportY(y);
     if (y < 0 || y >= this.height || x < 0 || x >= this.width) return;
     this.charBuf[y][x] = ch;
     this.styleBuf[y][x] = style;
   }
 
   fillRow(y, ch, style = null) {
+    y = this.mapViewportY(y);
     if (y < 0 || y >= this.height) return;
     for (let x = 0; x < this.width; x++) {
       this.charBuf[y][x] = ch;
