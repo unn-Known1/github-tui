@@ -73,6 +73,14 @@ export function exploreDown() {
   render();
 }
 
+export function getExploreSelectionLabel() {
+  const item = getExploreLanding()[appState.exploreSel];
+  if (!item) return 'Nothing selected';
+  return item.kind === 'saved' ? 'Saved search — Enter runs it' :
+    item.kind === 'trending' ? 'Trending repo — Enter opens it' :
+    'Recent repo — Enter opens it';
+}
+
 export async function submitSearch(value) {
   const query = (value || '').trim();
   if (!query) return;
@@ -481,6 +489,8 @@ export function renderSearchInput(screen, y, h) {
   tipY += 2;
   const hint = '[i] Search repos   [u] Search users   [C] Search code   [Enter] Open highlighted';
   screen.writeStr(2, tipY, hint, { dim: true });
+  screen.writeStr(Math.max(2, screen.width - getExploreSelectionLabel().length - 2), tipY,
+    getExploreSelectionLabel(), { fg: 'cyan', dim: true });
 
   renderExploreLanding(screen, tipY + 1, h);
 }

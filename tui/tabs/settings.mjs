@@ -8,7 +8,7 @@ import {
 } from '../config.mjs';
 import {
   getAuthenticatedUser, getUserRepositories,
-  lastRateLimit, lastScopes, getCacheStats, offlineState, isStarred as checkStarred,
+  lastRateLimit, lastScopes, getCacheStats, clearAccountCache, offlineState, isStarred as checkStarred,
 } from '../github.mjs';
 import { startInput, registerInputHandler } from '../input.mjs';
 import { color, listThemes, getThemeName, setTheme } from '../theme.mjs';
@@ -108,7 +108,7 @@ export async function submitLogin(value) {
         if (process.platform === 'linux') {
           showMessage(
             'Login OK, but no OS keychain (libsecret) is available. ' +
-            'Token will be lost on exit. Install gnome-keyring or KWallet.',
+            'Token is kept in the chmod 600 plaintext fallback file for future sessions. Install gnome-keyring or KWallet for OS encryption.',
             'warning', 8000
           );
         }
@@ -285,8 +285,14 @@ export function renderSettings(screen, y, h) {
   // AUTHENTICATION
   sectionHeader(screen, 2, row, '◆ AUTHENTICATION', leftMaxW);
   row += 2;
-  // Check gh availability (cached after first call)
+  // Keep the cursor on an actionable row while asynchronous CLI detection
+  // settles. In particular, PAT login must remain reachable when `gh` is
+  // unavailable.
   const ghReady = appState._ghAvailable === true;
+  if (!isCursorEnabled(appState.settingsCursor, ghReady)) {
+    const firstEnabled = [...Array(9).keys()].find(cursor => isCursorEnabled(cursor, ghReady));
+    if (firstEnabled != null) appState.settingsCursor = firstEnabled;
+  }
   const authItems = [
     { label: 'Login (GitHub CLI)', desc: isLoggedIn ? 'Already logged in' : (ghReady ? 'Use gh auth token' : 'Install gh CLI first'), enabled: !isLoggedIn && ghReady, sel: appState.settingsCursor === 0 },
     { label: 'Login (PAT)',        desc: isLoggedIn ? 'Already logged in' : 'Paste a Personal Access Token', enabled: !isLoggedIn, sel: appState.settingsCursor === 1 },
@@ -515,7 +521,12 @@ function buildSystemLines(screenW) {
   // Cache stats
   const cs = getCacheStats();
   if (cs.entries > 0) {
+    const age = cs.oldestTs ? Math.max(0, Math.floor((Date.now() - cs.oldestTs) / 60000)) + 'm oldest' : 'unknown age';
     lines.push(['Cache', cs.entries + ' entries, ' + cs.totalKB + ' KB', { dim: true }]);
+    lines.push(['Cache age', age, { dim: true }]);
+  }
+  if (appState.user?.login) {
+    lines.push(['Account', '@' + appState.user.login, { fg: 'cyan', bold: true }]);
   }
   if (offlineState.isOffline) {
     lines.push(['Status', 'OFFLINE', { fg: 'yellow', bold: true }]);
@@ -558,7 +569,16 @@ export const keys = {
   },
   's': () => starRepo(),
   'S': () => starRepo(),
-  'o': () => openUrl('https://github.com/unn-Known1/github-tui'),
+  'o': () => openUrl('https://github.com/unn-Known1/github-tui').then(r => {
+    if (r.ok) showMessage('Opened project page', 'success');
+    else showMessage(r.error || 'Open failed', 'error');
+  }),
+  'c': () => {
+    if (!appState.token) { showMessage('Login required to clear account cache', 'warning'); return; }
+    const removed = clearAccountCache(appState.token);
+    showMessage(removed ? 'Cleared ' + removed + ' cached account responses' : 'No cached account responses', 'success');
+    render();
+  },
 };
 const AUTH_ITEMS = [0, 1, 2];  // Login (CLI), Login (PAT), Logout
 const DATA_ITEMS = [3, 4, 5];  // Refresh Dashboard, Refresh User Data, Auto-Refresh
@@ -566,10 +586,11 @@ const APPEARANCE_ITEMS = [6]; // Change Theme
 const DANGER_ITEMS = [7];  // Clear Token
 const ABOUT_ITEMS = [8];  // Star repo
 
-function isCursorEnabled(cursor) {
+export function isSettingsCursorEnabled(cursor, ghReady = appState._ghAvailable === true) {
   const isLoggedIn = !!appState.token;
   if (AUTH_ITEMS.includes(cursor)) {
-    if (cursor === 0) return !isLoggedIn;
+    if (cursor === 0) return !isLoggedIn && ghReady;
+    if (cursor === 1) return !isLoggedIn;
     return isLoggedIn;
   }
   if (DATA_ITEMS.includes(cursor)) {
@@ -580,6 +601,10 @@ function isCursorEnabled(cursor) {
   if (DANGER_ITEMS.includes(cursor)) return isLoggedIn;
   if (ABOUT_ITEMS.includes(cursor)) return true;
   return false;
+}
+
+function isCursorEnabled(cursor) {
+  return isSettingsCursorEnabled(cursor);
 }
 
 export function up() {
@@ -594,7 +619,7 @@ export function up() {
   }
 }
 export function down() {
-  const max = appState._maxSettingsCursor != null ? appState._maxSettingsCursor : 6;
+  const max = appState._maxSettingsCursor != null ? appState._maxSettingsCursor : 8;
   let cur = appState.settingsCursor;
   while (cur < max) {
     cur++;

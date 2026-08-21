@@ -78,16 +78,43 @@ export async function loadWorkflowRuns() {
   appState.actionsJobSteps = {};
   render();
   try {
-    const result = await getWorkflowRuns(appState.token, owner, name, RUNS_PER_PAGE, gen.signal);
+    const result = await getWorkflowRuns(appState.token, owner, name, 1, RUNS_PER_PAGE, gen.signal);
     if (isStale(gen)) { appState.actionsLoading = false; return; }
     const runs = result && result.workflow_runs ? result.workflow_runs : [];
     appState.actionsRuns = runs;
+    appState.actionsRunsPage = 1;
+    appState.actionsRunsHasMore = runs.length >= RUNS_PER_PAGE;
     appState.actionsView = 'runs';
   } catch (e) {
     if (!isStale(gen)) showError(e.message, 'Load workflow runs', { retry: loadWorkflowRuns });
   }
   appState.actionsLoading = false;
   if (!isStale(gen)) render();
+}
+
+export async function loadMoreWorkflowRuns() {
+  const repos = getFilteredRepos();
+  const repo = repos[appState.actionsRepoSelected];
+  if (!repo || !appState.actionsRunsHasMore || appState.actionsLoading) return;
+  const [owner, name] = repo.full_name.split('/');
+  const gen = startAsync('actions-runs-more');
+  appState.actionsLoading = true;
+  render();
+  try {
+    const page = appState.actionsRunsPage + 1;
+    const result = await getWorkflowRuns(appState.token, owner, name, page, RUNS_PER_PAGE, gen.signal);
+    if (isStale(gen)) return;
+    const more = result && result.workflow_runs ? result.workflow_runs : [];
+    appState.actionsRuns = [...appState.actionsRuns, ...more];
+    appState.actionsRunsPage = page;
+    appState.actionsRunsHasMore = more.length >= RUNS_PER_PAGE;
+    showMessage(more.length ? 'Loaded ' + appState.actionsRuns.length + ' workflow runs' : 'All workflow runs loaded', 'info');
+  } catch (e) {
+    if (!isStale(gen)) showMessage(e.message || 'Failed to load more workflow runs', 'error');
+  } finally {
+    appState.actionsLoading = false;
+    if (!isStale(gen)) render();
+  }
 }
 
 export async function toggleRunDetail() {
@@ -376,9 +403,10 @@ function renderRunList(screen, y, h, W) {
   const hintY = y + Math.min(maxVisible, drawn);
   if (hintY < y + h - 1) {
     screen.hline(hintY, '─', { dim: true });
+      const moreHint = appState.actionsRunsHasMore ? '   [Space] Load more' : '';
     const hint = appState.actionsExpandedRun
-      ? '[Enter] Close detail   [o] Open in browser   [r] Re-run   [x] Cancel   [Esc] Back'
-      : '[Enter] Expand jobs   [o] Open in browser   [r] Re-run   [x] Cancel   [Esc] Back';
+      ? '[Enter] Close detail   [o] Open in browser   [r] Re-run   [x] Cancel   [Esc] Back' + moreHint
+      : '[Enter] Expand jobs   [o] Open in browser   [r] Re-run   [x] Cancel   [Esc] Back' + moreHint;
     screen.writeStr(2, hintY + 1, hint, { dim: true });
   }
 }
@@ -479,7 +507,11 @@ export function enter() {
 
 export function space() {
   if (appState.actionsView === 'repos') {
-    // No pagination for repos list currently.
+    // Repository metadata is loaded in the Repos tab.
+    return;
+  }
+  if (appState.actionsRunsHasMore && appState.actionsSelected >= appState.actionsRuns.length - 1) {
+    loadMoreWorkflowRuns();
   } else {
     toggleRunDetail();
   }

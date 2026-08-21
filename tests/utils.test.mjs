@@ -1,7 +1,7 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  relTime, clamp, truncate, padRight, shortNum, formatBytes,
+  relTime, clamp, truncate, truncateToWidth, padRight, displayWidth, shortNum, formatBytes,
   greeting, eventGlyph, notifTypeColor, notificationToHtmlUrl,
   safeCwdJoin, ghCloneUrl, wrapText, wrapTextWithMap,
 } from '../tui/utils.mjs';
@@ -61,6 +61,21 @@ describe('truncate', () => {
   it('truncates with ellipsis', () => assert.equal(truncate('hello world', 8), 'hello w…'));
   it('handles exact length', () => assert.equal(truncate('hello', 5), 'hello'));
   it('handles n=1', () => assert.equal(truncate('hello', 1), '…'));
+});
+
+describe('display-width helpers', () => {
+  it('counts CJK and emoji as two terminal cells', () => {
+    assert.equal(displayWidth('A中😀'), 5);
+  });
+  it('does not count combining marks as extra cells', () => {
+    assert.equal(displayWidth('e\u0301'), 1);
+  });
+  it('truncates by terminal cells rather than UTF-16 length', () => {
+    assert.equal(truncateToWidth('A中😀Z', 4), 'A中…');
+  });
+  it('pads wide strings to the requested cell width', () => {
+    assert.equal(padRight('中', 4), '中  ');
+  });
 });
 
 describe('padRight', () => {

@@ -176,6 +176,24 @@ process.on('SIGTERM', () => { saveEtagCache(); saveLastSynced(); });
 
 // ── Cache stats ──
 
+export function clearAccountCache(token) {
+  const identity = token
+    ? createHash('sha256').update(String(token)).digest('hex').slice(0, 16)
+    : 'anonymous';
+  let removed = 0;
+  for (const key of etagCache.keys()) {
+    if (key.endsWith(':' + identity)) {
+      etagCache.delete(key);
+      removed++;
+    }
+  }
+  if (removed > 0) {
+    _cacheDirty = true;
+    saveEtagCache();
+  }
+  return removed;
+}
+
 export function getCacheStats() {
   let totalBytes = 0;
   let oldestTs = Infinity;
@@ -233,7 +251,7 @@ export function request(path, opts) {
     if (cached) {
       cached.lastAccess = Date.now();
       _cacheDirty = true;
-      recordSync(path);   // keep last-synced fresh even when serving from cache
+      recordSync(path, cached.ts);
       return Promise.resolve(cached.body);
     }
     return Promise.reject(new Error('Offline — no cached data available'));
@@ -245,7 +263,7 @@ export function request(path, opts) {
     if (cached && Date.now() - cached.ts < ETAG_TTL) {
       cached.lastAccess = Date.now();
       _cacheDirty = true;
-      recordSync(path);   // same as offline path — refresh sync stamp
+      recordSync(path, cached.ts);
       return Promise.resolve(cached.body);
     }
   }
@@ -257,9 +275,17 @@ export function request(path, opts) {
       if (settled) return;
       settled = true;
       try { if (req) req.destroy(); } catch (e) {}
-      // Timeout while online → mark as potential offline.
-      if (!offlineState.isOffline) {
-        offlineState.isOffline = true;
+      // A slow endpoint is not proof that the whole connection is offline.
+      // Prefer this request's cached response, if any, while preserving its
+      // original age; only genuine socket errors can raise the global banner.
+      if (method === 'GET') {
+        const cached = etagCache.get(cacheKey);
+        if (cached) {
+          cached.lastAccess = Date.now();
+          _cacheDirty = true;
+          recordSync(path, cached.ts);
+          return resolve(cached.body);
+        }
       }
       reject(new Error('Request timed out'));
     }, timeoutMs);
@@ -315,7 +341,7 @@ export function request(path, opts) {
           if (cached && Date.now() - cached.ts < ETAG_TTL) {
             cached.lastAccess = Date.now();
             _cacheDirty = true;
-            recordSync(path);
+            recordSync(path, cached.ts);
             return resolve(cached.body);
           }
           // Cache was stale or empty. The 304 means the server has the
@@ -380,7 +406,7 @@ export function request(path, opts) {
         if (cached) {
           cached.lastAccess = Date.now();
           _cacheDirty = true;
-          recordSync(path);   // refresh sync stamp even on network-error recovery
+          recordSync(path, cached.ts);
           return resolve(cached.body);
         }
       }
@@ -502,8 +528,9 @@ export const getCommitActivity = (token, owner, repo, signal) =>
 // ─── Actions / Workflows  (CI cockpit foundation) ──────────────────
 export const getWorkflows = (token, owner, repo, signal) =>
   request('/repos/' + owner + '/' + repo + '/actions/workflows', { token, signal });
-export const getWorkflowRuns = (token, owner, repo, perPage, signal) =>
-  request('/repos/' + owner + '/' + repo + '/actions/runs?per_page=' + (perPage||20), { token, signal });
+export const getWorkflowRuns = (token, owner, repo, page, perPage, signal) =>
+  request('/repos/' + owner + '/' + repo + '/actions/runs?page=' + (page || 1) +
+    '&per_page=' + (perPage || 20), { token, signal });
 export const rerunWorkflow = (token, owner, repo, runId) =>
   request('/repos/' + owner + '/' + repo + '/actions/runs/' + runId + '/rerun',
     { token, method: 'POST' });

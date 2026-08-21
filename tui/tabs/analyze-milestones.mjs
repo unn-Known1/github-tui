@@ -3,6 +3,7 @@
 import { appState, render, startAsync, isStale, showMessage } from '../state.mjs';
 import { getRepoMilestones } from '../github.mjs';
 import { truncate, sectionHeader } from '../utils.mjs';
+import { loadingIndicator } from '../render.mjs';
 
 export async function loadMilestones() {
   const repo = appState.repoDetails;
@@ -16,11 +17,37 @@ export async function loadMilestones() {
     const milestones = await getRepoMilestones(appState.token, owner, name, 1, 20, gen.signal);
     if (isStale(gen)) { appState.loading = false; return; }
     appState.repoMilestones = Array.isArray(milestones) ? milestones : [];
+    appState.repoMilestonesPage = 1;
+    appState.repoMilestonesHasMore = Array.isArray(milestones) && milestones.length >= 20;
   } catch (e) {
     if (!isStale(gen)) showMessage('Failed to load milestones: ' + e.message, 'error');
   }
   appState.loading = false;
   if (!isStale(gen)) render();
+}
+
+export async function loadMoreMilestones() {
+  const repo = appState.repoDetails;
+  if (!repo || !appState.repoMilestonesHasMore || appState.loading) return;
+  const [owner, name] = repo.full_name.split('/');
+  const page = appState.repoMilestonesPage + 1;
+  const gen = startAsync('analyze-milestones-more');
+  appState.loading = true;
+  render();
+  try {
+    const more = await getRepoMilestones(appState.token, owner, name, page, 20, gen.signal);
+    if (isStale(gen)) return;
+    const items = Array.isArray(more) ? more : [];
+    appState.repoMilestones = [...appState.repoMilestones, ...items];
+    appState.repoMilestonesPage = page;
+    appState.repoMilestonesHasMore = items.length >= 20;
+    showMessage(items.length ? 'Loaded more milestones' : 'All milestones loaded', 'info');
+  } catch (e) {
+    if (!isStale(gen)) showMessage(e.message || 'Failed to load more milestones', 'error');
+  } finally {
+    appState.loading = false;
+    if (!isStale(gen)) render();
+  }
 }
 
 export function renderMilestonesPane(screen, y, maxH) {
@@ -29,12 +56,17 @@ export function renderMilestonesPane(screen, y, maxH) {
   sectionHeader(screen, 2, y, '📋 MILESTONES (' + milestones.length + ')');
   y++;
 
+  if (appState.loading) {
+    loadingIndicator(screen, 2, y, 'loading milestones');
+    return;
+  }
   if (milestones.length === 0) {
     screen.writeStr(2, y++, 'No milestones — create one on GitHub to track progress', { dim: true });
     return;
   }
 
   const yM = y;
+  if (appState.repoMilestonesHasMore) screen.writeStr(2, y++, '[Space] load more milestones', { dim: true });
   for (const m of milestones) {
     if (y >= yM + maxH - 1) break;
     const title = truncate(m.title || '', 30);

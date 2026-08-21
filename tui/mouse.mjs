@@ -10,6 +10,7 @@ import * as detail from './tabs/detail.mjs';
 import * as repos from './tabs/repos.mjs';
 import * as dashboard from './tabs/dashboard.mjs';
 import * as settings from './tabs/settings.mjs';
+import * as inbox from './tabs/inbox.mjs';
 import { focusDashboardZone } from './focus.mjs';
 
 // ── Text-selection helpers for README / file viewer ──
@@ -318,18 +319,7 @@ export function handleMouseEvent(event) {
       if (sy >= rowOff) {
         const listIdx = sy - rowOff;
         const absIdx = listIdx + appState.inboxScroll;
-        const filteredLen = appState.notifications.filter(n => {
-          if (appState.inboxFilter === 'unread') return n.unread;
-          if (appState.inboxFilter === 'mentions') return n.reason === 'mention';
-          if (appState.inboxFilter === 'review') return n.reason === 'review_requested';
-          if (appState.inboxTextFilter) {
-            const q = appState.inboxTextFilter.toLowerCase();
-            const title = (n.subject && n.subject.title || '').toLowerCase();
-            const repo = (n.repository && n.repository.full_name || '').toLowerCase();
-            return title.includes(q) || repo.includes(q);
-          }
-          return true;
-        }).length;
+        const filteredLen = inbox.getFilteredNotifications().length;
         if (absIdx >= 0 && absIdx < filteredLen && absIdx !== appState.selectedNotification) {
           appState.selectedNotification = absIdx;
           render();
@@ -1105,18 +1095,7 @@ function dispatchAnalyzeClick(sx, sy) {
 
 function dispatchInboxClick(sy) {
   // inboxScroll and selectedNotification both index into the filtered list.
-  const filteredLen = appState.notifications.filter(n => {
-    if (appState.inboxFilter === 'unread') return n.unread;
-    if (appState.inboxFilter === 'mentions') return n.reason === 'mention';
-    if (appState.inboxFilter === 'review') return n.reason === 'review_requested';
-    if (appState.inboxTextFilter) {
-      const q = appState.inboxTextFilter.toLowerCase();
-      const title = (n.subject && n.subject.title || '').toLowerCase();
-      const repo = (n.repository && n.repository.full_name || '').toLowerCase();
-      return title.includes(q) || repo.includes(q);
-    }
-    return true;
-  }).length;
+  const filteredLen = inbox.getFilteredNotifications().length;
   const screen = getScreen();
   const maxVisible = screen ? Math.max(1, screen.height - 15) : 20;
   const scroll = appState.inboxScroll;
@@ -1206,18 +1185,7 @@ function scrollDown(sx, sy) {
     }
   } else if (t === 4) {
     const maxV = Math.max(1, screen.height - 12);
-    const inboxCount = appState.notifications.filter(n => {
-      if (appState.inboxFilter === 'unread') return n.unread;
-      if (appState.inboxFilter === 'mentions') return n.reason === 'mention';
-      if (appState.inboxFilter === 'review') return n.reason === 'review_requested';
-      if (appState.inboxTextFilter) {
-        const q = appState.inboxTextFilter.toLowerCase();
-        const title = (n.subject && n.subject.title || '').toLowerCase();
-        const repo = (n.repository && n.repository.full_name || '').toLowerCase();
-        return title.includes(q) || repo.includes(q);
-      }
-      return true;
-    }).length;
+    const inboxCount = inbox.getFilteredNotifications().length;
     if (appState.inboxScroll + maxV < inboxCount) { appState.inboxScroll++; render(); }
   }
 }
@@ -1227,7 +1195,10 @@ function dispatchSettingsClick(sx, sy) {
   // Click on URL link → open in browser.
   const urlBounds = appState._settingsUrlBounds;
   if (urlBounds && sx >= urlBounds.x && sx < urlBounds.x + urlBounds.w && sy === urlBounds.y) {
-    import('../utils.mjs').then(m => m.openUrl(urlBounds.url));
+    import('../utils.mjs').then(m => m.openUrl(urlBounds.url)).then(r => {
+      if (r.ok) showMessage('Opened project page', 'success');
+      else showMessage(r.error || 'Open failed', 'error');
+    });
     render();
     return;
   }

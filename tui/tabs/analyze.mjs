@@ -19,7 +19,7 @@ import { loadMilestones, renderMilestonesPane } from './analyze-milestones.mjs';
 import { loadChecks, renderChecksPane } from './analyze-checks.mjs';
 import { loadTraffic, renderTrafficPane } from './analyze-traffic.mjs';
 import { loadReleaseAssets, downloadAsset, renderPackagesPane } from './analyze-packages.mjs';
-import { renderIssuesPane, renderPRsPane, cycleIssueStateFilter } from './analyze-issues.mjs';
+import { renderIssuesPane, renderPRsPane, cycleIssueStateFilter, loadMoreIssues } from './analyze-issues.mjs';
 import { viewReadme, renderReadmePane } from './analyze-readme.mjs';
 import {
   loadSecurity, renderSecurityPane,
@@ -68,13 +68,21 @@ export async function loadRepoDetails(owner, name) {
   appState.repoContributors = [];
   appState.repoReleases = [];
   appState.repoIssues = [];
+  appState.repoIssuesPage = 1;
+  appState.repoIssuesHasMore = false;
   appState.repoPullRequests = [];
+  appState.repoPullRequestsPage = 1;
+  appState.repoPullRequestsHasMore = false;
   appState._readmeText = null;
   appState.repoReleaseAssets = [];
   appState.repoTraffic = null;
   appState.repoTrafficClones = null;
   appState.repoMilestones = [];
+  appState.repoMilestonesPage = 1;
+  appState.repoMilestonesHasMore = false;
   appState.repoLabels = [];
+  appState.repoLabelsPage = 1;
+  appState.repoLabelsHasMore = false;
   appState.repoCheckRuns = [];
   appState.repoCheckSuites = [];
   appState.repoDependabotAlerts = [];
@@ -112,7 +120,11 @@ export async function loadRepoDetails(owner, name) {
     appState.repoContributors = Array.isArray(contribs) ? contribs : [];
     appState.repoReleases = Array.isArray(releases) ? releases : [];
     appState.repoIssues = Array.isArray(issues) ? issues.filter(i => !i.pull_request) : [];
+    appState.repoIssuesPage = 1;
+    appState.repoIssuesHasMore = Array.isArray(issues) && issues.length >= 100;
     appState.repoPullRequests = Array.isArray(prs) ? prs : [];
+    appState.repoPullRequestsPage = 1;
+    appState.repoPullRequestsHasMore = Array.isArray(prs) && prs.length >= 100;
     showMessage('Loaded ' + owner + '/' + name, 'success');
   } catch (e) {
     if (!isStale(gen, 'analyze-details')) showMessage(e.message || 'Failed to load repository', 'error');
@@ -751,6 +763,11 @@ export function enter() {
 export function space() {
   if (appState.analyzeView === 'results') loadMoreSearchResults();
   else if (appState.analyzeView === 'forks') loadMoreForks();
+  else if (appState.analyzeView === 'details') {
+    if (appState.detailsPane === 'issues' || appState.detailsPane === 'prs') loadMoreIssues();
+    else if (appState.detailsPane === 'labels') import('./analyze-labels.mjs').then(m => m.loadMoreLabels());
+    else if (appState.detailsPane === 'milestones') import('./analyze-milestones.mjs').then(m => m.loadMoreMilestones());
+  }
 }
 
 // ── Collapsible sections ──

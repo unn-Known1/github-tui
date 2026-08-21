@@ -188,6 +188,15 @@ function compileStyle(s) {
 
 // Unicode safe cell width — handles CJK wide characters and ESC sequences.
 // CJK Compatibility Ideographs, Hiragana, Katakana, Hangul, etc. occupy 2 cells.
+function isCombiningCodePoint(cp) {
+  return (cp >= 0x0300 && cp <= 0x036F) ||
+    (cp >= 0x1AB0 && cp <= 0x1AFF) ||
+    (cp >= 0x1DC0 && cp <= 0x1DFF) ||
+    (cp >= 0x20D0 && cp <= 0x20FF) ||
+    (cp >= 0xFE20 && cp <= 0xFE2F) || cp === 0x200D ||
+    (cp >= 0xFE00 && cp <= 0xFE0F);
+}
+
 function isWideCodePoint(cp) {
   return (cp >= 0x1100 && cp <= 0x115F) || // Hangul Jamo
     cp === 0x2329 || cp === 0x232A ||
@@ -242,7 +251,7 @@ function strWidth(s) {
         i++;
       }
     }
-    w += isWideCodePoint(cp) ? 2 : 1;
+    if (!isCombiningCodePoint(cp)) w += isWideCodePoint(cp) ? 2 : 1;
   }
   return w;
 }
@@ -326,6 +335,7 @@ export class Screen {
     for (let i = 0; i < chars.length; i++) {
       const ch = chars[i];
       const cp = ch.codePointAt(0);
+      if (isCombiningCodePoint(cp)) continue;
       const w = isWideCodePoint(cp) ? 2 : 1;
       if (cx < 0 || cx >= this.width) break;
       this.charBuf[y][cx] = ch;
@@ -349,6 +359,7 @@ export class Screen {
     for (let i = 0; i < chars.length; i++) {
       const ch = chars[i];
       const cp = ch.codePointAt(0);
+      if (isCombiningCodePoint(cp)) continue;
       const w = isWideCodePoint(cp) ? 2 : 1;
       if (cx < 0 || cx >= this.width) break;
       this.charBuf[y][cx] = ch;
@@ -504,7 +515,7 @@ export class Screen {
       }
       this.writeStr(cx, y, segs[i],
         isLast ? { fg: 'cyan', bold: true } : { dim: true });
-      cx += segs[i].length;
+      cx += strWidth(segs[i]);
     }
     return cx;
   }
@@ -531,12 +542,15 @@ export class Screen {
         const st = this.styleBuf[y][x];
         const pCh = this.prevChar[y] ? this.prevChar[y][x] : undefined;
         const pSt = this.prevStyle[y] ? this.prevStyle[y][x] : undefined;
+        // Renderers commonly create fresh style objects on every pass. Compare
+        // the compiled ANSI representation rather than object identity so an
+        // unchanged styled cell is genuinely skipped.
+        const compiled = FORCE_COLOR === false ? null : compileStyle(st);
+        const previousCompiled = FORCE_COLOR === false ? null : compileStyle(pSt);
 
-        if (ch === pCh && st === pSt) continue;
+        if (ch === pCh && compiled === previousCompiled) continue;
 
         out.push(`${ESC}[${y + 1};${x + 1}H`);
-
-        const compiled = FORCE_COLOR === false ? null : compileStyle(st);
         if (compiled !== curCompiled) {
           if (curCompiled) out.push(RESET);
           if (compiled) out.push(compiled);

@@ -609,7 +609,10 @@ function statusLine() {
       const v = appState.analyzeView;
       if (v === 'search')  return ' [i] Search public repo' + sep + '[?] Help' + sep + '[Ctrl-P] Palette';
       if (v === 'results') return ' [↑↓jk] Nav' + sep + '[Enter] View' + sep + '[Space] More' + sep + '[Esc] Back';
-      if (v === 'details') return ' [O]v [i]ssues [P]Rs [R]eadme [F]iles [A] Packages [T]raffic [M]iles [L]abels [K]hecks [S]ecurity';
+      if (v === 'details') {
+        if (appState.detailsPane === 'security') return ' [1-6] Security panes' + sep + '[s] severity' + sep + '[f] state' + sep + '[Enter] Open' + sep + '[Esc] Back';
+        return ' [O]v [i]ssues [P]Rs [R]eadme [F]iles [A] Packages [T]raffic [M]iles [L]abels [K]hecks [S]ecurity';
+      }
       if (v === 'forks')   return ' [↑↓jk] Nav' + sep + '[Space] More' + sep + '[p/s/n] Sort' + sep + '[Esc] Back';
       return '';
     }
@@ -619,10 +622,25 @@ function statusLine() {
       }
       return ' [↑↓jk] Nav' + sep + '[Enter] View runs' + sep + '[?] Help';
     }
-    case 4: return ' [↑↓jk] Nav' + sep + '[Enter] Open' + sep + '[m] Read' + sep + '[M] All' + sep + '[f] Filter' + sep + '[u] Unsubscribe';
-    case 5: return ' [↑↓] Nav' + sep + '[Enter] Select' + sep + '[s] Star repo' + sep + '[?] Help';
+    case 4: return ' [↑↓jk] Nav' + sep + '[Enter] Open' + sep + '[m] Read' + sep + '[M] All' + sep + '[f] Filter' + sep + '[H] Hide processed' + sep + '[u] Unsubscribe';
+    case 5: return ' [↑↓] Nav' + sep + '[Enter] Select' + sep + '[s] Star repo' + sep + '[c] Clear account cache' + sep + '[?] Help';
   }
   return '';
+}
+
+function renderCompact(W, H) {
+  const labels = ['Dash', 'Repos', 'Explore', 'Actions', 'Inbox', 'Settings'];
+  screen.writeStr(1, 0, 'GitHub TUI', { fg: 'cyan', bold: true });
+  const tabs = labels.map((label, i) => (i === tabState.current ? '[' + (i + 1) + ']' : String(i + 1)) + label[0]).join(' ');
+  screen.writeStr(1, 1, truncate(tabs, W - 2), { fg: 'white', bold: true });
+  screen.hline(2, '─', { dim: true });
+  const title = labels[tabState.current] || 'View';
+  screen.writeStr(1, 4, title + (appState.loading ? ' …' : ''), { fg: 'cyan', bold: true });
+  const context = appState.repoDetails?.full_name || appState.user?.login ||
+    (appState.message && appState.message.text) || 'Use number keys to switch tabs';
+  screen.writeStr(1, 6, truncate(context, W - 2), { dim: true });
+  screen.writeStr(1, H - 2, '[1-6] tabs  [q] quit  [?] help', { dim: true });
+  screen.hline(H - 1, '─', { dim: true });
 }
 
 function doRender() {
@@ -631,6 +649,13 @@ function doRender() {
   const H = screen.height;
   // Buffer is already clear from the previous render's swap — no clear() needed.
   appState._sectionHeaders = {};
+
+  // ── Compact terminal mode ──
+  if (W >= 40 && H >= 12 && (W < MIN_W || H < MIN_H)) {
+    renderCompact(W, H);
+    screen.render();
+    return;
+  }
 
   // ── Minimum terminal size check ──
   if (W < MIN_W || H < MIN_H) {

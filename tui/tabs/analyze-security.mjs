@@ -9,7 +9,7 @@ import {
 } from '../github.mjs';
 import { truncate, sectionHeader, relTime, openUrl } from '../utils.mjs';
 import { color } from '../theme.mjs';
-import { scrollIndicators } from '../render.mjs';
+import { scrollIndicators, loadingIndicator } from '../render.mjs';
 
 const SECURITY_SUB_PANES = ['dependabot', 'secret', 'codescan', 'advisories', 'branch', 'deps'];
 const SECURITY_SUB_LABELS = {
@@ -17,29 +17,44 @@ const SECURITY_SUB_LABELS = {
   advisories: 'Advisories', branch: 'Branch Protection', deps: 'Dependencies',
 };
 const SECURITY_SUB_KEYS = ['1', '2', '3', '4', '5', '6'];
+const SECURITY_STATE_FILTERS = {
+  dependabot: ['open', 'dismissed', 'fixed', 'all'],
+  secret: ['open', 'resolved', 'all'],
+  codescan: ['open', 'dismissed', 'fixed', 'all'],
+};
+
+export function securityStateOptions(sub = appState.securitySubPane) {
+  return SECURITY_STATE_FILTERS[sub] || [];
+}
 
 export async function loadSecurity() {
   const repo = appState.repoDetails;
   if (!repo) return;
   const sub = appState.securitySubPane || 'dependabot';
+  const stateOptions = securityStateOptions(sub);
+  if (stateOptions.length && !stateOptions.includes(appState.securityStateFilter)) {
+    appState.securityStateFilter = stateOptions[0];
+  }
+  const apiState = stateOptions.length && appState.securityStateFilter !== 'all'
+    ? appState.securityStateFilter : undefined;
   const gen = startAsync('analyze-security');
   appState.loading = true;
   render();
   try {
     const [owner, name] = repo.full_name.split('/');
     if (sub === 'dependabot') {
-      const state = appState.securityStateFilter !== 'all' ? appState.securityStateFilter : undefined;
+      const state = apiState;
       const alerts = await getRepoDependabotAlerts(appState.token, owner, name, state, gen.signal);
       if (isStale(gen, 'analyze-security')) { appState.loading = false; return; }
       appState.repoDependabotAlerts = Array.isArray(alerts) ? alerts : [];
     } else if (sub === 'secret') {
-      const state = appState.securityStateFilter !== 'all' ? appState.securityStateFilter : undefined;
+      const state = apiState;
       const alerts = await getSecretScanningAlerts(appState.token, owner, name, state, gen.signal);
       if (isStale(gen, 'analyze-security')) { appState.loading = false; return; }
       appState.secretScanningAlerts = Array.isArray(alerts) ? alerts : [];
     } else if (sub === 'codescan') {
-      const state = appState.securityStateFilter !== 'all' ? appState.securityStateFilter : undefined;
-      const alerts = await getCodeScanningAlerts(appState.token, owner, name, state, gen.signal);
+      const state = apiState;
+      const alerts = await getCodeScanningAlerts(appState.token, owner, name, state, undefined, gen.signal);
       if (isStale(gen, 'analyze-security')) { appState.loading = false; return; }
       appState.codeScanningAlerts = Array.isArray(alerts) ? alerts : [];
     } else if (sub === 'advisories') {
@@ -99,9 +114,13 @@ export function cycleSecurityFilter() {
 }
 
 export function cycleSecurityStateFilter() {
-  const cycle = ['open', 'dismissed', 'fixed', 'all'];
+  const cycle = securityStateOptions();
+  if (cycle.length === 0) {
+    showMessage('This security view has no state filter', 'info');
+    return;
+  }
   const i = cycle.indexOf(appState.securityStateFilter);
-  appState.securityStateFilter = cycle[(i + 1) % cycle.length];
+  appState.securityStateFilter = cycle[(i >= 0 ? i + 1 : 0) % cycle.length];
   appState.securityAlertCursor = 0;
   appState.securityAlertScroll = 0;
   showMessage('State: ' + appState.securityStateFilter, 'info');
@@ -144,11 +163,16 @@ export function renderSecurityPane(screen, y, maxH) {
   screen.hline(y, '─', { dim: true });
   y++;
 
-  // Filter chips
-  const stateChip = 'state: ' + appState.securityStateFilter;
+  // Filter chips are contextual: irrelevant controls are not rendered and
+  // therefore cannot accidentally send an unsupported API value.
+  const stateOptions = securityStateOptions();
+  const stateChip = stateOptions.length ? 'state: ' + appState.securityStateFilter : '';
   const sevChip = appState.securitySubPane === 'dependabot' ? '   severity: ' + appState.securityFilter : '';
   screen.writeStr(2, y, stateChip + sevChip, { fg: 'cyan' });
-  screen.writeStr(W - 18, y, '[s] severity [f] state', { dim: true });
+  const hints = [];
+  if (appState.securitySubPane === 'dependabot') hints.push('[s] severity');
+  if (stateOptions.length) hints.push('[f] state');
+  if (hints.length) screen.writeStr(Math.max(2, W - hints.join(' ').length - 2), y, hints.join(' '), { dim: true });
   y++;
   y++;
 
@@ -162,6 +186,7 @@ export function renderSecurityPane(screen, y, maxH) {
 }
 
 function renderDependabotPane(screen, y, maxH, W) {
+  if (appState.loading) { loadingIndicator(screen, 2, y, 'loading Dependabot alerts'); return; }
   const alerts = filterDependabot(appState.repoDependabotAlerts);
 
   if (alerts.length === 0) {
@@ -212,6 +237,7 @@ function renderDependabotPane(screen, y, maxH, W) {
 }
 
 function renderSecretPane(screen, y, maxH, W) {
+  if (appState.loading) { loadingIndicator(screen, 2, y, 'loading secret scanning alerts'); return; }
   const alerts = appState.secretScanningAlerts;
   if (alerts.length === 0) {
     screen.writeStr(2, y++, 'No secret scanning alerts — no leaked credentials found', { dim: true });
@@ -241,6 +267,7 @@ function renderSecretPane(screen, y, maxH, W) {
 }
 
 function renderCodeScanPane(screen, y, maxH, W) {
+  if (appState.loading) { loadingIndicator(screen, 2, y, 'loading code scanning alerts'); return; }
   const alerts = appState.codeScanningAlerts;
   if (alerts.length === 0) {
     screen.writeStr(2, y++, 'No code scanning alerts — no issues found by analysis', { dim: true });
@@ -268,6 +295,7 @@ function renderCodeScanPane(screen, y, maxH, W) {
 }
 
 function renderAdvisoriesPane(screen, y, maxH, W) {
+  if (appState.loading) { loadingIndicator(screen, 2, y, 'loading security advisories'); return; }
   const advisories = appState.securityAdvisories;
   if (advisories.length === 0) {
     screen.writeStr(2, y++, 'No published security advisories for this repo', { dim: true });
@@ -296,6 +324,7 @@ function renderAdvisoriesPane(screen, y, maxH, W) {
 }
 
 function renderBranchProtectionPane(screen, y, maxH, W) {
+  if (appState.loading) { loadingIndicator(screen, 2, y, 'loading branch protection'); return; }
   const prot = appState.branchProtection;
   const branch = appState.repoDetails?.default_branch || 'main';
   const startY = y;
@@ -364,6 +393,7 @@ function renderBranchProtectionPane(screen, y, maxH, W) {
 }
 
 function renderDepsPane(screen, y, maxH, W) {
+  if (appState.loading) { loadingIndicator(screen, 2, y, 'loading dependency manifests'); return; }
   const manifests = appState.dependencyManifests;
   if (manifests.length === 0) {
     screen.writeStr(2, y++, 'No dependency manifests found', { dim: true });
@@ -439,16 +469,24 @@ export function securityEnter() {
   if (sub === 'dependabot') {
     const alerts = filterDependabot(appState.repoDependabotAlerts);
     const alert = alerts[appState.securityAlertCursor];
-    if (alert && alert.html_url) openUrl(alert.html_url);
+    if (alert && alert.html_url) openUrl(alert.html_url).then(r => r.ok
+      ? showMessage('Opened in browser', 'success')
+      : showMessage(r.error || 'Open failed', 'error'));
   } else if (sub === 'secret') {
     const alert = appState.secretScanningAlerts[appState.securityAlertCursor];
-    if (alert && alert.html_url) openUrl(alert.html_url);
+    if (alert && alert.html_url) openUrl(alert.html_url).then(r => r.ok
+      ? showMessage('Opened in browser', 'success')
+      : showMessage(r.error || 'Open failed', 'error'));
   } else if (sub === 'codescan') {
     const alert = appState.codeScanningAlerts[appState.securityAlertCursor];
-    if (alert && alert.html_url) openUrl(alert.html_url);
+    if (alert && alert.html_url) openUrl(alert.html_url).then(r => r.ok
+      ? showMessage('Opened in browser', 'success')
+      : showMessage(r.error || 'Open failed', 'error'));
   } else if (sub === 'advisories') {
     const adv = appState.securityAdvisories[appState.securityAlertCursor];
-    if (adv && adv.html_url) openUrl(adv.html_url);
+    if (adv && adv.html_url) openUrl(adv.html_url).then(r => r.ok
+      ? showMessage('Opened in browser', 'success')
+      : showMessage(r.error || 'Open failed', 'error'));
   }
 }
 

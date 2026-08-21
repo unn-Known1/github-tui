@@ -223,14 +223,22 @@ export const appState = {
   repoReleaseAssets: [],
   selectedAsset: 0,
   repoIssues: [],
+  repoIssuesPage: 1,
+  repoIssuesHasMore: false,
   repoPullRequests: [],
+  repoPullRequestsPage: 1,
+  repoPullRequestsHasMore: false,
   issueStateFilter: 'open', // 'open' | 'closed' | 'all' — used by Issues/PRs panes
   repoTraffic: null,
   repoTrafficClones: null,
   repoTrafficPopularPaths: [],
   repoTrafficPopularReferrers: [],
   repoMilestones: [],
+  repoMilestonesPage: 1,
+  repoMilestonesHasMore: false,
   repoLabels: [],
+  repoLabelsPage: 1,
+  repoLabelsHasMore: false,
   repoCheckRuns: [],
   repoCheckSuites: [],
   userFollowers: [],
@@ -278,6 +286,7 @@ export const appState = {
   dashboardLastFetched: null,    // ms timestamp — drives the "Updated Xm ago" badge in the greeting row
   dashboardWidgetErrorCount: 0,  // count of widgets that failed on the most recent loadDashboardWidgets — used to render a non-modal "N widgets failed" banner so silent Promise.allSettled rejections become visible
   dashboardLoadingWidgets: {},  // { [widgetName]: boolean } — per-widget loading state
+  dashboardWidgetFetched: {},    // { [widgetName]: ms } — last successful widget response
   dashboardContributions: null,  // { weeks: [[day, day, ...], ...] } heatmap data
   dashboardRecentIssues: [],     // recently opened/updated issues across repos
   dashboardRecentPRs: [],        // recently opened/updated PRs across repos
@@ -317,6 +326,8 @@ export const appState = {
   actionsView: 'repos',     // 'repos' | 'runs'
   actionsRepos: [],         // repos with workflow runs loaded
   actionsRuns: [],          // workflow runs for selected repo
+  actionsRunsPage: 1,
+  actionsRunsHasMore: false,
   actionsSelected: 0,
   actionsScroll: 0,
   actionsRepoSelected: 0,
@@ -333,6 +344,7 @@ export const appState = {
   selectedNotification: 0,
   inboxFilter: 'all',    // 'all' | 'unread' | 'mentions' | 'review'
   inboxTextFilter: '',
+  inboxHideProcessed: false,
   inboxPage: 1,
   inboxHasMore: false,
 
@@ -504,7 +516,7 @@ export function upsertEntity(repo, opts = {}) {
     isBookmarked: opts.isBookmarked !== undefined ? !!opts.isBookmarked : (cur.isBookmarked || false),
     isPinned: opts.isPinned !== undefined ? !!opts.isPinned : (cur.isPinned || false),
     isOwner: opts.isOwner !== undefined ? !!opts.isOwner : (cur.isOwner || false),
-    starredAt: opts.starredAt || cur.starredAt || null,
+    starredAt: opts.starredAt !== undefined ? opts.starredAt : (cur.starredAt || null),
   };
   appState.entityCache[full] = next;
   // Keep appState.starred synced.
@@ -516,6 +528,18 @@ export function upsertEntity(repo, opts = {}) {
       appState.starred.splice(idx, 1);
     } else if (idx !== -1) {
       appState.starred[idx] = { ...appState.starred[idx], ...next.repo, starred_at: next.starredAt || appState.starred[idx].starred_at };
+    }
+  }
+}
+
+// Seed/merge a server-provided starred page into the shared entity cache.
+// Unlike replacing appState.starred, this is safe for paginated responses:
+// entries from earlier pages remain known without being falsely unstarred.
+export function syncStarredEntities(repos) {
+  if (!Array.isArray(repos)) return;
+  for (const repo of repos) {
+    if (repo && repo.full_name) {
+      upsertEntity(repo, { isStarred: true, starredAt: repo.starred_at || repo.created_at || undefined, isOwner: false });
     }
   }
 }
@@ -720,6 +744,12 @@ export function loadCollapsed() {
 // ── Per-widget loading state for dashboard ──
 export function setWidgetLoading(widget, loading) {
   appState.dashboardLoadingWidgets[widget] = loading;
+  if (!loading) appState.dashboardWidgetFetched[widget] = Date.now();
+}
+
+export function getWidgetAge(widget, now = Date.now()) {
+  const fetched = appState.dashboardWidgetFetched[widget];
+  return fetched ? Math.max(0, Math.floor((now - fetched) / 60000)) + 'm' : '—';
 }
 
 export function isWidgetLoading(widget) {

@@ -103,8 +103,9 @@ export function pageDown() {
   }
 }
 
-function filtered() {
+export function getFilteredNotifications() {
   let list = appState.notifications;
+  if (appState.inboxHideProcessed) list = list.filter(n => n.unread);
   if (appState.localRepo && appState.localRepoFilter) {
     const fullName = appState.localRepo.owner + '/' + appState.localRepo.repo;
     list = list.filter(n => n.repository && n.repository.full_name === fullName);
@@ -126,7 +127,7 @@ function filtered() {
 }
 
 export function getSelectedNotification() {
-  return filtered()[appState.selectedNotification];
+  return getFilteredNotifications()[appState.selectedNotification];
 }
 
 function selected() {
@@ -140,7 +141,7 @@ export async function markCurrentRead() {
     await markNotificationRead(appState.token, n.id);
     n.unread = false;
     // Clamp cursor to filtered list bounds
-    const list = filtered();
+    const list = getFilteredNotifications();
     if (appState.selectedNotification >= list.length) {
       appState.selectedNotification = Math.max(0, list.length - 1);
     }
@@ -173,6 +174,14 @@ export async function unsubscribeCurrent() {
       render();
     } catch (e) { showMessage('Failed: ' + e.message, 'error'); }
   }, 'Unsubscribe');
+}
+
+export function toggleHideProcessed() {
+  appState.inboxHideProcessed = !appState.inboxHideProcessed;
+  appState.inboxScroll = 0;
+  appState.selectedNotification = 0;
+  showMessage('Hide processed: ' + (appState.inboxHideProcessed ? 'on' : 'off'), 'info');
+  render();
 }
 
 export function cycleFilter() {
@@ -217,7 +226,7 @@ function sectionHeader(screen, x, y, text, hint) {
 
 export function renderInbox(screen, y, h) {
   const W = screen.width;
-  const list = filtered();
+  const list = getFilteredNotifications();
   const allList = appState.notifications;
   const unreadCount = allList.filter(n => n.unread).length;
 
@@ -346,7 +355,8 @@ export function renderInbox(screen, y, h) {
   if (infoY < y + h) {
     screen.writeStr(2, infoY,
       '[/] Search   [r] Refresh   [m] Mark read   [M] Mark all   [f] Filter   [u] Unsubscribe   [Enter] Open' +
-      (appState.inboxHasMore ? '   [Space] More' : ''), { dim: true });
+      (appState.inboxHasMore ? '   [Space] More' : '') +
+      '   [H] Hide processed: ' + (appState.inboxHideProcessed ? 'on' : 'off'), { dim: true });
   }
 }
 
@@ -366,10 +376,11 @@ export const keys = {
   'M': markAllRead,
   'u': unsubscribeCurrent,
   'f': cycleFilter,
+  'H': toggleHideProcessed,
 };
 
 export function bottom(screen) {
-  const list = filtered();
+  const list = getFilteredNotifications();
   appState.selectedNotification = Math.max(0, list.length - 1);
   const maxVisible = Math.max(1, (screen ? screen.height : process.stdout.rows || 24) - 12);
   appState.inboxScroll = Math.max(0, list.length - maxVisible);
@@ -377,7 +388,7 @@ export function bottom(screen) {
 }
 
 export function up(screen) {
-  const list = filtered();
+  const list = getFilteredNotifications();
   if (list.length === 0) return;
   const maxVisible = Math.max(1, (screen ? screen.height : process.stdout.rows || 24) - 15);
   appState.selectedNotification = Math.max(0, appState.selectedNotification - 1);
@@ -388,7 +399,7 @@ export function up(screen) {
   render();
 }
 export function down(screen) {
-  const list = filtered();
+  const list = getFilteredNotifications();
   if (list.length === 0) return;
   const maxVisible = Math.max(1, (screen ? screen.height : process.stdout.rows || 24) - 15);
   appState.selectedNotification = Math.min(list.length - 1, appState.selectedNotification + 1);

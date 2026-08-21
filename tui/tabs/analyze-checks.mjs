@@ -3,6 +3,7 @@
 import { appState, render, startAsync, isStale, showMessage } from '../state.mjs';
 import { getRepoCheckRuns, getRepoCheckSuites } from '../github.mjs';
 import { truncate, sectionHeader } from '../utils.mjs';
+import { loadingIndicator } from '../render.mjs';
 
 export async function loadChecks() {
   const repo = appState.repoDetails;
@@ -35,6 +36,10 @@ export function renderChecksPane(screen, y, maxH) {
   sectionHeader(screen, 2, y, '✅ CHECKS/CI (' + runs.length + ' runs, ' + suites.length + ' suites)');
   y++;
 
+  if (appState.loading) {
+    loadingIndicator(screen, 2, y, 'loading checks');
+    return;
+  }
   if (runs.length === 0 && suites.length === 0) {
     screen.writeStr(2, y++, 'No checks — push commits to see CI status here', { dim: true });
     return;

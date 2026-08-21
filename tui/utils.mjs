@@ -18,11 +18,66 @@ export function clamp(n, lo, hi) {
   return Math.max(lo, Math.min(hi, n));
 }
 
+// Terminal-cell width helpers. JavaScript string length counts UTF-16 code
+// units, not the cells a terminal paints. Keep these pure so every pane can
+// share the same behavior without depending on the renderer.
+function isCombining(cp) {
+  return (cp >= 0x0300 && cp <= 0x036F) ||
+    (cp >= 0x1AB0 && cp <= 0x1AFF) ||
+    (cp >= 0x1DC0 && cp <= 0x1DFF) ||
+    (cp >= 0x20D0 && cp <= 0x20FF) ||
+    (cp >= 0xFE20 && cp <= 0xFE2F) || cp === 0x200D ||
+    (cp >= 0xFE00 && cp <= 0xFE0F);
+}
+
+function isWide(cp) {
+  return (cp >= 0x1100 && cp <= 0x115F) || cp === 0x2329 || cp === 0x232A ||
+    (cp >= 0x2E80 && cp <= 0x303E) || (cp >= 0x3040 && cp <= 0x33BF) ||
+    (cp >= 0x3400 && cp <= 0x4DBF) || (cp >= 0x4E00 && cp <= 0xA4CF) ||
+    (cp >= 0xAC00 && cp <= 0xD7A3) || (cp >= 0xF900 && cp <= 0xFAFF) ||
+    (cp >= 0xFE30 && cp <= 0xFE6F) || (cp >= 0xFF01 && cp <= 0xFF60) ||
+    (cp >= 0xFFE0 && cp <= 0xFFE6) || (cp >= 0x1F300 && cp <= 0x1FAFF) ||
+    (cp >= 0x20000 && cp <= 0x3FFFD);
+}
+
+export function displayWidth(value) {
+  const chars = Array.from(String(value ?? ''));
+  let width = 0;
+  for (const ch of chars) {
+    const cp = ch.codePointAt(0);
+    if (isCombining(cp)) continue;
+    width += isWide(cp) ? 2 : 1;
+  }
+  return width;
+}
+
+function takeToWidth(chars, width) {
+  if (width <= 0) return { text: '', count: 0 };
+  let used = 0;
+  let count = 0;
+  while (count < chars.length) {
+    const w = displayWidth(chars[count]);
+    if (used + w > width) break;
+    used += w;
+    count++;
+  }
+  // Always make progress for a single wide glyph in a one-cell viewport.
+  if (count === 0 && chars.length > 0) count = 1;
+  return { text: chars.slice(0, count).join(''), count };
+}
+
+export function truncateToWidth(s, width, ellipsis = '…') {
+  if (s == null || width <= 0) return '';
+  const str = String(s);
+  if (displayWidth(str) <= width) return str;
+  const ellipsisWidth = displayWidth(ellipsis);
+  if (ellipsisWidth >= width) return takeToWidth(Array.from(ellipsis), width).text;
+  return takeToWidth(Array.from(str), width - ellipsisWidth).text + ellipsis;
+}
+
 // Truncate with ellipsis. truncate('hello world', 8) → 'hello w…'
 export function truncate(s, n) {
-  if (s == null) return '';
-  const str = String(s);
-  return str.length <= n ? str : str.slice(0, Math.max(0, n - 1)) + '…';
+  return truncateToWidth(s, n);
 }
 
 // Word-wrap `text` so each visual line fits within `width` display cells.
@@ -65,17 +120,18 @@ export function wrapTextWithMap(text, width) {
       if (isContinuation) ln = ln.trimStart();
       if (ln.length === 0) break;
       const chars = Array.from(ln);
-      if (chars.length <= width) {
+      if (displayWidth(ln) <= width) {
         visualLines.push(ln);
         visualToLogical.push(i);
         break;
       }
-      // Find the last whitespace index within the next `width` cells.
+      // Find the last whitespace in the prefix that fits in `width` cells.
+      const fit = takeToWidth(chars, width);
       let breakIdx = -1;
-      for (let j = width; j >= 0; j--) {
-        if (j < chars.length && /\s/.test(chars[j])) { breakIdx = j; break; }
+      for (let j = fit.count - 1; j >= 0; j--) {
+        if (/\s/.test(chars[j])) { breakIdx = j; break; }
       }
-      if (breakIdx <= 0) breakIdx = width; // unbreakable token — hard-break
+      if (breakIdx <= 0) breakIdx = fit.count; // unbreakable token — hard-break
       visualLines.push(chars.slice(0, breakIdx).join(''));
       visualToLogical.push(i);
       ln = chars.slice(breakIdx).join('');
@@ -95,7 +151,8 @@ export function wrapText(text, width) {
 // Pad-right to width (no truncation).
 export function padRight(s, n) {
   const str = String(s ?? '');
-  return str.length >= n ? str : str + ' '.repeat(n - str.length);
+  const missing = Math.max(0, n - displayWidth(str));
+  return str + ' '.repeat(missing);
 }
 
 // Format number with k / M suffix: 12345 → '12.3k', 1500000 → '1.5M'.
@@ -145,8 +202,21 @@ export async function openUrl(url) {
       args = [url];
     }
     const child = spawn(cmd, args, opts);
-    child.unref();
-    return { ok: true };
+    // `spawn()` can succeed synchronously and still fail asynchronously
+    // (missing opener, denied desktop session, non-zero exit). Wait for the
+    // child result before reporting success so the toast is trustworthy.
+    return await new Promise((resolve) => {
+      let settled = false;
+      const finish = (result) => {
+        if (settled) return;
+        settled = true;
+        resolve(result);
+      };
+      child.once('error', (error) => finish({ ok: false, error: error.message }));
+      child.once('close', (code) => finish(code === 0 || code == null
+        ? { ok: true } : { ok: false, error: 'Browser opener exited with code ' + code }));
+      child.unref();
+    });
   } catch (e) {
     return { ok: false, error: e.message };
   }

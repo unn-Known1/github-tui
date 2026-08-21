@@ -119,6 +119,7 @@ async function main() {
     console.log('  -h, --help       Show this help message');
     console.log('  -v, --version    Show version number');
     console.log('      --accessible Enable screen-reader friendly mode (text-only glyphs, no color)');
+    console.log('      --no-mouse  Disable terminal mouse capture for screen readers and copy-mode');
     process.exit(0);
   }
 
@@ -139,7 +140,7 @@ async function main() {
 
   // Hide cursor; enable mouse; enable bracketed paste.
   process.stdout.write('\x1b[?25l');
-  enableMouse();
+  if (!process.argv.includes('--no-mouse')) enableMouse();
   enableBracketedPaste();
 
   // wire the issue-create input modal contexts. Without this, pressing
@@ -230,7 +231,7 @@ let _shuttingDown = false;function shutdown() {
   // Run callbacks registered by state and other modules.
   runShutdownCallbacks();
   try { process.stdin.setRawMode(false); } catch {}
-  try { disableMouse(); } catch (e) { debug('disableMouse failed:', e.message); }
+  try {  if (!process.argv.includes('--no-mouse')) disableMouse(); } catch (e) { debug('disableMouse failed:', e.message); }
   try { disableBracketedPaste(); } catch (e) { debug('disableBracketedPaste failed:', e.message); }
   try { process.stdout.write('\x1b[?25h\x1b[2J\x1b[H'); } catch {}
 }
@@ -293,7 +294,7 @@ main().catch(err => {
   try {
     runShutdownCallbacks();
   } catch {}
-  try { disableMouse(); } catch {}
+  try {  if (!process.argv.includes('--no-mouse')) disableMouse(); } catch {}
   try { disableBracketedPaste(); } catch {}
   try {
     process.stdout.write('\x1b[?25h');

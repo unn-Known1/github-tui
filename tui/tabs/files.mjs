@@ -17,7 +17,7 @@
 import { appState, render, startAsync, isStale, showMessage, confirm } from '../state.mjs';
 import {
   getRepoContents, getRepoFile, getBranches, getZipballUrl,
-  getFileCommits, downloadToFile,
+  getFileCommits, downloadToFile, encodeRepoPath,
 } from '../github.mjs';
 import {
   formatBytes, relTime, writeFileSafe, safeCwdJoin, runCommand,
@@ -450,10 +450,15 @@ export function copyRawUrl() {
     }
   }
   if (!path) return;
-  const url = 'https://raw.githubusercontent.com/' + owner + '/' + name +
-    '/' + appState.filesRef + '/' + path;
+  const url = rawFileUrl(owner, name, appState.filesRef, path);
   if (copyToClipboard(url)) showMessage('Copied raw URL', 'success');
   else showMessage('Clipboard copy failed', 'error');
+}
+
+export function rawFileUrl(owner, name, ref, path) {
+  return 'https://raw.githubusercontent.com/' + encodeURIComponent(owner) + '/' +
+    encodeURIComponent(name) + '/' + encodeRepoPath(ref || 'main') + '/' +
+    encodeRepoPath(path);
 }
 
 // ─── Render ───────────────────────────────────────────────────────

@@ -3,6 +3,7 @@
 import { appState, render, startAsync, isStale, showMessage } from '../state.mjs';
 import { getRepoLabels } from '../github.mjs';
 import { truncate, sectionHeader } from '../utils.mjs';
+import { loadingIndicator } from '../render.mjs';
 
 export async function loadLabels() {
   const repo = appState.repoDetails;
@@ -16,11 +17,37 @@ export async function loadLabels() {
     const labels = await getRepoLabels(appState.token, owner, name, 1, 100, gen.signal);
     if (isStale(gen)) { appState.loading = false; return; }
     appState.repoLabels = Array.isArray(labels) ? labels : [];
+    appState.repoLabelsPage = 1;
+    appState.repoLabelsHasMore = Array.isArray(labels) && labels.length >= 100;
   } catch (e) {
     if (!isStale(gen)) showMessage('Failed to load labels: ' + e.message, 'error');
   }
   appState.loading = false;
   if (!isStale(gen)) render();
+}
+
+export async function loadMoreLabels() {
+  const repo = appState.repoDetails;
+  if (!repo || !appState.repoLabelsHasMore || appState.loading) return;
+  const [owner, name] = repo.full_name.split('/');
+  const page = appState.repoLabelsPage + 1;
+  const gen = startAsync('analyze-labels-more');
+  appState.loading = true;
+  render();
+  try {
+    const more = await getRepoLabels(appState.token, owner, name, page, 100, gen.signal);
+    if (isStale(gen)) return;
+    const items = Array.isArray(more) ? more : [];
+    appState.repoLabels = [...appState.repoLabels, ...items];
+    appState.repoLabelsPage = page;
+    appState.repoLabelsHasMore = items.length >= 100;
+    showMessage(items.length ? 'Loaded more labels' : 'All labels loaded', 'info');
+  } catch (e) {
+    if (!isStale(gen)) showMessage(e.message || 'Failed to load more labels', 'error');
+  } finally {
+    appState.loading = false;
+    if (!isStale(gen)) render();
+  }
 }
 
 export function renderLabelsPane(screen, y, maxH) {
@@ -29,12 +56,17 @@ export function renderLabelsPane(screen, y, maxH) {
   sectionHeader(screen, 2, y, '🏷️  LABELS (' + labels.length + ')');
   y++;
 
+  if (appState.loading) {
+    loadingIndicator(screen, 2, y, 'loading labels');
+    return;
+  }
   if (labels.length === 0) {
     screen.writeStr(2, y++, 'No labels — manage labels on GitHub to categorize issues', { dim: true });
     return;
   }
 
   const yL = y;
+  if (appState.repoLabelsHasMore) screen.writeStr(2, y++, '[Space] load more labels', { dim: true });
   for (const l of labels) {
     if (y >= yL + maxH - 1) break;
     const name = truncate(l.name || '', 25);

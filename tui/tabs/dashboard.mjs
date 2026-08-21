@@ -1,7 +1,7 @@
 // Dashboard tab — the home screen.
 // v0.5+ design: cleaner section cards, focus-aware stat cards, breadcrumb-aware.
 
-import { appState, render, startAsync, isStale, showMessage, setTab, confirm, setWidgetLoading, isWidgetLoading } from '../state.mjs';
+import { appState, render, startAsync, isStale, showMessage, setTab, confirm, setWidgetLoading, isWidgetLoading, syncStarredEntities, getWidgetAge } from '../state.mjs';
 import { STALE_DAYS } from '../repos-logic.mjs';
 import { startInput, registerInputHandler } from '../input.mjs';
 import {
@@ -108,6 +108,7 @@ export async function loadDashboardWidgets(force = false) {
         ...(s.repo || s),
         starred_at: s.starred_at,
       })) : [];
+      syncStarredEntities(appState.starred);
     }
     setWidgetLoading('starred', false);
     if (results[3].status === 'fulfilled') {
@@ -170,6 +171,7 @@ async function loadDashboardStarredPages(gen) {
       if (isStale(gen, 'dashboard-widgets') || !Array.isArray(more) || more.length === 0) break;
       const mapped = more.map(s => ({ ...(s.repo || s), starred_at: s.starred_at || s.created_at }));
       appState.starred = [...appState.starred, ...mapped];
+      syncStarredEntities(mapped);
       recomputeDashboardDerived();
       page++;
       if (more.length < 100) break;
@@ -358,7 +360,13 @@ function sparkCharsAccessible(level) {
 // so we keep the local wrapper to compose both behaviours.
 function sectionHeader(screen, x, y, text, hint, section) {
   if (section) {
-    return collapsibleHeader(screen, x, y, section, text, hint);
+    const widget = text.includes('TRENDING') ? 'trending' :
+      text.includes('STARS') ? 'starred' :
+      text.includes('ACTIVITY') || text.includes('CONTRIBUTIONS') ? 'events' :
+      text.includes('ISSUES') ? 'issues' :
+      text.includes('PRs') ? 'prs' : null;
+    const age = widget && appState.dashboardWidgetFetched[widget] ? ' · ' + getWidgetAge(widget) : '';
+    return collapsibleHeader(screen, x, y, section, text + age, hint);
   }
   screen.writeStr(x, y, text, color('sectionHeading'));
   if (hint) {
