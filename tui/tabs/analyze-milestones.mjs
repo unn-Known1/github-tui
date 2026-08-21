@@ -1,6 +1,6 @@
 // Milestones sub-pane — load and render repo milestones.
 
-import { appState, render, startAsync, isStale, showMessage } from '../state.mjs';
+import { appState, render, startAsync, isStale, showMessage, beginLoading, finishLoading } from '../state.mjs';
 import { getRepoMilestones } from '../github.mjs';
 import { truncate, sectionHeader } from '../utils.mjs';
 import { loadingIndicator } from '../render.mjs';
@@ -9,20 +9,20 @@ export async function loadMilestones() {
   const repo = appState.repoDetails;
   if (!repo) return;
   const gen = startAsync('analyze-milestones');
-  appState.loading = true;
+  beginLoading(gen);
   appState.repoMilestones = [];
   render();
   try {
     const [owner, name] = repo.full_name.split('/');
     const milestones = await getRepoMilestones(appState.token, owner, name, 1, 20, gen.signal);
-    if (isStale(gen)) { appState.loading = false; return; }
+    if (isStale(gen)) { finishLoading(gen); return; }
     appState.repoMilestones = Array.isArray(milestones) ? milestones : [];
     appState.repoMilestonesPage = 1;
     appState.repoMilestonesHasMore = Array.isArray(milestones) && milestones.length >= 20;
   } catch (e) {
     if (!isStale(gen)) showMessage('Failed to load milestones: ' + e.message, 'error');
   }
-  appState.loading = false;
+  finishLoading(gen);
   if (!isStale(gen)) render();
 }
 
@@ -32,7 +32,7 @@ export async function loadMoreMilestones() {
   const [owner, name] = repo.full_name.split('/');
   const page = appState.repoMilestonesPage + 1;
   const gen = startAsync('analyze-milestones-more');
-  appState.loading = true;
+  beginLoading(gen);
   render();
   try {
     const more = await getRepoMilestones(appState.token, owner, name, page, 20, gen.signal);
@@ -45,7 +45,7 @@ export async function loadMoreMilestones() {
   } catch (e) {
     if (!isStale(gen)) showMessage(e.message || 'Failed to load more milestones', 'error');
   } finally {
-    appState.loading = false;
+    finishLoading(gen);
     if (!isStale(gen)) render();
   }
 }

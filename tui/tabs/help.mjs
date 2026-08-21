@@ -3,7 +3,7 @@
 
 import { appState, tabState } from '../state.mjs';
 import { color } from '../theme.mjs';
-import { truncate } from '../utils.mjs';
+import { truncate, truncateToWidth } from '../utils.mjs';
 
 // All shortcuts organized by category for the searchable help overlay.
 const CATEGORIES = [
@@ -211,7 +211,7 @@ export function render(screen) {
     if (ln.kind === 'header') {
       screen.writeStr(x0 + 2, row, ln.text, { fg: 'cyan', bold: true });
     } else if (ln.kind === 'shortcut') {
-      const key = ln.key.padEnd(18).substring(0, 18);
+      const key = truncateToWidth(ln.key, 18, '').padEnd(18);
       screen.writeStr(x0 + 2, row, key, { fg: 'yellow', bold: true });
       screen.writeStr(x0 + 20, row, truncate(ln.desc, boxW - 22), color('repoName') || { fg: 'white' });
     } else if (ln.kind === 'empty') {

@@ -1,6 +1,6 @@
 // Checks sub-pane — load and render CI check runs and suites.
 
-import { appState, render, startAsync, isStale, showMessage } from '../state.mjs';
+import { appState, render, startAsync, isStale, showMessage, beginLoading, finishLoading } from '../state.mjs';
 import { getRepoCheckRuns, getRepoCheckSuites } from '../github.mjs';
 import { truncate, sectionHeader } from '../utils.mjs';
 import { loadingIndicator } from '../render.mjs';
@@ -9,7 +9,7 @@ export async function loadChecks() {
   const repo = appState.repoDetails;
   if (!repo) return;
   const gen = startAsync('analyze-checks');
-  appState.loading = true;
+  beginLoading(gen);
   appState.repoCheckRuns = [];
   appState.repoCheckSuites = [];
   render();
@@ -19,13 +19,13 @@ export async function loadChecks() {
       getRepoCheckRuns(appState.token, owner, name, repo.default_branch, gen.signal),
       getRepoCheckSuites(appState.token, owner, name, repo.default_branch, gen.signal),
     ]);
-    if (isStale(gen)) { appState.loading = false; return; }
+    if (isStale(gen)) { finishLoading(gen); return; }
     appState.repoCheckRuns = (runs && runs.check_runs) ? runs.check_runs : [];
     appState.repoCheckSuites = (suites && suites.check_suites) ? suites.check_suites : [];
   } catch (e) {
     if (!isStale(gen)) showMessage('Failed to load checks: ' + e.message, 'error');
   }
-  appState.loading = false;
+  finishLoading(gen);
   if (!isStale(gen)) render();
 }
 

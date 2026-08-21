@@ -80,6 +80,24 @@ export function truncate(s, n) {
   return truncateToWidth(s, n);
 }
 
+// Slice a string using terminal-cell columns rather than UTF-16 indices.
+// This is used by mouse text selection, where columns come from terminal
+// coordinates and may point into CJK, emoji, or combining-mark content.
+export function sliceByDisplayColumns(value, start = 0, end = Infinity) {
+  const chars = Array.from(String(value ?? ''));
+  const lo = Math.max(0, Number.isFinite(start) ? start : 0);
+  const hi = Number.isFinite(end) ? Math.max(lo, end) : Infinity;
+  let cell = 0;
+  let out = '';
+  for (const ch of chars) {
+    const w = displayWidth(ch);
+    const selected = w === 0 ? cell >= lo && cell < hi : cell < hi && cell + w > lo;
+    if (selected) out += ch;
+    cell += w;
+  }
+  return out;
+}
+
 // Word-wrap `text` so each visual line fits within `width` display cells.
 
 // Behavior:
@@ -229,6 +247,8 @@ export async function openUrl(url) {
 export function copyToClipboard(text) {
   if (!text) return false;
   const str = String(text);
+  globalThis._lastClipboardTempFile = null;
+  globalThis._lastClipboardMethod = null;
   let success = false;
 
   // 1. OSC-52 — synchronous escape sequence to the terminal. Works in most
@@ -237,10 +257,15 @@ export function copyToClipboard(text) {
   if (b64.length <= 75_000) {
     try {
       process.stdout.write(`\x1b]52;c;${b64}\x07`);
-      process.stdout.flush();
+      // stdout.flush() is not part of Node's portable stream API. The write
+      // above is synchronous from the caller's perspective; avoid throwing
+      // after emitting a valid OSC-52 sequence and incorrectly falling back.
+      globalThis._lastClipboardMethod = 'osc52';
       success = true;
     } catch { /* fall through */ }
   }
+
+  if (success) return true;
 
   // 2. Inside tmux: write directly to tmux's paste buffer. This is reliable
   //    regardless of whether OSC-52 passthrough is enabled. User accesses it
@@ -259,7 +284,7 @@ export function copyToClipboard(text) {
 
   // 3. Native clipboard tools — synchronous so paste immediately after copy works.
   if (_tryNativeClipboardSync(str)) {
-    globalThis._lastClipboardMethod = 'native';
+    if (!globalThis._lastClipboardMethod) globalThis._lastClipboardMethod = 'native';
     return true;
   }
 
@@ -293,6 +318,7 @@ function _tryNativeClipboardSync(str) {
     const tmpFile = join(tmpdir(), 'github-tui-clipboard.txt');
     writeFileSync(tmpFile, str, 'utf-8');
     globalThis._lastClipboardTempFile = tmpFile;
+    globalThis._lastClipboardMethod = 'temp-file';
     return true;
   } catch {
     return false;

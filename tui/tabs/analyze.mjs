@@ -2,7 +2,7 @@
 // toggle Issues/PRs sub-panes, view README, hop to Forks sub-view.
 // v0.5+ polish: pushes to recent-repos list, cleaner section headings.
 
-import { appState, render, startAsync, isStale, showMessage, pushRecentRepo } from '../state.mjs';
+import { appState, render, startAsync, isStale, showMessage, pushRecentRepo, beginLoading, finishLoading } from '../state.mjs';
 import {
   getRepositoryDetails,
   getRepositoryLanguages, getRepositoryContributors,
@@ -60,7 +60,7 @@ function clearTextSelection() {
 
 export async function loadRepoDetails(owner, name) {
   const gen = startAsync('analyze-details');
-  appState.loading = true;
+  beginLoading(gen);
   appState.detailsPane = 'overview';
   clearTextSelection();
   appState.detailsScroll = 0;
@@ -99,7 +99,7 @@ export async function loadRepoDetails(owner, name) {
   render();
   try {
     const details = await getRepositoryDetails(appState.token, owner, name, gen.signal);
-    if (isStale(gen, 'analyze-details')) { appState.loading = false; return; }
+    if (isStale(gen, 'analyze-details')) { finishLoading(gen); return; }
     appState.repoDetails = details;
     appState.analyzeView = 'details';
     // Track in recent repos.
@@ -115,7 +115,7 @@ export async function loadRepoDetails(owner, name) {
       safe(getRepositoryIssues(appState.token, owner, name, 1, 100, issueState, gen.signal)),
       safe(getRepositoryPullRequests(appState.token, owner, name, 1, 100, issueState, gen.signal)),
     ]);
-    if (isStale(gen, 'analyze-details')) { appState.loading = false; return; }
+    if (isStale(gen, 'analyze-details')) { finishLoading(gen); return; }
     appState.repoLanguages = langs || null;
     appState.repoContributors = Array.isArray(contribs) ? contribs : [];
     appState.repoReleases = Array.isArray(releases) ? releases : [];
@@ -129,7 +129,7 @@ export async function loadRepoDetails(owner, name) {
   } catch (e) {
     if (!isStale(gen, 'analyze-details')) showMessage(e.message || 'Failed to load repository', 'error');
   }
-  appState.loading = false;
+  finishLoading(gen);
   if (!isStale(gen, 'analyze-details')) render();
   // Silently pre-load release assets for overview + packages pane
   if (appState.repoReleaseAssets.length === 0 && appState.repoReleases.length > 0) {
@@ -221,7 +221,7 @@ function renderRepoDetails(screen, y, maxH) {
         const pct = total ? bytes / total : 0;
         const filled = Math.max(1, Math.round(pct * barWidth));
         const bar = '█'.repeat(filled) + '░'.repeat(Math.max(0, barWidth - filled));
-        screen.writeStr(rightX, ry, lang.substring(0, 12).padEnd(13));
+        screen.writeStr(rightX, ry, truncate(lang, 12).padEnd(13));
         screen.writeStr(rightX + 13, ry, bar, { fg: 'cyan' });
         screen.writeStr(rightX + 14 + barWidth, ry, (pct * 100).toFixed(1) + '%', { dim: true });
         ry++;
@@ -689,7 +689,7 @@ export function down(screen) {
   }
 }
 export function exploreEnter() {
-  const items = getExploreLanding();
+  const items = appState._exploreVisibleItems || getExploreLanding();
   const item = items[appState.exploreSel];
   if (!item) return;
   if (item.kind === 'trending' || item.kind === 'recent') {

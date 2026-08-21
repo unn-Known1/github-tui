@@ -3,7 +3,7 @@
 import { appState, tabState, setTab, render, TABS, toggleCollapse, showMessage, upsertEntity } from './state.mjs';
 import { getScreen, HEADER_HEIGHT, TAB_CONTENT_Y, getStatCardLayout } from './render.mjs';
 import { setTheme } from './theme.mjs';
-import { openUrl, copyToClipboard, getClipboardTempFilePath, getLastClipboardMethod, wrapTextWithMap } from './utils.mjs';
+import { openUrl, copyToClipboard, getClipboardTempFilePath, getLastClipboardMethod, wrapTextWithMap, sliceByDisplayColumns } from './utils.mjs';
 import { dismissConfirm } from './state.mjs';
 import * as analyze from './tabs/analyze.mjs';
 import * as detail from './tabs/detail.mjs';
@@ -89,25 +89,18 @@ export function getSelectedText() {
     const innerW = Math.max(20, W - 6);
     const raw = appState._readmeText || '';
     const { lines } = wrapTextWithMap(raw, innerW);
-    const linesNormalized = [];
-    for (let i = 0; i < lines.length; i++) {
-      const ln = lines[i];
-      // Include a trailing newline for every line except the last visual line.
-      linesNormalized.push(ln + '\n');
-    }
     let out = '';
     for (let r = sr; r <= er; r++) {
-      if (r < 0 || r >= linesNormalized.length) continue;
-      const ln = linesNormalized[r];
+      if (r < 0 || r >= lines.length) continue;
+      const ln = lines[r];
       if (r === sr && r === er) {
-        // Single-cell selection — take exactly the characters from sc to ec.
-        out += ln.substring(sc, ec);
+        out += sliceByDisplayColumns(ln, sc, ec);
       } else if (r === sr) {
-        out += ln.substring(sc);
+        out += sliceByDisplayColumns(ln, sc) + '\n';
       } else if (r === er) {
-        out += ln.substring(0, ec);
+        out += sliceByDisplayColumns(ln, 0, ec);
       } else {
-        out += ln;
+        out += ln + '\n';
       }
     }
     return out || null;
@@ -122,11 +115,11 @@ export function getSelectedText() {
       if (vr < 0 || vr >= visualLines.length) continue;
       const ln = visualLines[vr];
       if (vr === sr && vr === er) {
-        out += ln.substring(sc, ec);
+        out += sliceByDisplayColumns(ln, sc, ec);
       } else if (vr === sr) {
-        out += ln.substring(sc);
+        out += sliceByDisplayColumns(ln, sc) + '\n';
       } else if (vr === er) {
-        out += ln.substring(0, ec);
+        out += sliceByDisplayColumns(ln, 0, ec);
       } else {
         out += ln + '\n';
       }
@@ -149,7 +142,7 @@ export async function copySelectedText() {
     if (method === 'tmux') {
       showMessage('Copied ' + text.length + ' chars — tmux buffer (Ctrl+B [ to view)', 'success');
     } else if (tmpFile) {
-      showMessage('Copied ' + text.length + ' chars → ' + tmpFile, 'info');
+      showMessage('Saved ' + text.length + ' chars to ' + tmpFile, 'info');
     } else {
       showMessage('Copied ' + text.length + ' chars to clipboard', 'success');
     }
@@ -203,7 +196,7 @@ export async function selectAllAndCopy() {
     if (method === 'tmux') {
       showMessage('Copied all text — tmux buffer (Ctrl+B [ to view)', 'success');
     } else if (tmpFile) {
-      showMessage('Copied all text → ' + tmpFile, 'info');
+      showMessage('Saved all text to ' + tmpFile, 'info');
     } else {
       showMessage('Copied all text to clipboard', 'success');
     }
@@ -313,37 +306,37 @@ export function handleMouseEvent(event) {
       }
     }
 
-    // Inbox tab list.
+    // Inbox tab list. Use the exact geometry published by renderInbox.
     if (t === 4) {
-      const rowOff = TAB_CONTENT_Y[4];
-      if (sy >= rowOff) {
-        const listIdx = sy - rowOff;
-        const absIdx = listIdx + appState.inboxScroll;
+      const bounds = appState._inboxListBounds;
+      if (bounds && sy >= bounds.rowStart && sy < bounds.rowStart + bounds.maxRows) {
+        const absIdx = sy - bounds.rowStart + appState.inboxScroll;
         const filteredLen = inbox.getFilteredNotifications().length;
         if (absIdx >= 0 && absIdx < filteredLen && absIdx !== appState.selectedNotification) {
           appState.selectedNotification = absIdx;
+          inbox.normalizeInboxCursor();
           render();
         }
       }
     }
 
-    // Actions tab list.
+    // Actions tab list. Renderers publish separate origins because the repo
+    // list and workflow-run list have different headers/offsets.
     if (t === 3) {
-      const rowOff = TAB_CONTENT_Y[3];
-      if (sy >= rowOff) {
-        const listIdx = sy - rowOff;
+      const bounds = appState._actionsListBounds;
+      if (bounds && sy >= bounds.rowStart && sy < bounds.rowStart + bounds.maxRows) {
+        const absIdx = sy - bounds.rowStart + bounds.scroll;
         if (appState.actionsView === 'repos') {
-          const absIdx = listIdx + appState.actionsRepoScroll;
-          if (absIdx >= 0 && absIdx < appState.actionsRepos.length && absIdx !== appState.actionsRepoSelected) {
+          const reposList = appState.actionsFilter
+            ? appState.actionsRepos.filter(r => (r.full_name || '').toLowerCase().includes(appState.actionsFilter.toLowerCase()))
+            : appState.actionsRepos;
+          if (absIdx >= 0 && absIdx < reposList.length && absIdx !== appState.actionsRepoSelected) {
             appState.actionsRepoSelected = absIdx;
             render();
           }
-        } else {
-          const absIdx = listIdx + appState.actionsScroll;
-          if (absIdx >= 0 && absIdx < appState.actionsRuns.length && absIdx !== appState.actionsSelected) {
-            appState.actionsSelected = absIdx;
-            render();
-          }
+        } else if (absIdx >= 0 && absIdx < appState.actionsRuns.length && absIdx !== appState.actionsSelected) {
+          appState.actionsSelected = absIdx;
+          render();
         }
       }
     }
@@ -785,7 +778,9 @@ function handleContentClick(sx, sy) {
     case 0: dispatchDashboardClick(sx, sy); break;
     case 1: dispatchReposClick(sx, sy); break;
     case 2: dispatchAnalyzeClick(sx, sy); break;
-    case 3: render(); break;
+    case 3:
+      dispatchActionsClick(sx, sy);
+      break;
     case 4: dispatchInboxClick(sy); break;
     case 5: dispatchSettingsClick(sx, sy); break;
     default: render();
@@ -988,16 +983,13 @@ function dispatchAnalyzeClick(sx, sy) {
 
     // Click on a landing row (trending / saved search / recent repo).
     const b = appState._exploreBounds;
-    if (b) {
-      for (const [kind, sec] of [['trending', b.trending], ['saved', b.saved], ['recent', b.recent]]) {
-        if (!sec || sec.count === 0) continue;
-        if (sy > sec.y && sy <= sec.y + sec.count && sx >= sec.x) {
-          const rowIdx = sy - sec.y - 1;
-          appState.exploreSel = sec.startIdx + rowIdx;
-          render();
-          analyze.exploreEnter();
-          return;
-        }
+    if (b?.list) {
+      const sec = b.list;
+      if (sy >= sec.y && sy < sec.y + sec.count && sx >= sec.x) {
+        appState.exploreSel = sec.startIdx + sy - sec.y;
+        render();
+        analyze.exploreEnter();
+        return;
       }
     }
     return;
@@ -1094,21 +1086,44 @@ function dispatchAnalyzeClick(sx, sy) {
 // ── Inbox tab ─────────────────────────────────────────────────
 
 function dispatchInboxClick(sy) {
-  // inboxScroll and selectedNotification both index into the filtered list.
+  const bounds = appState._inboxListBounds;
   const filteredLen = inbox.getFilteredNotifications().length;
-  const screen = getScreen();
-  const maxVisible = screen ? Math.max(1, screen.height - 15) : 20;
-  const scroll = appState.inboxScroll;
-  const itemIdx = sy - HEADER_HEIGHT - 2 + scroll;
+  if (!bounds || sy < bounds.rowStart || sy >= bounds.rowStart + bounds.maxRows) return;
+  const itemIdx = sy - bounds.rowStart + appState.inboxScroll;
   if (itemIdx >= 0 && itemIdx < filteredLen) {
     appState.selectedNotification = itemIdx;
-    // Only scroll if the item is outside the current viewport.
-    if (itemIdx < scroll) {
-      appState.inboxScroll = itemIdx;
-    } else if (itemIdx >= scroll + maxVisible) {
-      appState.inboxScroll = itemIdx - maxVisible + 1;
-    }
+    inbox.normalizeInboxCursor();
     render();
+  }
+}
+
+function dispatchActionsClick(sx, sy) {
+  const bounds = appState._actionsListBounds;
+  if (!bounds || sy < bounds.rowStart || sy >= bounds.rowStart + bounds.maxRows) return;
+  const itemIdx = sy - bounds.rowStart + bounds.scroll;
+  if (appState.actionsView === 'repos') {
+    const q = (appState.actionsFilter || '').trim().toLowerCase();
+    const list = q ? appState.actionsRepos.filter(r => (r.full_name || '').toLowerCase().includes(q)) : appState.actionsRepos;
+    if (itemIdx >= 0 && itemIdx < list.length) {
+      appState.actionsRepoSelected = itemIdx;
+      // A second click on the selected row has the same effect as Enter.
+      if (appState._actionsClickedIndex === itemIdx) {
+        appState._actionsClickedIndex = null;
+        import('./tabs/actions.mjs').then(m => m.enter()).catch(() => {});
+      } else {
+        appState._actionsClickedIndex = itemIdx;
+        render();
+      }
+    }
+  } else if (itemIdx >= 0 && itemIdx < appState.actionsRuns.length) {
+    appState.actionsSelected = itemIdx;
+    if (appState._actionsClickedIndex === itemIdx) {
+      appState._actionsClickedIndex = null;
+      import('./tabs/actions.mjs').then(m => m.enter()).catch(() => {});
+    } else {
+      appState._actionsClickedIndex = itemIdx;
+      render();
+    }
   }
 }
 

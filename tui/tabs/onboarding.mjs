@@ -11,6 +11,7 @@ import { appState, render, showMessage, setTab, compareVersions } from '../state
 // newer than what they last saw?".
 export { compareVersions };
 import { color } from '../theme.mjs';
+import { truncateToWidth } from '../utils.mjs';
 import { APP_VERSION, CONFIG_DIR, TOKEN_FILE } from '../config.mjs';
 import { listThemes } from '../theme.mjs';
 import { startInput } from '../input.mjs';
@@ -354,7 +355,7 @@ export function renderOnboarding(screen, opts = {}) {
     else if (/^\s*•/.test(ln)) style = color('repoName') || { fg: 'white' };
     else if (/^\s*$/.test(ln)) { bodyY++; continue; }
     else style = null;
-    screen.writeStr(x0 + 3, bodyY, ln.substring(0, innerW), style);
+    screen.writeStr(x0 + 3, bodyY, truncateToWidth(ln, innerW, ''), style);
     bodyY++;
   }
 
@@ -378,7 +379,7 @@ export function renderOnboarding(screen, opts = {}) {
 
   const hintY = y0 + boxH - 3;
   const hint = step.hint || '[Enter] Next   [Esc] Skip';
-  screen.writeStr(x0 + 3, hintY, hint.substring(0, boxW - 6), { fg: 'cyan' });
+  screen.writeStr(x0 + 3, hintY, truncateToWidth(hint, boxW - 6, ''), { fg: 'cyan' });
 
   if (!welcomeMode) {
     let dx = x0 + 3;

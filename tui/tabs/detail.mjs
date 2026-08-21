@@ -1,7 +1,7 @@
 // Detail popup — Issue/PR detail view with rendered body, comments, and actions.
 // Opens as an overlay on top of the Explore tab.
 
-import { appState, render, startAsync, isStale, showMessage, confirm } from '../state.mjs';
+import { appState, render, startAsync, isStale, showMessage, confirm, beginLoading, finishLoading } from '../state.mjs';
 import {
   getIssue, getPullRequest, getIssueComments, getPullRequestReviews,
   getPullRequestFiles, postComment, createReaction,
@@ -59,6 +59,7 @@ export function openDetail(type, owner, repo, number) {
 
 async function loadDetail() {
   const gen = startAsync('detail');
+  beginLoading(gen);
   appState.detailLoading = true;
   render();
   try {
@@ -69,7 +70,7 @@ async function loadDetail() {
     } else {
       data = await getIssue(appState.token, owner, repo, number, gen.signal);
     }
-    if (isStale(gen, 'detail')) { appState.loading = false; appState.detailLoading = false; return; }
+    if (isStale(gen, 'detail')) { finishLoading(gen); appState.detailLoading = false; return; }
     appState.detailData = data;
 
     const safe = (p) => p.catch(() => null);
@@ -78,7 +79,7 @@ async function loadDetail() {
       type === 'pull_request' ? safe(getPullRequestReviews(appState.token, owner, repo, number, gen.signal)) : Promise.resolve([]),
       type === 'pull_request' ? safe(getPullRequestFiles(appState.token, owner, repo, number, 1, 30, gen.signal)) : Promise.resolve([]),
     ]);
-    if (isStale(gen, 'detail')) { appState.loading = false; appState.detailLoading = false; return; }
+    if (isStale(gen, 'detail')) { finishLoading(gen); appState.detailLoading = false; return; }
     appState.detailComments = Array.isArray(comments) ? comments : [];
     appState.detailReviews = Array.isArray(reviews) ? reviews : [];
     appState.detailFiles = Array.isArray(files) ? files : [];

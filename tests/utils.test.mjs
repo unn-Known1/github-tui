@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import {
   relTime, clamp, truncate, truncateToWidth, padRight, displayWidth, shortNum, formatBytes,
   greeting, eventGlyph, notifTypeColor, notificationToHtmlUrl,
-  safeCwdJoin, ghCloneUrl, wrapText, wrapTextWithMap,
+  safeCwdJoin, ghCloneUrl, wrapText, wrapTextWithMap, sliceByDisplayColumns,
 } from '../tui/utils.mjs';
 
 describe('relTime', () => {
@@ -66,6 +66,11 @@ describe('truncate', () => {
 describe('display-width helpers', () => {
   it('counts CJK and emoji as two terminal cells', () => {
     assert.equal(displayWidth('A中😀'), 5);
+  });
+  it('slices by terminal cells without splitting wide/combining text', () => {
+    assert.equal(sliceByDisplayColumns('A中😀é', 1, 3), '中');
+    assert.equal(sliceByDisplayColumns('A中😀é', 3, 5), '😀');
+    assert.equal(sliceByDisplayColumns('A中😀é', 5), 'é');
   });
   it('does not count combining marks as extra cells', () => {
     assert.equal(displayWidth('e\u0301'), 1);

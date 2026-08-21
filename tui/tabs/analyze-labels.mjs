@@ -1,6 +1,6 @@
 // Labels sub-pane — load and render repo labels with color mapping.
 
-import { appState, render, startAsync, isStale, showMessage } from '../state.mjs';
+import { appState, render, startAsync, isStale, showMessage, beginLoading, finishLoading } from '../state.mjs';
 import { getRepoLabels } from '../github.mjs';
 import { truncate, sectionHeader } from '../utils.mjs';
 import { loadingIndicator } from '../render.mjs';
@@ -9,20 +9,20 @@ export async function loadLabels() {
   const repo = appState.repoDetails;
   if (!repo) return;
   const gen = startAsync('analyze-labels');
-  appState.loading = true;
+  beginLoading(gen);
   appState.repoLabels = [];
   render();
   try {
     const [owner, name] = repo.full_name.split('/');
     const labels = await getRepoLabels(appState.token, owner, name, 1, 100, gen.signal);
-    if (isStale(gen)) { appState.loading = false; return; }
+    if (isStale(gen)) { finishLoading(gen); return; }
     appState.repoLabels = Array.isArray(labels) ? labels : [];
     appState.repoLabelsPage = 1;
     appState.repoLabelsHasMore = Array.isArray(labels) && labels.length >= 100;
   } catch (e) {
     if (!isStale(gen)) showMessage('Failed to load labels: ' + e.message, 'error');
   }
-  appState.loading = false;
+  finishLoading(gen);
   if (!isStale(gen)) render();
 }
 
@@ -32,7 +32,7 @@ export async function loadMoreLabels() {
   const [owner, name] = repo.full_name.split('/');
   const page = appState.repoLabelsPage + 1;
   const gen = startAsync('analyze-labels-more');
-  appState.loading = true;
+  beginLoading(gen);
   render();
   try {
     const more = await getRepoLabels(appState.token, owner, name, page, 100, gen.signal);
@@ -45,7 +45,7 @@ export async function loadMoreLabels() {
   } catch (e) {
     if (!isStale(gen)) showMessage(e.message || 'Failed to load more labels', 'error');
   } finally {
-    appState.loading = false;
+    finishLoading(gen);
     if (!isStale(gen)) render();
   }
 }

@@ -32,13 +32,16 @@ const ETAG_CACHE_MAX = 500;
 const ETAG_TTL = 300_000; // 5 minutes
 let _cacheDirty = false;
 
+function tokenIdentity(token) {
+  return token
+    ? createHash('sha256').update(String(token)).digest('hex').slice(0, 16)
+    : 'anonymous';
+}
+
 export function cacheKeyFor(method, path, accept, raw, token) {
   // Keep credentials out of the persisted key while partitioning private
   // responses between accounts. An empty identity is the anonymous cache.
-  const identity = token
-    ? createHash('sha256').update(String(token)).digest('hex').slice(0, 16)
-    : 'anonymous';
-  return `v2:${method}:${path}:${accept || ''}:${raw ? 'raw' : 'json'}:${identity}`;
+  return `v2:${method}:${path}:${accept || ''}:${raw ? 'raw' : 'json'}:${tokenIdentity(token)}`;
 }
 
 export function encodeRepoPath(path) {
@@ -146,19 +149,26 @@ function saveLastSynced() {
   } catch { /* non-fatal */ }
 }
 
-function recordSync(path, ts) {
-  // allow caller to pass an explicit timestamp (used by cache-
-  // serve paths so the sync stamp reflects data age, not "now").
-  lastSynced[path] = (typeof ts === 'number') ? ts : Date.now();
+function syncKey(path, token) {
+  return `v2sync:${tokenIdentity(token)}:${path}`;
+}
+
+function recordSync(path, ts, token) {
+  // Keep freshness metadata account-scoped just like response bodies. Cache
+  // serves preserve the cached body's original age rather than claiming now.
+  lastSynced[syncKey(path, token)] = (typeof ts === 'number') ? ts : Date.now();
   _syncedDirty = true;
 }
 
-export function getLastSynced(path) {
-  return lastSynced[path] || null;
+export function getLastSynced(path, token = null) {
+  return lastSynced[syncKey(path, token)] || null;
 }
 
-export function getAllLastSynced() {
-  return { ...lastSynced };
+export function getAllLastSynced(token = null) {
+  const prefix = `v2sync:${tokenIdentity(token)}:`;
+  return Object.fromEntries(Object.entries(lastSynced)
+    .filter(([key]) => key.startsWith(prefix))
+    .map(([key, value]) => [key.slice(prefix.length), value]));
 }
 
 // Load persisted data on module init.
@@ -177,9 +187,7 @@ process.on('SIGTERM', () => { saveEtagCache(); saveLastSynced(); });
 // ── Cache stats ──
 
 export function clearAccountCache(token) {
-  const identity = token
-    ? createHash('sha256').update(String(token)).digest('hex').slice(0, 16)
-    : 'anonymous';
+  const identity = tokenIdentity(token);
   let removed = 0;
   for (const key of etagCache.keys()) {
     if (key.endsWith(':' + identity)) {
@@ -187,9 +195,16 @@ export function clearAccountCache(token) {
       removed++;
     }
   }
-  if (removed > 0) {
+  const syncPrefix = 'v2sync:' + identity + ':';
+  let syncRemoved = 0;
+  for (const key of Object.keys(lastSynced)) {
+    if (key.startsWith(syncPrefix)) { delete lastSynced[key]; syncRemoved++; }
+  }
+  if (removed > 0 || syncRemoved > 0) {
     _cacheDirty = true;
+    _syncedDirty = true;
     saveEtagCache();
+    saveLastSynced();
   }
   return removed;
 }
@@ -251,7 +266,7 @@ export function request(path, opts) {
     if (cached) {
       cached.lastAccess = Date.now();
       _cacheDirty = true;
-      recordSync(path, cached.ts);
+      recordSync(path, cached.ts, token);
       return Promise.resolve(cached.body);
     }
     return Promise.reject(new Error('Offline — no cached data available'));
@@ -263,7 +278,7 @@ export function request(path, opts) {
     if (cached && Date.now() - cached.ts < ETAG_TTL) {
       cached.lastAccess = Date.now();
       _cacheDirty = true;
-      recordSync(path, cached.ts);
+      recordSync(path, cached.ts, token);
       return Promise.resolve(cached.body);
     }
   }
@@ -283,7 +298,7 @@ export function request(path, opts) {
         if (cached) {
           cached.lastAccess = Date.now();
           _cacheDirty = true;
-          recordSync(path, cached.ts);
+          recordSync(path, cached.ts, token);
           return resolve(cached.body);
         }
       }
@@ -341,7 +356,7 @@ export function request(path, opts) {
           if (cached && Date.now() - cached.ts < ETAG_TTL) {
             cached.lastAccess = Date.now();
             _cacheDirty = true;
-            recordSync(path, cached.ts);
+            recordSync(path, cached.ts, token);
             return resolve(cached.body);
           }
           // Cache was stale or empty. The 304 means the server has the
@@ -375,7 +390,7 @@ export function request(path, opts) {
             evictLRU();
             _cacheDirty = true;
           }
-          if (method === 'GET') recordSync(path);
+          if (method === 'GET') recordSync(path, undefined, token);
           return resolve(payload);
         }
         let msg = 'GitHub API error ' + res.statusCode;
@@ -406,7 +421,7 @@ export function request(path, opts) {
         if (cached) {
           cached.lastAccess = Date.now();
           _cacheDirty = true;
-          recordSync(path, cached.ts);
+          recordSync(path, cached.ts, token);
           return resolve(cached.body);
         }
       }

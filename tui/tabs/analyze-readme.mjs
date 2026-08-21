@@ -1,6 +1,6 @@
 // README sub-pane — load and render repo README markdown.
 
-import { appState, render, startAsync, isStale, showMessage } from '../state.mjs';
+import { appState, render, startAsync, isStale, showMessage, beginLoading, finishLoading } from '../state.mjs';
 import { getReadme } from '../github.mjs';
 import { sectionHeader, wrapTextWithMap } from '../utils.mjs';
 import { scrollIndicators } from '../render.mjs';
@@ -10,12 +10,12 @@ export async function viewReadme() {
   const repo = appState.repoDetails;
   if (!repo) return;
   const gen = startAsync('analyze-readme');
-  appState.loading = true;
+  beginLoading(gen);
   render();
   try {
     const [owner, name] = repo.full_name.split('/');
     const md = await getReadme(appState.token, owner, name, gen.signal);
-    if (isStale(gen, 'analyze-readme')) { appState.loading = false; return; }
+    if (isStale(gen, 'analyze-readme')) { finishLoading(gen); return; }
     appState.detailsPane = 'readme';
     appState.detailsScroll = 0;
     appState._readmeText = md || '(empty README)';
@@ -26,7 +26,7 @@ export async function viewReadme() {
   } catch (e) {
     if (!isStale(gen, 'analyze-readme')) showMessage(e.message || 'README unavailable', 'warning');
   }
-  appState.loading = false;
+  finishLoading(gen);
   if (!isStale(gen, 'analyze-readme')) render();
 }
 

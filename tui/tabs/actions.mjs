@@ -79,7 +79,7 @@ export async function loadWorkflowRuns() {
   render();
   try {
     const result = await getWorkflowRuns(appState.token, owner, name, 1, RUNS_PER_PAGE, gen.signal);
-    if (isStale(gen)) { appState.actionsLoading = false; return; }
+    if (isStale(gen)) return;
     const runs = result && result.workflow_runs ? result.workflow_runs : [];
     appState.actionsRuns = runs;
     appState.actionsRunsPage = 1;
@@ -88,8 +88,10 @@ export async function loadWorkflowRuns() {
   } catch (e) {
     if (!isStale(gen)) showError(e.message, 'Load workflow runs', { retry: loadWorkflowRuns });
   }
-  appState.actionsLoading = false;
-  if (!isStale(gen)) render();
+  if (!isStale(gen)) {
+    appState.actionsLoading = false;
+    render();
+  }
 }
 
 export async function loadMoreWorkflowRuns() {
@@ -112,8 +114,10 @@ export async function loadMoreWorkflowRuns() {
   } catch (e) {
     if (!isStale(gen)) showMessage(e.message || 'Failed to load more workflow runs', 'error');
   } finally {
-    appState.actionsLoading = false;
-    if (!isStale(gen)) render();
+    if (!isStale(gen)) {
+      appState.actionsLoading = false;
+      render();
+    }
   }
 }
 
@@ -141,7 +145,7 @@ export async function toggleRunDetail() {
     render();
     try {
       const result = await getWorkflowJobs(appState.token, owner, name, runId, gen.signal);
-      if (isStale(gen)) { appState.actionsLoading = false; return; }
+      if (isStale(gen)) return;
       const jobs = result && result.jobs ? result.jobs : [];
       appState.actionsJobs[runId] = jobs;
       // Cache steps for each job
@@ -152,7 +156,7 @@ export async function toggleRunDetail() {
       if (!isStale(gen)) showMessage('Failed to load jobs: ' + e.message, 'error');
       appState.actionsJobs[runId] = [];
     }
-    appState.actionsLoading = false;
+    if (!isStale(gen)) appState.actionsLoading = false;
   }
   render();
 }
@@ -218,6 +222,7 @@ export function goBack() {
 
 export function renderActions(screen, y, h) {
   const W = screen.width;
+  appState._actionsListBounds = null;
   if (!appState.token) {
     emptyState(screen, y, h, {
       icon: '🔒  NOT SIGNED IN',
@@ -264,6 +269,7 @@ function renderRepoList(screen, y, h, W) {
     return;
   }
   const maxVisible = Math.max(1, h - 2);
+  appState._actionsListBounds = { rowStart: y, maxRows: maxVisible, scroll: appState.actionsRepoScroll, length: repos.length };
   for (let i = 0; i < maxVisible && i < repos.length; i++) {
     const idx = appState.actionsRepoScroll + i;
     if (idx >= repos.length) break;
@@ -317,6 +323,7 @@ function renderRunList(screen, y, h, W) {
   y++;
 
   const maxVisible = Math.max(1, h - 3);
+  appState._actionsListBounds = { rowStart: y, maxRows: maxVisible, scroll: appState.actionsScroll, length: runs.length };
   let curY = y;
   let drawn = 0;
 

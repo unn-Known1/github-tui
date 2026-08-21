@@ -1,7 +1,7 @@
 // Inbox tab — GitHub notifications.
 // v0.5+ polish: cleaner section header, by-repo panel as a real box, filter chip.
 
-import { appState, render, startAsync, isStale, showMessage, confirm } from '../state.mjs';
+import { appState, render, startAsync, isStale, showMessage, confirm, beginLoading, finishLoading } from '../state.mjs';
 import {
   getNotifications, markNotificationRead,
   markAllNotificationsRead, unsubscribeNotification,
@@ -22,12 +22,12 @@ export async function loadNotifications() {
     return;
   }
   const gen = startAsync('inbox');
-  appState.loading = true;
+  beginLoading(gen);
   appState.inboxPage = 1;
   render();
   try {
     const notes = await getNotifications(appState.token, 1, INBOX_PER_PAGE, gen.signal);
-    if (isStale(gen)) { appState.loading = false; return; }
+    if (isStale(gen)) { finishLoading(gen); return; }
     appState.notifications = Array.isArray(notes) ? notes : [];
     appState.inboxHasMore = notes.length >= INBOX_PER_PAGE;
     appState.inboxScroll = 0;
@@ -36,71 +36,52 @@ export async function loadNotifications() {
   } catch (e) {
     if (!isStale(gen)) showError(e.message || 'Unknown error', 'Load notifications', { retry: loadNotifications });
   }
-  appState.loading = false;
+  finishLoading(gen);
   if (!isStale(gen)) render();
 }
 
 export async function loadMoreNotifications() {
   if (!appState.inboxHasMore || !appState.token) return;
   const gen = startAsync('inbox-more');
-  appState.loading = true;
+  beginLoading(gen);
   render();
   try {
     const page = appState.inboxPage + 1;
     const more = await getNotifications(appState.token, page, INBOX_PER_PAGE, gen.signal);
-    if (isStale(gen)) { appState.loading = false; return; }
+    if (isStale(gen)) { finishLoading(gen); return; }
     appState.notifications = [...appState.notifications, ...more];
     appState.inboxPage = page;
     appState.inboxHasMore = more.length >= INBOX_PER_PAGE;
+    normalizeInboxCursor();
   } catch (e) {
     if (!isStale(gen)) showMessage(e.message || 'Failed to load more', 'error');
   }
-  appState.loading = false;
+  finishLoading(gen);
   if (!isStale(gen)) render();
 }
 
-export function pageUp() {
-  if (appState.inboxPage > 1) {
-    const page = appState.inboxPage - 1;
-    const gen = startAsync('inbox-page');
-    appState.loading = true;
-    render();
-    getNotifications(appState.token, page, INBOX_PER_PAGE, gen.signal).then(more => {
-      if (isStale(gen)) { appState.loading = false; return; }
-      if (Array.isArray(more)) {
-        appState.notifications = more;
-        appState.inboxPage = page;
-        appState.inboxHasMore = true;
-        appState.selectedNotification = 0;
-        appState.inboxScroll = 0;
-      }
-      appState.loading = false;
-      render();
-    }).catch(() => { appState.loading = false; render(); });
-  }
+// Page keys move through the already-loaded, append-only list. If PageDown
+// reaches the end, fetches the next server page without replacing earlier rows.
+export function pageUp(screen) {
+  const list = getFilteredNotifications();
+  const maxRows = appState._inboxListBounds?.maxRows
+    || Math.max(1, (screen ? screen.height : process.stdout.rows || 24) - 15);
+  appState.selectedNotification = Math.max(0, appState.selectedNotification - maxRows);
+  normalizeInboxCursor(screen);
+  render();
 }
 
-export function pageDown() {
-  if (appState.inboxHasMore) {
-    const page = appState.inboxPage + 1;
-    const gen = startAsync('inbox-page');
-    appState.loading = true;
-    render();
-    getNotifications(appState.token, page, INBOX_PER_PAGE, gen.signal).then(more => {
-      if (isStale(gen)) { appState.loading = false; return; }
-      if (Array.isArray(more) && more.length > 0) {
-        appState.notifications = more;
-        appState.inboxPage = page;
-        appState.inboxHasMore = more.length >= INBOX_PER_PAGE;
-        appState.selectedNotification = 0;
-        appState.inboxScroll = 0;
-      } else {
-        appState.inboxHasMore = false;
-      }
-      appState.loading = false;
-      render();
-    }).catch(() => { appState.loading = false; render(); });
+export function pageDown(screen) {
+  const list = getFilteredNotifications();
+  const maxRows = appState._inboxListBounds?.maxRows
+    || Math.max(1, (screen ? screen.height : process.stdout.rows || 24) - 15);
+  if (appState.selectedNotification >= Math.max(0, list.length - 1) && appState.inboxHasMore) {
+    loadMoreNotifications();
+    return;
   }
+  appState.selectedNotification = Math.min(Math.max(0, list.length - 1), appState.selectedNotification + maxRows);
+  normalizeInboxCursor(screen);
+  render();
 }
 
 export function getFilteredNotifications() {
@@ -130,6 +111,19 @@ export function getSelectedNotification() {
   return getFilteredNotifications()[appState.selectedNotification];
 }
 
+export function normalizeInboxCursor(screen = null) {
+  const list = getFilteredNotifications();
+  const maxRows = appState._inboxListBounds?.maxRows
+    || Math.max(1, (screen ? screen.height : process.stdout.rows || 24) - 15);
+  appState.selectedNotification = Math.max(0, Math.min(appState.selectedNotification, Math.max(0, list.length - 1)));
+  const maxScroll = Math.max(0, list.length - maxRows);
+  appState.inboxScroll = Math.max(0, Math.min(appState.inboxScroll, maxScroll));
+  if (appState.selectedNotification < appState.inboxScroll) appState.inboxScroll = appState.selectedNotification;
+  if (appState.selectedNotification >= appState.inboxScroll + maxRows) {
+    appState.inboxScroll = Math.min(maxScroll, appState.selectedNotification - maxRows + 1);
+  }
+}
+
 function selected() {
   return getSelectedNotification();
 }
@@ -140,11 +134,8 @@ export async function markCurrentRead() {
   try {
     await markNotificationRead(appState.token, n.id);
     n.unread = false;
-    // Clamp cursor to filtered list bounds
-    const list = getFilteredNotifications();
-    if (appState.selectedNotification >= list.length) {
-      appState.selectedNotification = Math.max(0, list.length - 1);
-    }
+    // Clamp both selection and scroll after the filtered row disappears.
+    normalizeInboxCursor();
     showMessage('✓ Marked as read', 'success');
     render();
   } catch (e) { showMessage('Failed: ' + e.message, 'error'); }
@@ -156,6 +147,7 @@ export function markAllRead() {
     try {
       await markAllNotificationsRead(appState.token);
       for (const n of appState.notifications) n.unread = false;
+      normalizeInboxCursor();
       showMessage('✓ All notifications marked as read', 'success');
       render();
     } catch (e) { showMessage('Failed: ' + e.message, 'error'); }
@@ -170,6 +162,7 @@ export async function unsubscribeCurrent() {
     try {
       await unsubscribeNotification(appState.token, n.id);
       n.unread = false;
+      normalizeInboxCursor();
       showMessage('Unsubscribed from thread', 'success');
       render();
     } catch (e) { showMessage('Failed: ' + e.message, 'error'); }
@@ -180,6 +173,7 @@ export function toggleHideProcessed() {
   appState.inboxHideProcessed = !appState.inboxHideProcessed;
   appState.inboxScroll = 0;
   appState.selectedNotification = 0;
+  normalizeInboxCursor();
   showMessage('Hide processed: ' + (appState.inboxHideProcessed ? 'on' : 'off'), 'info');
   render();
 }
@@ -189,6 +183,7 @@ export function cycleFilter() {
   appState.inboxFilter = FILTERS[(i + 1) % FILTERS.length];
   appState.inboxScroll = 0;
   appState.selectedNotification = 0;
+  normalizeInboxCursor();
   showMessage('Filter: ' + appState.inboxFilter, 'info');
   render();
 }
@@ -229,6 +224,7 @@ export function renderInbox(screen, y, h) {
   const list = getFilteredNotifications();
   const allList = appState.notifications;
   const unreadCount = allList.filter(n => n.unread).length;
+  appState._inboxListBounds = null;
 
   screen.writeStr(2, y, 'NOTIFICATIONS', color('title') || { fg: 'white', bold: true });
 
@@ -237,7 +233,8 @@ export function renderInbox(screen, y, h) {
   screen.writeStr(18, y, filterChip, { bg: 'cyan', fg: 'darkGray', bold: true });
 
   if (allList.length > 0) {
-    const counts = (unreadCount > 0 ? unreadCount + ' unread / ' : '0 unread / ') + allList.length + ' total';
+    const counts = (unreadCount > 0 ? unreadCount + ' unread / ' : '0 unread / ') +
+      allList.length + (appState.inboxHasMore ? '+ loaded' : ' total');
     screen.writeStr(Math.max(2, W - counts.length - 2), y, counts,
       unreadCount > 0 ? { fg: 'yellow', bold: true } : { dim: true });
   }
@@ -310,6 +307,10 @@ export function renderInbox(screen, y, h) {
   screen.hline(headerY + 1, '─', { dim: true });
 
   const maxRows = Math.max(1, h - 7);
+  // Publish the exact painted list geometry so keyboard, mouse, and wheel
+  // interactions use the same origin. `headerY + 2` is the first row, not the
+  // tab content origin (which also contains the title and filter chip).
+  appState._inboxListBounds = { rowStart: headerY + 2, maxRows, length: list.length };
   const start = appState.inboxScroll;
   for (let i = 0; i < maxRows && start + i < list.length; i++) {
     const n = list[start + i];
@@ -364,6 +365,7 @@ registerInputHandler('inbox-filter', (value) => {
   appState.inboxTextFilter = (value || '').trim();
   appState.inboxScroll = 0;
   appState.selectedNotification = 0;
+  normalizeInboxCursor();
   showMessage(appState.inboxTextFilter
     ? 'Filtering: "' + appState.inboxTextFilter + '"'
     : 'Filter cleared', 'info');

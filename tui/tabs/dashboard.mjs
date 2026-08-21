@@ -1,7 +1,7 @@
 // Dashboard tab — the home screen.
 // v0.5+ design: cleaner section cards, focus-aware stat cards, breadcrumb-aware.
 
-import { appState, render, startAsync, isStale, showMessage, setTab, confirm, setWidgetLoading, isWidgetLoading, syncStarredEntities, getWidgetAge } from '../state.mjs';
+import { appState, render, startAsync, isStale, showMessage, setTab, confirm, setWidgetLoading, isWidgetLoading, syncStarredEntities, getWidgetAge, beginLoading, finishLoading } from '../state.mjs';
 import { STALE_DAYS } from '../repos-logic.mjs';
 import { startInput, registerInputHandler } from '../input.mjs';
 import {
@@ -23,7 +23,7 @@ export async function refreshDashboard() {
   appState.dashboardLoaded = false;
   try {
     const repos = await import('./repos.mjs');
-    await repos.loadUserData({ loadDashboard: false });
+    await repos.loadUserData({ loadDashboard: false, awaitBackground: true });
     await loadDashboardWidgets(true);
   } catch (error) {
     showError(error.message || 'Dashboard refresh failed', 'Dashboard', { retry: () => refreshDashboard() });
@@ -34,16 +34,17 @@ export async function loadDashboardWidgets(force = false) {
   if (!appState.token || !appState.user) return;
   if (appState.dashboardLoaded && !force) return;
   const gen = startAsync('dashboard-widgets');
+  beginLoading(gen);
   const username = appState.user.login;
 
   // Mark individual widgets as loading.
-  setWidgetLoading('events', true);
-  setWidgetLoading('trending', true);
-  setWidgetLoading('starred', true);
-  setWidgetLoading('issues', true);
-  setWidgetLoading('prs', true);
-  setWidgetLoading('followers', true);
-  setWidgetLoading('notifications', true);
+  setWidgetLoading('events', true, gen);
+  setWidgetLoading('trending', true, gen);
+  setWidgetLoading('starred', true, gen);
+  setWidgetLoading('issues', true, gen);
+  setWidgetLoading('prs', true, gen);
+  setWidgetLoading('followers', true, gen);
+  setWidgetLoading('notifications', true, gen);
   render();
 
   try {
@@ -81,20 +82,20 @@ export async function loadDashboardWidgets(force = false) {
     appState.dashboardWidgetErrorCount = failCount;
     if (failCount === 0) appState.dashboardLastFetched = Date.now();
     if (isStale(gen, 'dashboard-widgets')) {
-      setWidgetLoading('events', false);
-      setWidgetLoading('trending', false);
-      setWidgetLoading('starred', false);
-      setWidgetLoading('issues', false);
-      setWidgetLoading('prs', false);
-      setWidgetLoading('followers', false);
-      setWidgetLoading('notifications', false);
-      appState.loading = false;
+      setWidgetLoading('events', false, gen);
+      setWidgetLoading('trending', false, gen);
+      setWidgetLoading('starred', false, gen);
+      setWidgetLoading('issues', false, gen);
+      setWidgetLoading('prs', false, gen);
+      setWidgetLoading('followers', false, gen);
+      setWidgetLoading('notifications', false, gen);
+      finishLoading(gen);
       return;
     }
     // Preserve the last known good value when one widget fails. A transient
     // network error must not turn a populated widget into a false empty state.
     if (results[0].status === 'fulfilled') appState.events = Array.isArray(events) ? events : [];
-    setWidgetLoading('events', false);
+    setWidgetLoading('events', false, gen);
     if (results[1].status === 'fulfilled') {
       appState.trending = Array.isArray(trending) ? trending : [];
       appState.trendingPage = 1;
@@ -102,29 +103,29 @@ export async function loadDashboardWidgets(force = false) {
       appState.trendingSelected = 0;
       appState.trendingHasMore = appState.trending.length >= 100;
     }
-    setWidgetLoading('trending', false);
+    setWidgetLoading('trending', false, gen);
     if (results[2].status === 'fulfilled') {
       appState.starred = Array.isArray(starred) ? starred.map(s => ({
         ...(s.repo || s),
-        starred_at: s.starred_at,
+        starred_at: s.starred_at || s.repo?.starred_at || null,
       })) : [];
       syncStarredEntities(appState.starred);
     }
-    setWidgetLoading('starred', false);
+    setWidgetLoading('starred', false, gen);
     if (results[3].status === 'fulfilled') {
       // `/issues` includes PR-shaped records; keep only actual issues here.
       appState.dashboardRecentIssues = Array.isArray(issues)
         ? issues.filter(item => !item.pull_request)
         : [];
     }
-    setWidgetLoading('issues', false);
+    setWidgetLoading('issues', false, gen);
     if (results[4].status === 'fulfilled') {
       const prItems = Array.isArray(prs) ? prs : (prs && prs.items);
       appState.dashboardRecentPRs = Array.isArray(prItems) ? prItems : [];
     }
-    setWidgetLoading('prs', false);
+    setWidgetLoading('prs', false, gen);
     if (results[5].status === 'fulfilled') appState.userFollowers = Array.isArray(followers) ? followers : [];
-    setWidgetLoading('followers', false);
+    setWidgetLoading('followers', false, gen);
     if (results[6].status === 'fulfilled') {
       appState.notifications = Array.isArray(notifications) ? notifications : [];
       appState.inboxPage = 1;
@@ -132,7 +133,7 @@ export async function loadDashboardWidgets(force = false) {
       appState.inboxScroll = Math.min(appState.inboxScroll, Math.max(0, appState.notifications.length - 1));
       appState.selectedNotification = Math.min(appState.selectedNotification, Math.max(0, appState.notifications.length - 1));
     }
-    setWidgetLoading('notifications', false);
+    setWidgetLoading('notifications', false, gen);
     recomputeDashboardDerived();
     appState.dashboardLoaded = true;
 
@@ -160,16 +161,19 @@ export async function loadDashboardWidgets(force = false) {
   } catch (e) {
     if (!isStale(gen, 'dashboard-widgets')) showError(e.message, 'Dashboard widgets', { retry: () => loadDashboardWidgets(true) });
   }
+  finishLoading(gen);
 }
 
 async function loadDashboardStarredPages(gen) {
-  setWidgetLoading('starred', true);
+  const loadingHandle = { ...gen, scope: 'dashboard-starred-pages' };
+  beginLoading(loadingHandle);
+  setWidgetLoading('starred', true, gen);
   let page = 2;
   try {
     while (appState.starred.length >= (page - 1) * 100 && !isStale(gen, 'dashboard-widgets')) {
       const more = await getStarredRepos(appState.token, page, 100, gen.signal);
       if (isStale(gen, 'dashboard-widgets') || !Array.isArray(more) || more.length === 0) break;
-      const mapped = more.map(s => ({ ...(s.repo || s), starred_at: s.starred_at || s.created_at }));
+      const mapped = more.map(s => ({ ...(s.repo || s), starred_at: s.starred_at || s.repo?.starred_at || null }));
       appState.starred = [...appState.starred, ...mapped];
       syncStarredEntities(mapped);
       recomputeDashboardDerived();
@@ -179,7 +183,8 @@ async function loadDashboardStarredPages(gen) {
   } catch (error) {
     if (!isStale(gen, 'dashboard-widgets')) showError(error.message || 'Failed to load starred repositories', 'Dashboard stars');
   } finally {
-    setWidgetLoading('starred', false);
+    setWidgetLoading('starred', false, gen);
+    finishLoading(loadingHandle);
     if (!isStale(gen, 'dashboard-widgets')) render();
   }
 }
@@ -443,8 +448,10 @@ export function renderDashboard(screen, y, h) {
   }
 
   const unread = appState.notifications.filter(n => n.unread).length;
-  if (unread > 0) {
-    const badge = '• ' + unread + ' unread';
+  if (unread > 0 || appState.inboxHasMore || appState.reposHasMore) {
+    const badge = (unread > 0 ? '• ' + unread + ' unread' : '') +
+      (appState.inboxHasMore ? '  inbox partial' : '') +
+      (appState.reposHasMore ? '  repos loading' : '');
     screen.writeStr(Math.max(2, W - badge.length - 4), y, badge, { fg: 'yellow', bold: true });
   }
   screen.hline(y + 1, '─', { dim: true });
@@ -548,7 +555,7 @@ export function renderDashboard(screen, y, h) {
     ];
     for (const p of profile) {
       if (ly >= y + h - 1) break;
-      screen.writeStr(leftX, ly++, p.text.substring(0, leftW), p.style);
+      screen.writeStr(leftX, ly++, truncate(p.text, leftW), p.style);
     }
     ly++;
 
@@ -560,7 +567,7 @@ export function renderDashboard(screen, y, h) {
       for (let i = 0; i < maxFollowers; i++) {
         if (ly >= y + h - 1) break;
         const f = appState.userFollowers[i];
-        const login = (f.login || '?').substring(0, leftW - 2);
+        const login = truncate(f.login || '?', leftW - 2);
         screen.writeStr(leftX + 2, ly++, '@' + login, { fg: 'cyan' });
       }
     }
@@ -695,7 +702,7 @@ export function renderDashboard(screen, y, h) {
           const pct = count / total;
           const filled = Math.max(1, Math.round(pct * barW));
           const bar = '█'.repeat(filled) + '░'.repeat(Math.max(0, barW - filled));
-          screen.writeStr(langLeftX, lly, lang.substring(0, 8).padEnd(9));
+          screen.writeStr(langLeftX, lly, truncate(lang, 8).padEnd(9));
           screen.writeStr(langLeftX + 9, lly, bar, { fg: 'cyan' });
           screen.writeStr(langLeftX + 10 + barW, lly, String(count), { dim: true });
           lly++;
@@ -756,7 +763,7 @@ export function renderDashboard(screen, y, h) {
         const ev = dashboardEvents[i];
         const sel = activityFocused && i === appState.dashboardActivitySelected;
         const [icon, c, label] = eventGlyph(ev.type);
-        const repo = (ev.repo && ev.repo.name ? ev.repo.name : '?').substring(0, Math.max(10, rightW - 22));
+        const repo = truncate(ev.repo && ev.repo.name ? ev.repo.name : '?', Math.max(10, rightW - 22));
         const when = relTime(ev.created_at);
         if (sel) {
           // Background highlight across the full right-column width so the
@@ -765,7 +772,7 @@ export function renderDashboard(screen, y, h) {
           for (let x = rightX; x < rightX + rightW; x++) screen.setStyle(x, ry, { bg: 'blue', fg: 'white', bold: true });
         }
         screen.writeStr(rightX, ry, icon, sel ? { bg: 'blue', fg: 'white', bold: true } : c);
-        screen.writeStr(rightX + 2, ry, label.substring(0, 11).padEnd(11), sel ? { bg: 'blue', fg: 'white', bold: true } : { dim: true });
+        screen.writeStr(rightX + 2, ry, truncate(label, 11).padEnd(11), sel ? { bg: 'blue', fg: 'white', bold: true } : { dim: true });
         screen.writeStr(rightX + 14, ry, truncate(repo, rightW - 22), sel ? { bg: 'blue', fg: 'white' } : null);
         screen.writeStr(rightX + rightW - when.length, ry, when, sel ? { bg: 'blue', fg: 'white' } : { dim: true });
         ry++;
@@ -956,8 +963,7 @@ function _trendingQuery() {
   return 'created:>' + since;
 }
 
-async function _fetchTrendingPage(page) {
-  const gen = startAsync('dashboard-trending');
+async function _fetchTrendingPage(page, gen) {
   try {
     const list = await searchRepositories(
       appState.token, _trendingQuery(), page, 10, gen.signal
@@ -975,10 +981,11 @@ async function _fetchTrendingPage(page) {
 // trendingHasMore flag so the next j/Space stops trying to fetch.
 async function _setTrendingPage(page, replace) {
   if (!appState.token) return;
-  appState.loading = true;
+  const gen = startAsync('dashboard-trending');
+  beginLoading(gen);
   render();
-  const { stale, list, error } = await _fetchTrendingPage(page);
-  if (stale) { appState.loading = false; render(); return; }
+  const { stale, list, error } = await _fetchTrendingPage(page, gen);
+  if (stale) return;
   if (error) {
     showError(error.message || 'Failed to load trending page ' + page, 'Trending', {
       retry: () => _setTrendingPage(page, replace),
@@ -996,8 +1003,10 @@ async function _setTrendingPage(page, replace) {
   } else {
     appState.trendingHasMore = false;
   }
-  appState.loading = false;
-  render();
+  if (!isStale(gen, 'dashboard-trending')) {
+    finishLoading(gen);
+    render();
+  }
 }
 
 export function loadMoreTrending() {
@@ -1138,23 +1147,27 @@ function reloadTrending(previousPeriod = appState.trendingPeriod) {
   if (!appState.token) return;
   const days = appState.trendingPeriod;
   const gen = startAsync('dashboard-trending');
-  appState.loading = true;
+  beginLoading(gen);
   render();
   getTrendingRepos(appState.token, days, 100, gen.signal).then(more => {
-    if (isStale(gen, 'dashboard-trending')) { appState.loading = false; return; }
+    if (isStale(gen, 'dashboard-trending')) return;
     appState.trending = Array.isArray(more) ? more : [];
     appState.trendingPage = 1;
     appState.trendingScroll = 0;
     appState.trendingSelected = 0;
     appState.trendingHasMore = appState.trending.length >= 100;
-    appState.loading = false;
-    render();
+    if (!isStale(gen, 'dashboard-trending')) {
+      finishLoading(gen);
+      render();
+    }
   }).catch((error) => {
     if (!isStale(gen, 'dashboard-trending')) {
       appState.trendingPeriod = previousPeriod;
       showError(error.message || 'Trending refresh failed', 'Trending', { retry: () => reloadTrending(previousPeriod) });
-      appState.loading = false;
-      render();
+      if (!isStale(gen, 'dashboard-trending')) {
+        finishLoading(gen);
+        render();
+      }
     }
   });
 }

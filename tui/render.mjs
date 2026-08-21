@@ -6,7 +6,7 @@ import { appState, TABS, tabState, bindRender, checkLoadingWatchdog, getUnreadCo
 import { Screen } from './screen.mjs';
 import { lastRateLimit, offlineState, getCacheStats } from './github.mjs';
 import { color } from './theme.mjs';
-import { truncate } from './utils.mjs';
+import { truncate, truncateToWidth, displayWidth } from './utils.mjs';
 import { readFileSync } from 'fs';
 import { fileURLToPath } from 'url';
 import { dirname, join } from 'path';
@@ -525,7 +525,7 @@ function renderFooter(W, H) {
     // input cursor uses a plain '_' in --accessible mode.
     const cursorChar = appState.accessible ? '_' : '█';
     const line = appState.inputPrompt + before + cursorChar + after;
-    screen.writeStr(1, statusY, line.substring(0, W - 2), color('inputBox'));
+    screen.writeStr(1, statusY, truncateToWidth(line, W - 2, ''), color('inputBox'));
     return;
   }
 
@@ -552,7 +552,7 @@ function renderFooter(W, H) {
     const retrySuffix = hasRetry ? '   [r] to retry' : '';
     const reserve = retrySuffix.length;
     screen.writeStr(1, statusY,
-      txt.substring(0, Math.max(0, W - 2 - reserve)) + retrySuffix, style);
+      truncateToWidth(txt, Math.max(0, W - 2 - reserve), '') + retrySuffix, style);
     return;
   }
 
@@ -561,8 +561,8 @@ function renderFooter(W, H) {
   if (hint) {
     const tabLabel = TABS[tabState.current]?.label || '';
     screen.writeStr(2, statusY, tabLabel, { fg: 'cyan', bold: true });
-    screen.writeStr(2 + tabLabel.length + 1, statusY, '│', { dim: true });
-    screen.writeStr(2 + tabLabel.length + 3, statusY, hint.substring(0, W - tabLabel.length - 8), color('repoName') || { fg: 'white' });
+    screen.writeStr(2 + displayWidth(tabLabel) + 1, statusY, '│', { dim: true });
+    screen.writeStr(2 + displayWidth(tabLabel) + 3, statusY, truncateToWidth(hint, W - displayWidth(tabLabel) - 8, ''), color('repoName') || { fg: 'white' });
   }
 
   // Rate limit badge on the right when remaining is available and low.
@@ -815,7 +815,7 @@ function renderBookmarksOverlay(screen) {
     // Tags or URL snippet on the right
     if (boxW > 50) {
       const tagsStr = (b.tags && b.tags.length > 0) ? b.tags.slice(0, 2).join(',') : '';
-      const urlSnippet = b.url ? b.url.replace(/^https?:\/\//, '').substring(0, 24) : '';
+      const urlSnippet = b.url ? truncate(b.url.replace(/^https?:\/\//, ''), 24) : '';
       const rightText = tagsStr ? '{' + truncate(tagsStr, 20) + '}' : truncate(urlSnippet, 24);
       screen.writeStr(x + boxW - rightText.length - 3, row,
         rightText, sel ? color('selection') : color('dim'));

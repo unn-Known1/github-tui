@@ -29,6 +29,149 @@ export function render() {
 
 const asyncGenerations = { _global: 0 };
 const asyncControllers = {};  // { [scope]: AbortController }
+let _accountEpoch = 0;
+const _loadingHandles = new Set();
+let _manualLoading = false;
+
+function loadingKey(handle) {
+  return handle && typeof handle === 'object'
+    ? String(handle.scope) + ':' + String(handle.gen)
+    : null;
+}
+
+/** Mark one async operation as contributing to the shared loading indicator. */
+export function beginLoading(handle) {
+  const key = loadingKey(handle);
+  if (key) _loadingHandles.add(key);
+  appState.loading = true;
+}
+
+/** Clear only this operation's loading contribution; stale operations cannot hide newer work. */
+export function finishLoading(handle) {
+  const key = loadingKey(handle);
+  if (key) _loadingHandles.delete(key);
+  if (_loadingHandles.size === 0 && !_manualLoading) appState.loading = false;
+}
+
+export function setManualLoading(flag) {
+  _manualLoading = !!flag;
+  appState.loading = _manualLoading || _loadingHandles.size > 0;
+}
+
+export function getAccountEpoch() { return _accountEpoch; }
+
+/**
+ * Invalidate every account-bound request at once. This is deliberately not
+ * a hard-coded scope list: new paginated panes are safe by default.
+ */
+export function invalidateAccountAsync() {
+  _accountEpoch++;
+  for (const scope of Object.keys(asyncControllers)) {
+    const ctl = asyncControllers[scope];
+    try { ctl?.abort?.(); } catch {}
+    _bumpScope(scope);
+  }
+  _loadingHandles.clear();
+  _manualLoading = false;
+  appState.loading = false;
+  return _accountEpoch;
+}
+
+/** Clear all account/private UI data while preserving user preferences. */
+export function resetAccountState() {
+  invalidateAccountAsync();
+  appState.token = null;
+  appState.user = null;
+  appState.repos = [];
+  appState.reposPage = 1;
+  appState.reposHasMore = true;
+  appState.repoSelected = 0;
+  appState.repoScroll = 0;
+  appState.events = [];
+  appState.trending = [];
+  appState.trendingPage = 1;
+  appState.trendingHasMore = true;
+  appState.starred = [];
+  appState.starredPage = 1;
+  appState.starredHasMore = false;
+  appState.entityCache = {};
+  appState.notifications = [];
+  appState.inboxPage = 1;
+  appState.inboxHasMore = false;
+  appState.selectedNotification = 0;
+  appState.actionsRepos = [];
+  appState.actionsRuns = [];
+  appState.actionsRunsPage = 1;
+  appState.actionsRunsHasMore = false;
+  appState.actionsJobs = {};
+  appState.actionsJobSteps = {};
+  appState.actionsFilter = '';
+  appState.repoDetails = null;
+  appState.repoLanguages = null;
+  appState.repoContributors = [];
+  appState.repoReleases = [];
+  appState.repoReleaseAssets = [];
+  appState.repoIssues = [];
+  appState.repoPullRequests = [];
+  appState.repoTraffic = null;
+  appState.repoTrafficClones = null;
+  appState.repoTrafficPopularPaths = [];
+  appState.repoTrafficPopularReferrers = [];
+  appState.repoMilestones = [];
+  appState.repoLabels = [];
+  appState.repoCheckRuns = [];
+  appState.repoCheckSuites = [];
+  appState.repoDependabotAlerts = [];
+  appState.secretScanningAlerts = [];
+  appState.codeScanningAlerts = [];
+  appState.securityAdvisories = [];
+  appState.branchProtection = null;
+  appState.dependencyManifests = [];
+  appState.forks = [];
+  appState.searchResults = [];
+  appState.searchPage = 1;
+  appState.searchHasMore = true;
+  appState.userSearchResults = [];
+  appState.userSearchPage = 1;
+  appState.userSearchHasMore = true;
+  appState.codeSearchResults = [];
+  appState.codeSearchPage = 1;
+  appState.codeSearchHasMore = true;
+  appState.userRepos = [];
+  appState.selectedUser = null;
+  appState.filesEntries = [];
+  appState.filesBranches = [];
+  appState.filesPath = '';
+  appState.fileViewing = null;
+  appState.fileText = '';
+  appState._readmeText = null;
+  appState.showDetail = false;
+  appState.detailData = null;
+  appState.detailComments = [];
+  appState.detailReviews = [];
+  appState.detailFiles = [];
+  appState.detailDiffContent = '';
+  appState.detailDiffFile = null;
+  appState.securityAlertDetail = null;
+  appState.securityError = null;
+  appState.dashboardRecentIssues = [];
+  appState.dashboardRecentPRs = [];
+  appState.dashboardAttentionItems = [];
+  appState.dashboardContributions = null;
+  appState.dashboardStarHistory = [];
+  appState.dashboardLoaded = false;
+  appState.dashboardWidgetErrorCount = 0;
+  appState.dashboardLoadingWidgets = {};
+  appState.dashboardLoadingOwners = {};
+  appState.dashboardWidgetFetched = {};
+  appState._inboxListBounds = null;
+  appState._actionsListBounds = null;
+  appState._exploreVisibleItems = [];
+  appState.dashboardLastFetched = null;
+  appState.dashboardStaleCount = 0;
+  appState.dashboardStaleRepos = [];
+  appState._moreReposAvailable = false;
+}
 
 function _bumpScope(scope) {
   if (!asyncGenerations[scope]) asyncGenerations[scope] = 0;
@@ -67,7 +210,10 @@ export function startAsync(scope) {
   }
   const ctl = new AbortController();
   asyncControllers[scope] = ctl;
-  return { gen: _bumpScope(scope), controller: ctl, signal: ctl.signal, scope };
+  return {
+    gen: _bumpScope(scope), controller: ctl, signal: ctl.signal, scope,
+    accountEpoch: _accountEpoch,
+  };
 }
 
 /**
@@ -87,6 +233,7 @@ export function isStale(handle, scope) {
     s = scope;
   }
   if (!s) s = '_global';
+  if (handle && typeof handle === 'object' && handle.accountEpoch !== _accountEpoch) return true;
   return gen !== (asyncGenerations[s] || 0);
 }
 
@@ -250,6 +397,7 @@ export const appState = {
   securityAlertCursor: 0,
   securityAlertScroll: 0,
   securityAlertDetail: null,      // full alert detail when viewing a single alert
+  securityError: null,             // permission/unavailable/API failure message for active security pane
   secretScanningAlerts: [],
   codeScanningAlerts: [],
   securityAdvisories: [],
@@ -286,6 +434,7 @@ export const appState = {
   dashboardLastFetched: null,    // ms timestamp — drives the "Updated Xm ago" badge in the greeting row
   dashboardWidgetErrorCount: 0,  // count of widgets that failed on the most recent loadDashboardWidgets — used to render a non-modal "N widgets failed" banner so silent Promise.allSettled rejections become visible
   dashboardLoadingWidgets: {},  // { [widgetName]: boolean } — per-widget loading state
+  dashboardLoadingOwners: {},    // { [widgetName]: generation handle } — stale clears cannot hide newer work
   dashboardWidgetFetched: {},    // { [widgetName]: ms } — last successful widget response
   dashboardContributions: null,  // { weeks: [[day, day, ...], ...] } heatmap data
   dashboardRecentIssues: [],     // recently opened/updated issues across repos
@@ -581,6 +730,8 @@ export function checkLoadingWatchdog(now = Date.now()) {
   // 30s stuck — force-clear and toast the user.
   if (now - _loadingStartedAt > 30000) {
     appState.loading = false;
+    _loadingHandles.clear();
+    _manualLoading = false;
     _loadingStartedAt = 0;
     // Abort every in-flight controller registered by startAsync() so the
     // late-arriving response doesn't silently clobber the cleared state.
@@ -742,9 +893,16 @@ export function loadCollapsed() {
 }
 
 // ── Per-widget loading state for dashboard ──
-export function setWidgetLoading(widget, loading) {
-  appState.dashboardLoadingWidgets[widget] = loading;
-  if (!loading) appState.dashboardWidgetFetched[widget] = Date.now();
+export function setWidgetLoading(widget, loading, owner = null) {
+  if (loading) {
+    appState.dashboardLoadingOwners[widget] = owner || true;
+    appState.dashboardLoadingWidgets[widget] = true;
+    return;
+  }
+  if (owner && appState.dashboardLoadingOwners[widget] !== owner) return;
+  appState.dashboardLoadingWidgets[widget] = false;
+  appState.dashboardLoadingOwners[widget] = null;
+  appState.dashboardWidgetFetched[widget] = Date.now();
 }
 
 export function getWidgetAge(widget, now = Date.now()) {

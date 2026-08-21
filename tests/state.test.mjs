@@ -5,7 +5,7 @@
 import { describe, it, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  startAsync, isStale,
+  startAsync, isStale, beginLoading, finishLoading,
   setRetryHandler, clearRetryHandler, consumeRetryHandler, appState,
 } from '../tui/state.mjs';
 
@@ -108,6 +108,19 @@ describe('state.mjs — async generation guard', () => {
       assert.equal(isStale(fastB), false);
       assert.equal(isStale(fastA), true); // Bumped 5 times since.
     });
+  });
+});
+
+describe('state.mjs — generation-owned loading', () => {
+  it('a stale request cannot clear a newer loading handle', () => {
+    const a = startAsync('test-loading-owner');
+    beginLoading(a);
+    const b = startAsync('test-loading-owner');
+    beginLoading(b);
+    finishLoading(a);
+    assert.equal(appState.loading, true);
+    finishLoading(b);
+    assert.equal(appState.loading, false);
   });
 });
 

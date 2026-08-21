@@ -5,7 +5,7 @@ import { appState } from '../tui/state.mjs';
 import { CONFIG_DIR } from '../tui/config.mjs';
 import { existsSync, readFileSync, writeFileSync, unlinkSync, rmdirSync } from 'node:fs';
 import { join } from 'node:path';
-import { getSelectedNotification, getFilteredNotifications } from '../tui/tabs/inbox.mjs';
+import { getSelectedNotification, getFilteredNotifications, normalizeInboxCursor } from '../tui/tabs/inbox.mjs';
 import { isSettingsCursorEnabled, down as settingsDown } from '../tui/tabs/settings.mjs';
 import { rawFileUrl } from '../tui/tabs/files.mjs';
 import { securityStateOptions } from '../tui/tabs/analyze-security.mjs';
@@ -68,6 +68,39 @@ describe('audit regressions', () => {
       assert.equal(appState.settingsCursor, 1);
     } finally {
       Object.assign(appState, saved);
+    }
+  });
+
+  it('clamps Inbox selection and scroll after a filter mutation', () => {
+    const saved = {
+      notifications: appState.notifications,
+      inboxFilter: appState.inboxFilter,
+      inboxHideProcessed: appState.inboxHideProcessed,
+      inboxScroll: appState.inboxScroll,
+      selectedNotification: appState.selectedNotification,
+      inboxListBounds: appState._inboxListBounds,
+    };
+    try {
+      appState.notifications = [
+        { id: 'a', unread: true, subject: { title: 'a' } },
+        { id: 'b', unread: false, subject: { title: 'b' } },
+      ];
+      appState.inboxFilter = 'all';
+      appState.inboxHideProcessed = false;
+      appState._inboxListBounds = { rowStart: 10, maxRows: 1, length: 2 };
+      appState.inboxScroll = 1;
+      appState.selectedNotification = 1;
+      appState.inboxFilter = 'unread';
+      normalizeInboxCursor();
+      assert.equal(appState.selectedNotification, 0);
+      assert.equal(appState.inboxScroll, 0);
+    } finally {
+      appState.notifications = saved.notifications;
+      appState.inboxFilter = saved.inboxFilter;
+      appState.inboxHideProcessed = saved.inboxHideProcessed;
+      appState.inboxScroll = saved.inboxScroll;
+      appState.selectedNotification = saved.selectedNotification;
+      appState._inboxListBounds = saved.inboxListBounds;
     }
   });
 

@@ -1,6 +1,6 @@
 // Packages sub-pane — load release assets and render download list.
 
-import { appState, render, startAsync, isStale, showMessage } from '../state.mjs';
+import { appState, render, startAsync, isStale, showMessage, beginLoading, finishLoading } from '../state.mjs';
 import { getReleaseAssets, downloadToFile } from '../github.mjs';
 import { truncate, formatBytes, sectionHeader, safeCwdJoin } from '../utils.mjs';
 import { color } from '../theme.mjs';
@@ -12,7 +12,7 @@ export async function loadReleaseAssets(silent = false) {
   if (!repo || !appState.repoReleases.length) return;
   const gen = startAsync('analyze-packages');
   if (!silent) {
-    appState.loading = true;
+    beginLoading(gen);
     appState.repoReleaseAssets = [];
     render();
   }
@@ -21,7 +21,7 @@ export async function loadReleaseAssets(silent = false) {
     const allAssets = [];
     for (const rel of appState.repoReleases.slice(0, 3)) {
       const assets = await getReleaseAssets(appState.token, owner, name, rel.id, gen.signal);
-      if (isStale(gen, 'analyze-packages')) { appState.loading = false; return; }
+      if (isStale(gen, 'analyze-packages')) { finishLoading(gen); return; }
       if (Array.isArray(assets)) {
         for (const a of assets) {
           allAssets.push({ ...a, releaseTag: rel.tag_name, releaseName: rel.name });
@@ -32,7 +32,7 @@ export async function loadReleaseAssets(silent = false) {
   } catch (e) {
     if (!isStale(gen, 'analyze-packages')) showMessage('Failed to load release assets', 'error');
   }
-  if (!silent) appState.loading = false;
+  if (!silent) finishLoading(gen);
   if (!isStale(gen, 'analyze-packages')) render();
 }
 

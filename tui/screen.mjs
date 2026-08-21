@@ -213,6 +213,19 @@ function isWideCodePoint(cp) {
     (cp >= 0x30000 && cp <= 0x3FFFD);
 }
 
+function sliceCells(s, width) {
+  if (width <= 0) return '';
+  let out = '';
+  let used = 0;
+  for (const ch of Array.from(String(s ?? ''))) {
+    const w = strWidth(ch);
+    if (used + w > width) break;
+    out += ch;
+    used += w;
+  }
+  return out;
+}
+
 function strWidth(s) {
   let w = 0;
   for (let i = 0; i < s.length; i++) {
@@ -409,12 +422,12 @@ export class Screen {
     if (title) {
       // Truncate title to fit within box (accounting for borders + padding)
       const maxTitleLen = Math.max(0, w - 4);
-      const truncatedTitle = maxTitleLen > 0 ? title.substring(0, maxTitleLen) : '';
-      const titleLen = truncatedTitle.length;
+      const truncatedTitle = maxTitleLen > 0 ? sliceCells(title, maxTitleLen) : '';
+      const titleLen = strWidth(truncatedTitle);
       const pad = Math.max(0, Math.floor((w - titleLen - 4) / 2));
       const rightPad = Math.max(0, w - 2 - pad - titleLen - 2);
       const top = BOX.tl + BOX.h.repeat(pad) + ' ' + truncatedTitle + ' ' + BOX.h.repeat(rightPad) + BOX.tr;
-      this.writeStr(x, y, top.substring(0, w), style);
+      this.writeStr(x, y, sliceCells(top, w), style);
     } else {
       this.writeStr(x, y, BOX.tl + BOX.h.repeat(w - 2) + BOX.tr, style);
     }
@@ -449,7 +462,7 @@ export class Screen {
     }
     if (title) {
       const t = ' ' + title + ' ';
-      const tx = x + Math.floor((w - t.length) / 2);
+      const tx = x + Math.floor((w - strWidth(t)) / 2);
       this.writeStr(tx, y, t, { fg: 'gray', dim: true });
     }
   }
@@ -463,7 +476,7 @@ export class Screen {
     const dismiss = dismissible ? ' ✕' : '';
     const txt = ' ' + label + dismiss + ' ';
     this.writeStr(x, y, txt, s);
-    return x + txt.length;
+    return x + strWidth(txt);
   }
 
   // Render a key hint in the canonical [key] style.
@@ -524,7 +537,7 @@ export class Screen {
   badge(x, y, text, style = null) {
     const t = ' ' + text + ' ';
     this.writeStr(x, y, t, style);
-    return x + t.length;
+    return x + strWidth(t);
   }
 
   // Build a style escape sequence, or return null when colors are disabled.

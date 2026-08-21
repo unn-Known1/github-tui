@@ -14,14 +14,14 @@
 //   filesBranchPicker : boolean — branch picker overlay open?
 //   filesBranchCursor : index inside branches
 
-import { appState, render, startAsync, isStale, showMessage, confirm } from '../state.mjs';
+import { appState, render, startAsync, isStale, showMessage, confirm, beginLoading, finishLoading } from '../state.mjs';
 import {
   getRepoContents, getRepoFile, getBranches, getZipballUrl,
   getFileCommits, downloadToFile, encodeRepoPath,
 } from '../github.mjs';
 import {
   formatBytes, relTime, writeFileSafe, safeCwdJoin, runCommand,
-  ghCloneUrl, copyToClipboard, dirExists, wrapTextWithMap, wrapText,
+  ghCloneUrl, copyToClipboard, dirExists, wrapTextWithMap, wrapText, truncateToWidth,
 } from '../utils.mjs';
 import { color } from '../theme.mjs';
 import { join, resolve } from 'path';
@@ -89,7 +89,7 @@ export async function loadTree() {
   const [owner, name] = repoOwnerName();
   if (!owner) return;
   const gen = startAsync('files-tree');
-  appState.loading = true;
+  beginLoading(gen);
   render();
   try {
     const list = await getRepoContents(
@@ -110,7 +110,7 @@ export async function loadTree() {
     appState.filesEntries = [];
   } finally {
     // always clear loading flag regardless of how we exit the try.
-    appState.loading = false;
+    finishLoading(gen);
   }
   if (!isStale(gen)) render();
 }
@@ -163,7 +163,7 @@ export async function viewFile(ent) {
   // selection refilled with a different entry.
   const targetPath = ent.path;
   const gen = startAsync('files-view');
-  appState.loading = true;
+  beginLoading(gen);
   render();
   try {
     const text = await getRepoFile(
@@ -175,7 +175,7 @@ export async function viewFile(ent) {
   } catch (e) {
     if (!isStale(gen)) showMessage('Failed to view: ' + e.message, 'error');
   } finally {
-    appState.loading = false;
+    finishLoading(gen);
   }
   if (!isStale(gen)) render();
 }
@@ -185,7 +185,7 @@ export async function openBranchPicker() {
   if (!owner) return;
   if (appState.filesBranches.length === 0) {
     const gen = startAsync('files-branches');
-    appState.loading = true;
+    beginLoading(gen);
     render();
     try {
       const list = await getBranches(appState.token, owner, name, 50, gen.signal);
@@ -195,7 +195,7 @@ export async function openBranchPicker() {
       if (!isStale(gen)) showMessage('Branches: ' + e.message, 'error');
       appState.filesBranches = [];
     } finally {
-      appState.loading = false;  // always clear
+      finishLoading(gen);  // always clear
     }
   }
   appState.filesBranchPicker = true;
@@ -271,7 +271,7 @@ async function _saveCurrentFolderImpl() {
   const stack = [root];
   const gen = startAsync('files-bulk');
   const seenFiles = [];
-  appState.loading = true;   // set up-front so finally can clear it
+  beginLoading(gen);   // set up-front so finally can clear it
   try {
     // BFS to enumerate files.
     while (stack.length) {
@@ -342,7 +342,7 @@ async function _saveCurrentFolderImpl() {
   } catch (e) {
     if (!isStale(gen)) showMessage('Folder save failed: ' + e.message, 'error');
   } finally {
-    appState.loading = false;   // always clear
+    finishLoading(gen);   // always clear
     if (!isStale(gen)) render();
   }
 }
@@ -470,7 +470,7 @@ function renderBreadcrumb(screen, y, owner, name) {
     for (const p of appState.filesPath.split('/')) parts.push(p);
   }
   const crumb = parts.join(' > ');
-  screen.writeStr(4, y, crumb.substring(0, W - 6), color('accent'));
+  screen.writeStr(4, y, truncateToWidth(crumb, W - 6, ''), color('accent'));
 }
 
 export function renderFilesPane(screen, y, maxH) {
@@ -517,7 +517,7 @@ export function renderFilesPane(screen, y, maxH) {
     screen.writeStr(4, row, icon, c);
 
     const nameStyle = sel ? color('selection') : null;
-    screen.writeStr(7, row, ent.name.substring(0, W - 36), nameStyle);
+    screen.writeStr(7, row, truncateToWidth(ent.name, W - 36, ''), nameStyle);
 
     if (ent.type === 'file') {
       screen.writeStr(W - 22, row, formatBytes(ent.size || 0), color('dim'));
@@ -777,7 +777,7 @@ function renderBranchPicker(screen) {
     const label = b.name + (b.name === appState.filesRef ? ' (current)' : '');
     screen.writeStr(x0 + 1, y0 + 1 + i, sel ? '>' : ' ', sel ? color('selection') : null);
     screen.writeStr(x0 + 3, y0 + 1 + i,
-      label.substring(0, boxW - 5), sel ? color('selection') : null);
+      truncateToWidth(label, boxW - 5, ''), sel ? color('selection') : null);
   }
 }
 

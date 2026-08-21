@@ -1,6 +1,6 @@
 // Issues/PRs sub-pane — render issue and PR lists with state filtering.
 
-import { appState, render, startAsync, isStale, showMessage } from '../state.mjs';
+import { appState, render, startAsync, isStale, showMessage, beginLoading, finishLoading } from '../state.mjs';
 import { getRepositoryIssues, getRepositoryPullRequests } from '../github.mjs';
 import { truncate, sectionHeader } from '../utils.mjs';
 import { scrollIndicators, loadingIndicator } from '../render.mjs';
@@ -19,32 +19,32 @@ export function cycleIssueStateFilter() {
   if (!repo) return;
   const [owner, name] = repo.full_name.split('/');
   const gen = startAsync('analyze-issues');
-  appState.loading = true;
+  beginLoading(gen);
   render();
   if (appState.detailsPane === 'issues') {
     getRepositoryIssues(appState.token, owner, name, 1, 100, appState.issueStateFilter, gen.signal).then(issues => {
-      if (isStale(gen, 'analyze-issues')) { appState.loading = false; return; }
+      if (isStale(gen, 'analyze-issues')) { finishLoading(gen); return; }
       appState.repoIssues = Array.isArray(issues) ? issues.filter(i => !i.pull_request) : [];
       appState.repoIssuesPage = 1;
       appState.repoIssuesHasMore = Array.isArray(issues) && issues.length >= 100;
       appState.detailsScroll = 0;
-      appState.loading = false;
+      finishLoading(gen);
       render();
     }).catch(e => {
-      appState.loading = false;
+      finishLoading(gen);
       if (!isStale(gen, 'analyze-issues')) { showMessage(e.message || 'Failed to reload issues', 'error'); render(); }
     });
   } else {
     getRepositoryPullRequests(appState.token, owner, name, 1, 100, appState.issueStateFilter, gen.signal).then(prs => {
-      if (isStale(gen, 'analyze-issues')) { appState.loading = false; return; }
+      if (isStale(gen, 'analyze-issues')) { finishLoading(gen); return; }
       appState.repoPullRequests = Array.isArray(prs) ? prs : [];
       appState.repoPullRequestsPage = 1;
       appState.repoPullRequestsHasMore = Array.isArray(prs) && prs.length >= 100;
       appState.detailsScroll = 0;
-      appState.loading = false;
+      finishLoading(gen);
       render();
     }).catch(e => {
-      appState.loading = false;
+      finishLoading(gen);
       if (!isStale(gen, 'analyze-issues')) { showMessage(e.message || 'Failed to reload PRs', 'error'); render(); }
     });
   }
@@ -58,7 +58,7 @@ export async function loadMoreIssues() {
   const [owner, name] = repo.full_name.split('/');
   const page = (isIssues ? appState.repoIssuesPage : appState.repoPullRequestsPage) + 1;
   const gen = startAsync('analyze-issues-more');
-  appState.loading = true;
+  beginLoading(gen);
   render();
   try {
     const more = isIssues
@@ -79,7 +79,7 @@ export async function loadMoreIssues() {
   } catch (e) {
     if (!isStale(gen)) showMessage(e.message || 'Failed to load more items', 'error');
   } finally {
-    appState.loading = false;
+    finishLoading(gen);
     if (!isStale(gen)) render();
   }
 }
@@ -121,7 +121,7 @@ export function renderPRsPane(screen, y, maxH) {
     }),
     renderExtra: (screen, item, col, W, row) => {
       if (col + 8 < W) {
-        const branch = ((item.head && item.head.ref) || '').substring(0, 8);
+        const branch = truncate((item.head && item.head.ref) || '', 8);
         screen.writeStr(col, row, branch, { fg: 'magenta' });
       }
     },

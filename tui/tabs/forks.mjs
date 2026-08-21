@@ -1,7 +1,7 @@
 // Forks sub-view (lives under the Explore tab).
 // Concurrent ahead/behind compares + Space-for-more pagination.
 
-import { appState, render, startAsync, isStale, showMessage } from '../state.mjs';
+import { appState, render, startAsync, isStale, showMessage, beginLoading, finishLoading } from '../state.mjs';
 import { getRepositoryForks, getCompare } from '../github.mjs';
 import { color } from '../theme.mjs';
 import { truncate } from '../utils.mjs';
@@ -47,13 +47,13 @@ async function runCompares(owner, name, defaultBranch, range, gen) {
     while (true) {
       const i = cursor++;
       if (i >= range.to) return;
-      if (isStale(gen)) { appState.loading = false; return; }
+      if (isStale(gen)) { finishLoading(gen); return; }
       const forkOwner = appState.forks[i] && appState.forks[i].owner && appState.forks[i].owner.login;
       if (!forkOwner) { completed++; continue; }
       try {
         const compare = await getCompare(
           appState.token, owner, name, defaultBranch, forkOwner + ':' + defaultBranch);
-        if (isStale(gen)) { appState.loading = false; return; }
+        if (isStale(gen)) { finishLoading(gen); return; }
         appState.forks[i]._aheadBehind = compare
           ? { ahead: compare.ahead_by || 0, behind: compare.behind_by || 0 }
           : { ahead: 0, behind: 0 };
@@ -71,7 +71,7 @@ export async function loadForks() {
   const repo = appState.repoDetails;
   if (!repo) return;
   const gen = startAsync('forks');
-  appState.loading = true;
+  beginLoading(gen);
   appState.analyzeView = 'forks';
   appState.forks = [];
   appState.selectedFork = 0;
@@ -81,7 +81,7 @@ export async function loadForks() {
   try {
     const [owner, name] = repo.full_name.split('/');
     const forks = await getRepositoryForks(appState.token, owner, name, 1, FORKS_PER_PAGE, gen.signal);
-    if (isStale(gen)) { appState.loading = false; return; }
+    if (isStale(gen)) { finishLoading(gen); return; }
     appState.forks = forks;
     appState.forksHasMore = forks.length >= FORKS_PER_PAGE;
     await runCompares(owner, name, repo.default_branch || 'main',
@@ -90,7 +90,7 @@ export async function loadForks() {
   } catch (e) {
     if (!isStale(gen)) showMessage(e.message || 'Failed to load forks', 'error');
   }
-  appState.loading = false;
+  finishLoading(gen);
   if (!isStale(gen)) render();
 }
 
@@ -98,13 +98,13 @@ export async function loadMoreForks() {
   const repo = appState.repoDetails;
   if (!repo || !appState.forksHasMore) return;
   const gen = startAsync('forks-more');
-  appState.loading = true;
+  beginLoading(gen);
   render();
   try {
     const [owner, name] = repo.full_name.split('/');
     const page = appState.forksPage + 1;
     const more = await getRepositoryForks(appState.token, owner, name, page, FORKS_PER_PAGE, gen.signal);
-    if (isStale(gen)) { appState.loading = false; return; }
+    if (isStale(gen)) { finishLoading(gen); return; }
     const offset = appState.forks.length;
     appState.forks = [...appState.forks, ...more];
     appState.forksPage = page;
@@ -115,7 +115,7 @@ export async function loadMoreForks() {
   } catch (e) {
     if (!isStale(gen)) showMessage(e.message || 'Failed to load more forks', 'error');
   }
-  appState.loading = false;
+  finishLoading(gen);
   if (!isStale(gen)) render();
 }
 

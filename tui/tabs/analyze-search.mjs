@@ -1,9 +1,9 @@
 // Search sub-pane — search repos/users/code, paginate, render results.
 
-import { appState, render, startAsync, isStale, showMessage } from '../state.mjs';
+import { appState, render, startAsync, isStale, showMessage, beginLoading, finishLoading } from '../state.mjs';
 import { searchRepositories, searchUsers, searchCode, getUser, getUserRepos } from '../github.mjs';
 import { startInput, registerInputHandler } from '../input.mjs';
-import { shortNum, truncate, sectionHeader } from '../utils.mjs';
+import { shortNum, truncate, truncateToWidth, sectionHeader } from '../utils.mjs';
 import { color } from '../theme.mjs';
 import { emptyState, scrollIndicators } from '../render.mjs';
 import { addSavedSearch } from '../store.mjs';
@@ -60,21 +60,21 @@ export function loadExploreTrending() {
 }
 
 export function exploreUp() {
-  const items = getExploreLanding();
+  const items = appState._exploreVisibleItems || getExploreLanding();
   if (items.length === 0) return;
   appState.exploreSel = Math.max(0, appState.exploreSel - 1);
   render();
 }
 
 export function exploreDown() {
-  const items = getExploreLanding();
+  const items = appState._exploreVisibleItems || getExploreLanding();
   if (items.length === 0) return;
   appState.exploreSel = Math.min(items.length - 1, appState.exploreSel + 1);
   render();
 }
 
 export function getExploreSelectionLabel() {
-  const item = getExploreLanding()[appState.exploreSel];
+  const item = (appState._exploreVisibleItems || getExploreLanding())[appState.exploreSel];
   if (!item) return 'Nothing selected';
   return item.kind === 'saved' ? 'Saved search — Enter runs it' :
     item.kind === 'trending' ? 'Trending repo — Enter opens it' :
@@ -85,7 +85,7 @@ export async function submitSearch(value) {
   const query = (value || '').trim();
   if (!query) return;
   const gen = startAsync('analyze-search-repos');
-  appState.loading = true;
+  beginLoading(gen);
   appState.searchQuery = query;
   appState.searchType = 'repos';
   appState.repoDetails = null;
@@ -97,14 +97,14 @@ export async function submitSearch(value) {
   render();
   try {
     const results = await searchRepositories(appState.token, query, 1, SEARCH_PER_PAGE, gen.signal);
-    if (isStale(gen, 'analyze-search-repos')) { appState.loading = false; return; }
+    if (isStale(gen, 'analyze-search-repos')) { finishLoading(gen); return; }
     appState.searchResults = results;
     appState.searchHasMore = results.length >= SEARCH_PER_PAGE;
     if (results.length === 0) showMessage('No repositories found', 'warning');
   } catch (e) {
     if (!isStale(gen, 'analyze-search-repos')) showMessage(e.message || 'Search failed', 'error');
   }
-  appState.loading = false;
+  finishLoading(gen);
   if (!isStale(gen, 'analyze-search-repos')) render();
 }
 registerInputHandler('search', submitSearch);
@@ -113,7 +113,7 @@ export async function submitUserSearch(value) {
   const query = (value || '').trim();
   if (!query) return;
   const gen = startAsync('analyze-search-users');
-  appState.loading = true;
+  beginLoading(gen);
   appState.searchQuery = query;
   appState.searchType = 'users';
   appState.userSelectedRepo = 0;
@@ -123,14 +123,14 @@ export async function submitUserSearch(value) {
   render();
   try {
     const results = await searchUsers(appState.token, query, 1, USER_SEARCH_PER_PAGE, gen.signal);
-    if (isStale(gen, 'analyze-search-users')) { appState.loading = false; return; }
+    if (isStale(gen, 'analyze-search-users')) { finishLoading(gen); return; }
     appState.userSearchResults = results;
     appState.userSearchHasMore = results.length >= USER_SEARCH_PER_PAGE;
     if (results.length === 0) showMessage('No users found', 'warning');
   } catch (e) {
     if (!isStale(gen, 'analyze-search-users')) showMessage(e.message || 'User search failed', 'error');
   }
-  appState.loading = false;
+  finishLoading(gen);
   if (!isStale(gen, 'analyze-search-users')) render();
 }
 
@@ -138,7 +138,7 @@ export async function submitCodeSearch(value) {
   const query = (value || '').trim();
   if (!query) return;
   const gen = startAsync('analyze-search-code');
-  appState.loading = true;
+  beginLoading(gen);
   appState.searchQuery = query;
   appState.searchType = 'code';
   appState.codeSelectedRepo = 0;
@@ -148,14 +148,14 @@ export async function submitCodeSearch(value) {
   render();
   try {
     const results = await searchCode(appState.token, query, 1, CODE_SEARCH_PER_PAGE, gen.signal);
-    if (isStale(gen, 'analyze-search-code')) { appState.loading = false; return; }
+    if (isStale(gen, 'analyze-search-code')) { finishLoading(gen); return; }
     appState.codeSearchResults = results;
     appState.codeSearchHasMore = results.length >= CODE_SEARCH_PER_PAGE;
     if (results.length === 0) showMessage('No code results found', 'warning');
   } catch (e) {
     if (!isStale(gen, 'analyze-search-code')) showMessage(e.message || 'Code search failed', 'error');
   }
-  appState.loading = false;
+  finishLoading(gen);
   if (!isStale(gen, 'analyze-search-code')) render();
 }
 
@@ -165,7 +165,7 @@ registerInputHandler('code-search', submitCodeSearch);
 export async function openUserRepos(user) {
   if (!user || !user.login) return;
   const gen = startAsync('analyze-user-repos');
-  appState.loading = true;
+  beginLoading(gen);
   appState.searchType = 'user-repos';
   appState.selectedUser = user;
   appState.analyzeView = 'results';
@@ -182,7 +182,7 @@ export async function openUserRepos(user) {
       getUser(appState.token, user.login, gen.signal).catch(() => null),
       getUserRepos(appState.token, user.login, 1, USER_REPOS_PER_PAGE, gen.signal),
     ]);
-    if (isStale(gen, 'analyze-user-repos')) { appState.loading = false; return; }
+    if (isStale(gen, 'analyze-user-repos')) { finishLoading(gen); return; }
     appState.selectedUser = profile && profile.login ? { ...profile } : user;
     appState.userRepos = repos;
     appState.userReposHasMore = repos.length >= USER_REPOS_PER_PAGE;
@@ -191,7 +191,7 @@ export async function openUserRepos(user) {
   } catch (e) {
     if (!isStale(gen, 'analyze-user-repos')) showMessage(e.message || 'Failed to load user repos', 'error');
   }
-  appState.loading = false;
+  finishLoading(gen);
   if (!isStale(gen, 'analyze-user-repos')) render();
 }
 
@@ -234,7 +234,7 @@ export async function loadMoreSearchResults() {
     : 'analyze-search-repos';
   const scope = getScope(type);
   const gen = startAsync(scope);
-  appState.loading = true;
+  beginLoading(gen);
   render();
   try {
     const page = type === 'users' ? appState.userSearchPage + 1
@@ -243,19 +243,19 @@ export async function loadMoreSearchResults() {
       : appState.searchPage + 1;
     let more;
     if (type === 'users') {
-      if (!appState.userSearchHasMore) { appState.loading = false; render(); return; }
+      if (!appState.userSearchHasMore) { finishLoading(gen); render(); return; }
       more = await searchUsers(appState.token, appState.searchQuery, page, USER_SEARCH_PER_PAGE, gen.signal);
     } else if (type === 'code') {
-      if (!appState.codeSearchHasMore) { appState.loading = false; render(); return; }
+      if (!appState.codeSearchHasMore) { finishLoading(gen); render(); return; }
       more = await searchCode(appState.token, appState.searchQuery, page, CODE_SEARCH_PER_PAGE, gen.signal);
     } else if (type === 'user-repos') {
-      if (!appState.userReposHasMore) { appState.loading = false; render(); return; }
+      if (!appState.userReposHasMore) { finishLoading(gen); render(); return; }
       more = await getUserRepos(appState.token, appState.selectedUser.login, page, USER_REPOS_PER_PAGE, gen.signal);
     } else {
-      if (!appState.searchHasMore) { appState.loading = false; render(); return; }
+      if (!appState.searchHasMore) { finishLoading(gen); render(); return; }
       more = await searchRepositories(appState.token, appState.searchQuery, page, SEARCH_PER_PAGE, gen.signal);
     }
-    if (isStale(gen, scope)) { appState.loading = false; return; }
+    if (isStale(gen, scope)) { finishLoading(gen); return; }
     if (type === 'users') {
       appState.userSearchResults = [...appState.userSearchResults, ...more];
       appState.userSearchPage = page;
@@ -278,7 +278,7 @@ export async function loadMoreSearchResults() {
   } catch (e) {
     if (!isStale(gen, scope)) showMessage(e.message || 'Failed to load more', 'error');
   }
-  appState.loading = false;
+  finishLoading(gen);
   if (!isStale(gen, scope)) render();
 }
 
@@ -288,10 +288,10 @@ export function pageUp() {
     if (type === 'users' && appState.userSearchPage > 1) {
       const page = appState.userSearchPage - 1;
       const gen = startAsync('analyze-search-users');
-      appState.loading = true;
+      beginLoading(gen);
       render();
       searchUsers(appState.token, appState.searchQuery, page, USER_SEARCH_PER_PAGE, gen.signal).then(more => {
-        if (isStale(gen, 'analyze-search-users')) { appState.loading = false; return; }
+        if (isStale(gen, 'analyze-search-users')) { finishLoading(gen); return; }
         if (Array.isArray(more)) {
           appState.userSearchResults = more;
           appState.userSearchPage = page;
@@ -299,16 +299,16 @@ export function pageUp() {
           appState.userSelectedRepo = 0;
           appState.userSearchScroll = 0;
         }
-        appState.loading = false;
+        finishLoading(gen);
         render();
-      }).catch(e => { if (!isStale(gen, 'analyze-search-users')) showMessage(e.message || 'Page up failed', 'error'); appState.loading = false; render(); });
+      }).catch(e => { if (!isStale(gen, 'analyze-search-users')) showMessage(e.message || 'Page up failed', 'error'); finishLoading(gen); render(); });
     } else if (type === 'code' && appState.codeSearchPage > 1) {
       const page = appState.codeSearchPage - 1;
       const gen = startAsync('analyze-search-code');
-      appState.loading = true;
+      beginLoading(gen);
       render();
       searchCode(appState.token, appState.searchQuery, page, CODE_SEARCH_PER_PAGE, gen.signal).then(more => {
-        if (isStale(gen, 'analyze-search-code')) { appState.loading = false; return; }
+        if (isStale(gen, 'analyze-search-code')) { finishLoading(gen); return; }
         if (Array.isArray(more)) {
           appState.codeSearchResults = more;
           appState.codeSearchPage = page;
@@ -316,16 +316,16 @@ export function pageUp() {
           appState.codeSelectedRepo = 0;
           appState.codeSearchScroll = 0;
         }
-        appState.loading = false;
+        finishLoading(gen);
         render();
-      }).catch(e => { if (!isStale(gen, 'analyze-search-code')) showMessage(e.message || 'Page up failed', 'error'); appState.loading = false; render(); });
+      }).catch(e => { if (!isStale(gen, 'analyze-search-code')) showMessage(e.message || 'Page up failed', 'error'); finishLoading(gen); render(); });
     } else if (type === 'user-repos' && appState.userReposPage > 1) {
       const page = appState.userReposPage - 1;
       const gen = startAsync('analyze-user-repos');
-      appState.loading = true;
+      beginLoading(gen);
       render();
       getUserRepos(appState.token, appState.selectedUser.login, page, USER_REPOS_PER_PAGE, gen.signal).then(more => {
-        if (isStale(gen, 'analyze-user-repos')) { appState.loading = false; return; }
+        if (isStale(gen, 'analyze-user-repos')) { finishLoading(gen); return; }
         if (Array.isArray(more)) {
           appState.userRepos = more;
           appState.userReposPage = page;
@@ -334,16 +334,16 @@ export function pageUp() {
           appState.userReposScroll = 0;
           applyUserReposSort();
         }
-        appState.loading = false;
+        finishLoading(gen);
         render();
-      }).catch(e => { if (!isStale(gen, 'analyze-user-repos')) showMessage(e.message || 'Page up failed', 'error'); appState.loading = false; render(); });
+      }).catch(e => { if (!isStale(gen, 'analyze-user-repos')) showMessage(e.message || 'Page up failed', 'error'); finishLoading(gen); render(); });
     } else if (type === 'repos' && appState.searchPage > 1) {
       const page = appState.searchPage - 1;
       const gen = startAsync('analyze-search-repos');
-      appState.loading = true;
+      beginLoading(gen);
       render();
       searchRepositories(appState.token, appState.searchQuery, page, SEARCH_PER_PAGE, gen.signal).then(more => {
-        if (isStale(gen, 'analyze-search-repos')) { appState.loading = false; return; }
+        if (isStale(gen, 'analyze-search-repos')) { finishLoading(gen); return; }
         if (Array.isArray(more)) {
           appState.searchResults = more;
           appState.searchPage = page;
@@ -351,9 +351,9 @@ export function pageUp() {
           appState.selectedRepo = 0;
           appState.searchScroll = 0;
         }
-        appState.loading = false;
+        finishLoading(gen);
         render();
-      }).catch(e => { if (!isStale(gen, 'analyze-search-repos')) showMessage(e.message || 'Page up failed', 'error'); appState.loading = false; render(); });
+      }).catch(e => { if (!isStale(gen, 'analyze-search-repos')) showMessage(e.message || 'Page up failed', 'error'); finishLoading(gen); render(); });
     }
   }
 }
@@ -364,10 +364,10 @@ export function pageDown() {
     if (type === 'users' && appState.userSearchHasMore) {
       const page = appState.userSearchPage + 1;
       const gen = startAsync('analyze-search-users');
-      appState.loading = true;
+      beginLoading(gen);
       render();
       searchUsers(appState.token, appState.searchQuery, page, USER_SEARCH_PER_PAGE, gen.signal).then(more => {
-        if (isStale(gen, 'analyze-search-users')) { appState.loading = false; return; }
+        if (isStale(gen, 'analyze-search-users')) { finishLoading(gen); return; }
         if (Array.isArray(more) && more.length > 0) {
           appState.userSearchResults = [...appState.userSearchResults, ...more];
           appState.userSearchPage = page;
@@ -375,16 +375,16 @@ export function pageDown() {
         } else {
           appState.userSearchHasMore = false;
         }
-        appState.loading = false;
+        finishLoading(gen);
         render();
-      }).catch(e => { if (!isStale(gen, 'analyze-search-users')) showMessage(e.message || 'Page down failed', 'error'); appState.loading = false; render(); });
+      }).catch(e => { if (!isStale(gen, 'analyze-search-users')) showMessage(e.message || 'Page down failed', 'error'); finishLoading(gen); render(); });
     } else if (type === 'code' && appState.codeSearchHasMore) {
       const page = appState.codeSearchPage + 1;
       const gen = startAsync('analyze-search-code');
-      appState.loading = true;
+      beginLoading(gen);
       render();
       searchCode(appState.token, appState.searchQuery, page, CODE_SEARCH_PER_PAGE, gen.signal).then(more => {
-        if (isStale(gen, 'analyze-search-code')) { appState.loading = false; return; }
+        if (isStale(gen, 'analyze-search-code')) { finishLoading(gen); return; }
         if (Array.isArray(more) && more.length > 0) {
           appState.codeSearchResults = [...appState.codeSearchResults, ...more];
           appState.codeSearchPage = page;
@@ -392,16 +392,16 @@ export function pageDown() {
         } else {
           appState.codeSearchHasMore = false;
         }
-        appState.loading = false;
+        finishLoading(gen);
         render();
-      }).catch(e => { if (!isStale(gen, 'analyze-search-code')) showMessage(e.message || 'Page down failed', 'error'); appState.loading = false; render(); });
+      }).catch(e => { if (!isStale(gen, 'analyze-search-code')) showMessage(e.message || 'Page down failed', 'error'); finishLoading(gen); render(); });
     } else if (type === 'user-repos' && appState.userReposHasMore) {
       const page = appState.userReposPage + 1;
       const gen = startAsync('analyze-user-repos');
-      appState.loading = true;
+      beginLoading(gen);
       render();
       getUserRepos(appState.token, appState.selectedUser.login, page, USER_REPOS_PER_PAGE, gen.signal).then(more => {
-        if (isStale(gen, 'analyze-user-repos')) { appState.loading = false; return; }
+        if (isStale(gen, 'analyze-user-repos')) { finishLoading(gen); return; }
         if (Array.isArray(more) && more.length > 0) {
           appState.userRepos = [...appState.userRepos, ...more];
           appState.userReposPage = page;
@@ -410,16 +410,16 @@ export function pageDown() {
         } else {
           appState.userReposHasMore = false;
         }
-        appState.loading = false;
+        finishLoading(gen);
         render();
-      }).catch(e => { if (!isStale(gen, 'analyze-user-repos')) showMessage(e.message || 'Page down failed', 'error'); appState.loading = false; render(); });
+      }).catch(e => { if (!isStale(gen, 'analyze-user-repos')) showMessage(e.message || 'Page down failed', 'error'); finishLoading(gen); render(); });
     } else if (type === 'repos' && appState.searchHasMore) {
       const page = appState.searchPage + 1;
       const gen = startAsync('analyze-search-repos');
-      appState.loading = true;
+      beginLoading(gen);
       render();
       searchRepositories(appState.token, appState.searchQuery, page, SEARCH_PER_PAGE, gen.signal).then(more => {
-        if (isStale(gen, 'analyze-search-repos')) { appState.loading = false; return; }
+        if (isStale(gen, 'analyze-search-repos')) { finishLoading(gen); return; }
         if (Array.isArray(more) && more.length > 0) {
           appState.searchResults = [...appState.searchResults, ...more];
           appState.searchPage = page;
@@ -427,9 +427,9 @@ export function pageDown() {
         } else {
           appState.searchHasMore = false;
         }
-        appState.loading = false;
+        finishLoading(gen);
         render();
-      }).catch(e => { if (!isStale(gen, 'analyze-search-repos')) showMessage(e.message || 'Page down failed', 'error'); appState.loading = false; render(); });
+      }).catch(e => { if (!isStale(gen, 'analyze-search-repos')) showMessage(e.message || 'Page down failed', 'error'); finishLoading(gen); render(); });
     }
   }
 }
@@ -453,7 +453,7 @@ export function renderSearchInput(screen, y, h) {
     const shown = appState.inputMask
       ? '*'.repeat(appState.inputBuffer.length) : appState.inputBuffer;
     screen.writeStr(4, inputY + 1,
-      (appState.inputPrompt + shown + '_').substring(0, inputW - 2), { fg: 'cyan', underline: true });
+      truncateToWidth(appState.inputPrompt + shown + '_', inputW - 2, ''), { fg: 'cyan', underline: true });
   } else {
     screen.writeStr(4, inputY + 1, placeholder, { dim: true });
   }
@@ -496,90 +496,46 @@ export function renderSearchInput(screen, y, h) {
 }
 
 function renderExploreLanding(screen, y, h) {
+  // Compact, viewport-first landing: the default 24-row terminal should
+  // never expose keyboard targets that are below the footer. The selected
+  // rows are a single painted list, so Enter and mouse bounds stay in parity.
   const W = screen.width;
-  const splitX = Math.floor(W / 2);
-  const leftX = 2;
-  const rightX = splitX + 2;
-  const leftW = splitX - leftX - 2;
-  const rightW = W - rightX - 2;
   const landing = getExploreLanding();
-  const sel = appState.exploreSel;
-  const bounds = { trending: null, saved: null, recent: null };
+  const bottom = Math.min(screen.height - 2, y + Math.max(1, h) - 1);
+  const maxRows = Math.max(1, bottom - y - 2);
+  const visible = landing.slice(0, maxRows);
+  const sel = Math.min(appState.exploreSel, Math.max(0, visible.length - 1));
+  appState.exploreSel = sel;
+  appState._exploreVisibleItems = visible;
+  appState._exploreBounds = { list: { x: 2, y: y + 2, count: visible.length, startIdx: 0 } };
 
-  const selectRow = (x, row, itemIdx, colW) => {
-    if (itemIdx !== sel) return;
-    for (let c = 0; c < colW; c++) screen.styleBuf[row][x + c] = color('selection');
-  };
-
-  // ── LEFT: Trending this week ──────────────────────────────────
-  let ly = y;
-  let gi = 0; // global index into the merged landing list
-  sectionHeader(screen, leftX, ly, '🔥 TRENDING THIS WEEK');
-  ly++;
-  screen.writeStr(leftX, ly, '─'.repeat(Math.max(2, leftW)), { dim: true });
-  ly++;
-  if (appState.trending.length === 0) {
-    screen.writeStr(leftX, ly, appState.token ? 'Loading trending…' : 'Sign in to load trending', { dim: true });
-    ly++;
-  }
-  const trendCount = Math.min(appState.trending.length, EXPLORE_MAX_TRENDING);
-  for (let i = 0; i < trendCount; i++) {
-    if (ly > y + h - 2) break;
-    const repo = appState.trending[i];
-    selectRow(leftX, ly, gi, leftW);
-    screen.writeStr(leftX, ly, gi === sel ? '▶ ' : '  ', gi === sel ? color('selection') : color('dim'));
-    const name = truncate(repo.full_name || '?', Math.max(8, Math.min(26, leftW - 12)));
-    screen.writeStr(leftX + 2, ly, name, gi === sel ? color('selection') : color('repoName'));
-    const stats = '★ ' + shortNum(repo.stargazers_count || 0) +
-      (repo.language ? '  ' + repo.language : '');
-    screen.writeStr(Math.min(leftX + 28, leftX + leftW - 10), ly, truncate(stats, Math.max(6, leftW - 12)), gi === sel ? color('selection') : color('dim'));
-    ly++;
-    gi++;
-  }
-  bounds.trending = { x: leftX, y, count: trendCount, startIdx: 0 };
-
-  // ── RIGHT: Saved searches + Recent ────────────────────────────
-  let ry = y;
-  sectionHeader(screen, rightX, ry, '⭐ SAVED SEARCHES');
-  ry++;
-  if (appState.savedSearches.length === 0) {
-    screen.writeStr(rightX, ry, 'None yet — save a query with [Ctrl-P]', { dim: true });
-    ry++;
-  }
-  const savedCount = Math.min(appState.savedSearches.length, EXPLORE_MAX_SAVED);
-  for (let i = 0; i < savedCount; i++) {
-    if (ry > y + h - 2) break;
-    const s = appState.savedSearches[i];
-    selectRow(rightX, ry, gi, rightW);
-    screen.writeStr(rightX, ry, gi === sel ? '▶ ' : '  ', gi === sel ? color('selection') : color('dim'));
-    screen.writeStr(rightX + 2, ry, truncate(s.label || s.query || '?', Math.max(8, Math.min(20, rightW - 2))), gi === sel ? color('selection') : color('repoName'));
-    screen.writeStr(Math.min(rightX + 24, rightX + rightW - 14), ry, truncate(s.query || '', Math.max(6, rightW - 24)), gi === sel ? color('selection') : color('dim'));
-    ry++;
-    gi++;
-  }
-  bounds.saved = { x: rightX, y, count: savedCount, startIdx: gi - savedCount };
-  ry++;
-
-  if (appState.recentRepos.length > 0) {
-    sectionHeader(screen, rightX, ry, '🕘 RECENT');
-    ry++;
-    const recentCount = Math.min(appState.recentRepos.length, EXPLORE_MAX_RECENT);
-    for (let i = 0; i < recentCount; i++) {
-      if (ry > y + h - 2) break;
-      const r = appState.recentRepos[i];
-      selectRow(rightX, ry, gi, rightW);
-      screen.writeStr(rightX, ry, gi === sel ? '▶ ' : '  ', gi === sel ? color('selection') : color('dim'));
-      screen.writeStr(rightX + 2, ry, truncate(r.full_name || '?', Math.max(8, Math.min(24, rightW - 2))), gi === sel ? color('selection') : color('repoName'));
-      if (r.description) {
-        screen.writeStr(rightX + 28, ry, truncate(r.description, Math.max(4, rightW - 28)), gi === sel ? color('selection') : color('dim'));
-      }
-      ry++;
-      gi++;
+  screen.writeStr(2, y, 'EXPLORE', color('title') || { fg: 'white', bold: true });
+  screen.writeStr(12, y, visible.length + '/' + landing.length + ' visible', { dim: true });
+  screen.hline(y + 1, '─', { dim: true });
+  for (let i = 0; i < visible.length; i++) {
+    const item = visible[i];
+    const row = y + 2 + i;
+    const selected = i === sel;
+    for (let x = 0; selected && x < W; x++) screen.styleBuf[row][x] = color('selection');
+    const prefix = selected ? '▶ ' : '  ';
+    let label;
+    let detail = '';
+    if (item.kind === 'trending') {
+      label = 'Trending  ' + (item.repo?.full_name || '?');
+      detail = '★ ' + shortNum(item.repo?.stargazers_count || 0);
+    } else if (item.kind === 'saved') {
+      label = 'Saved      ' + (item.search?.label || item.search?.query || '?');
+      detail = item.search?.query || '';
+    } else {
+      label = 'Recent     ' + (item.repo?.full_name || '?');
+      detail = item.repo?.description || '';
     }
-    bounds.recent = { x: rightX, y, count: recentCount, startIdx: gi - recentCount };
+    screen.writeStr(2, row, prefix + truncate(label, Math.max(10, W - 30)), selected ? color('selection') : color('repoName'));
+    if (detail) screen.writeStr(Math.max(20, W - Math.min(28, Math.max(8, detail.length)) - 2), row, truncate(detail, 26), selected ? color('selection') : color('dim'));
   }
-
-  appState._exploreBounds = bounds;
+  if (landing.length > visible.length) {
+    screen.writeStr(2, bottom, '↓ ' + (landing.length - visible.length) + ' more — search to narrow this list', { dim: true });
+  }
 }
 
 export function renderResultsList(screen, y, h) {

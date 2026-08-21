@@ -1,7 +1,8 @@
 // Settings tab — login/logout, refresh actions, system info panel.
 // v0.5+ polish: sectioned panels with clearer hierarchy, system info in its own box.
 
-import { appState, render, startAsync, isStale, showMessage, confirm } from '../state.mjs';
+import { appState, render, startAsync, isStale, showMessage, confirm,
+  beginLoading, finishLoading, setManualLoading, resetAccountState } from '../state.mjs';
 import {
   APP_VERSION, CONFIG_DIR, TOKEN_FILE, saveToken, removeToken,
   tokenStorageBackend,
@@ -14,7 +15,7 @@ import { startInput, registerInputHandler } from '../input.mjs';
 import { color, listThemes, getThemeName, setTheme } from '../theme.mjs';
 import { refreshDashboard, loadDashboardWidgets } from './dashboard.mjs';
 import { loadUserData, loadAllReposBackground } from './repos.mjs';
-import { openUrl } from '../utils.mjs';
+import { openUrl, truncateToWidth, displayWidth } from '../utils.mjs';
 import { starRepo as apiStarRepo } from '../github.mjs';
 import { execFile } from 'child_process';
 import { promisify } from 'util';
@@ -50,19 +51,19 @@ export async function getGhToken() {
 // Login via GitHub CLI — reads the token from `gh auth token`.
 export async function loginWithGh() {
   const gen = startAsync('login');
-  appState.loading = true;
+  beginLoading(gen);
   render();
   try {
     const token = await getGhToken();
-    if (isStale(gen, 'login')) { appState.loading = false; return; }
+    if (isStale(gen, 'login')) { finishLoading(gen); return; }
     if (!token) {
       showMessage('GitHub CLI not logged in — run "gh auth login" first', 'warning', 6000);
-      appState.loading = false;
+      finishLoading(gen);
       render();
       return;
     }
     const user = await getAuthenticatedUser(token, gen.signal);
-    if (isStale(gen, 'login')) { appState.loading = false; return; }
+    if (isStale(gen, 'login')) { finishLoading(gen); return; }
     if (user) {
       saveToken(token);
       appState.token = token;
@@ -80,7 +81,7 @@ export async function loginWithGh() {
   } catch (e) {
     if (!isStale(gen, 'login')) showMessage(e.message || 'GitHub CLI login failed', 'error');
   }
-  appState.loading = false;
+  finishLoading(gen);
   if (!isStale(gen, 'login')) render();
 }
 
@@ -90,11 +91,11 @@ export async function submitLogin(value) {
   const token = (value || '').trim();
   if (!token) { showMessage('Token cannot be empty', 'error'); render(); return; }
   const gen = startAsync('login');
-  appState.loading = true;
+  beginLoading(gen);
   render();
   try {
     const user = await getAuthenticatedUser(token, gen.signal);
-    if (isStale(gen, 'login')) { appState.loading = false; return; }
+    if (isStale(gen, 'login')) { finishLoading(gen); return; }
     if (user) {
       // Attempt to persist the token to OS keychain first. If that fails
       // we NEVER set the in-memory token — fail loudly so the user knows
@@ -128,93 +129,19 @@ export async function submitLogin(value) {
   } catch (e) {
     if (!isStale(gen, 'login')) showMessage(e.message || 'Login failed', 'error');
   }
-  appState.loading = false;
+  finishLoading(gen);
   if (!isStale(gen, 'login')) render();
 }
 registerInputHandler('login', submitLogin);
 
 export async function handleLogout() {
-  // Invalidate account-scoped requests before clearing their data. The
-  // generation bump aborts active requests and prevents late responses from
-  // repopulating the UI after logout.
-  for (const scope of [
-    'login', 'repos', 'repos-more', 'dashboard-widgets', 'dashboard-trending',
-    'inbox', 'inbox-more', 'inbox-page', 'actions-runs', 'actions-jobs',
-    'analyze-details', 'analyze-search-repos', 'analyze-search-users',
-    'analyze-search-code', 'analyze-user-profile', 'forks', 'forks-more',
-    'analyze-labels', 'analyze-checks', 'analyze-issues', 'analyze-traffic',
-    'analyze-milestones', 'analyze-readme', 'analyze-packages',
-    'analyze-security', 'files-tree', 'files-view', 'files-branches', 'files-bulk', 'detail',
-  ]) startAsync(scope);
-
-  appState.token = null;
-  appState.user = null;
-  appState.repos = [];
-  appState.reposPage = 1;
-  appState.reposHasMore = true;
-  appState.repoSelected = 0;
-  appState.repoScroll = 0;
-  appState.events = [];
-  appState.trending = [];
-  appState.trendingPage = 1;
-  appState.trendingHasMore = true;
-  appState.notifications = [];
-  appState.inboxPage = 1;
-  appState.inboxHasMore = false;
-  appState.selectedNotification = 0;
-  appState.starred = [];
-  appState.starredPage = 1;
-  appState.starredHasMore = false;
-  appState.entityCache = {};
-  appState.actionsRepos = [];
-  appState.actionsRuns = [];
-  appState.actionsJobs = {};
-  appState.repoDetails = null;
-  appState.repoLanguages = null;
-  appState.repoContributors = [];
-  appState.repoReleases = [];
-  appState.repoReleaseAssets = [];
-  appState.repoIssues = [];
-  appState.repoPullRequests = [];
-  appState.repoTraffic = null;
-  appState.repoTrafficClones = null;
-  appState.repoTrafficPopularPaths = [];
-  appState.repoTrafficPopularReferrers = [];
-  appState.repoMilestones = [];
-  appState.repoLabels = [];
-  appState.repoCheckRuns = [];
-  appState.repoCheckSuites = [];
-  appState.repoDependabotAlerts = [];
-  appState.secretScanningAlerts = [];
-  appState.codeScanningAlerts = [];
-  appState.securityAdvisories = [];
-  appState.branchProtection = null;
-  appState.dependencyManifests = [];
-  appState.forks = [];
-  appState.searchResults = [];
-  appState.userSearchResults = [];
-  appState.codeSearchResults = [];
-  appState.filesEntries = [];
-  appState.filesBranches = [];
-  appState.filesPath = '';
-  appState.fileViewing = null;
-  appState.fileText = '';
-  appState._readmeText = null;
-  appState.showDetail = false;
-  appState.detailData = null;
-  appState.detailComments = [];
-  appState.detailReviews = [];
-  appState.detailFiles = [];
-  appState.detailDiffContent = '';
-  appState.detailDiffFile = null;
-  appState.securityAlertDetail = null;
-  appState.dashboardRecentIssues = [];
-  appState.dashboardRecentPRs = [];
-  appState.dashboardAttentionItems = [];
-  appState.dashboardContributions = null;
-  appState.dashboardStarHistory = [];
-  appState.dashboardLoaded = false;
-  appState.loading = false;
+  // Clear account-scoped cache/freshness metadata before dropping the token;
+  // otherwise a later session can inherit misleading ages or cached bodies.
+  const oldToken = appState.token;
+  if (oldToken) clearAccountCache(oldToken);
+  // One account epoch invalidates every active/paginated request, including
+  // scopes added by future panes. Private state is reset in one place.
+  resetAccountState();
   removeToken();
   showMessage('Logged out', 'success');
   render();
@@ -230,7 +157,7 @@ function sectionHeader(screen, x, y, text, maxW) {
   // Local extension of utils.sectionHeader that ALSO draws an underline row
   // at y+1 — used for the Settings tab's left-column dividers.
   screen.writeStr(x, y, text, { fg: 'cyan', bold: true });
-  const underlineEnd = Math.min(x + text.length + 4, maxW || screen.width);
+  const underlineEnd = Math.min(x + displayWidth(text) + 4, maxW || screen.width);
   for (let i = x; i < underlineEnd; i++) {
     screen.setCell(i, y + 1, '─', { dim: true });
   }
@@ -251,8 +178,8 @@ function renderRow(screen, y, W, label, desc, enabled, selected, labelStyleOverr
   screen.writeStr(4, y, label, labelStyle);
   // Right-align description within the row's allowed width.
   const maxX = W - 2;
-  const descX = Math.max(4 + label.length + 2, maxX - desc.length);
-  screen.writeStr(descX, y, desc.substring(0, Math.max(0, maxX - descX)), descStyle);
+  const descX = Math.max(4 + displayWidth(label) + 2, maxX - displayWidth(desc));
+  screen.writeStr(descX, y, truncateToWidth(desc, Math.max(0, maxX - descX), ''), descStyle);
 }
 
 export function renderSettings(screen, y, h) {
@@ -475,15 +402,15 @@ function renderSystemPanel(screen, x, y, w, h, screenW) {
     const [k, v, c] = lines[i];
     screen.writeStr(x + 2, y + 2 + i, k + ':', { dim: true });
     const val = String(v);
-    const valX = x + Math.min(16, w - val.length - 4);
-    screen.writeStr(valX, y + 2 + i, val.substring(0, w - (valX - x) - 2), c || { fg: 'white' });
+    const valX = x + Math.min(16, w - displayWidth(val) - 4);
+    screen.writeStr(valX, y + 2 + i, truncateToWidth(val, w - (valX - x) - 2, ''), c || { fg: 'white' });
   }
 }
 
 function renderSystemLines(screen, y, W, screenW) {
   const lines = buildSystemLines(screenW);
   const items = lines.map(([k, v]) => k + ': ' + v).join('   ');
-  screen.writeStr(2, y, items.substring(0, W - 4), { dim: true });
+  screen.writeStr(2, y, truncateToWidth(items, W - 4, ''), { dim: true });
 }
 
 function buildSystemLines(screenW) {
@@ -604,7 +531,7 @@ export function isSettingsCursorEnabled(cursor, ghReady = appState._ghAvailable 
 }
 
 function isCursorEnabled(cursor) {
-  return isSettingsCursorEnabled(cursor);
+  return isSettingsCursorEnabled(cursor, appState._ghAvailable === true);
 }
 
 export function up() {
@@ -651,10 +578,10 @@ export function enter() {
       break;
     case 3:
       if (isLoggedIn) {
-        appState.loading = true;
+        setManualLoading(true);
         render();
         refreshDashboard().finally(() => {
-          appState.loading = false;
+          setManualLoading(false);
           render();
         });
         showMessage('Refreshing dashboard...', 'info');
@@ -662,9 +589,9 @@ export function enter() {
       break;
     case 4:
       if (isLoggedIn) {
-        appState.loading = true;
+        setManualLoading(true);
         render();
-        loadUserData().finally(() => { appState.loading = false; render(); });
+        loadUserData().finally(() => { setManualLoading(false); render(); });
         showMessage('Refreshing user data...', 'info');
       }
       break;

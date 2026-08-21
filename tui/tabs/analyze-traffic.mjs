@@ -1,6 +1,6 @@
 // Traffic sub-pane — load and render repo traffic views, clones, paths, referrers.
 
-import { appState, render, startAsync, isStale, showMessage } from '../state.mjs';
+import { appState, render, startAsync, isStale, showMessage, beginLoading, finishLoading } from '../state.mjs';
 import {
   getRepoTrafficViews, getRepoTrafficClones,
   getRepoTrafficPopularPaths, getRepoTrafficPopularReferrers,
@@ -12,7 +12,7 @@ export async function loadTraffic() {
   const repo = appState.repoDetails;
   if (!repo) return;
   const gen = startAsync('analyze-traffic');
-  appState.loading = true;
+  beginLoading(gen);
   appState.repoTraffic = null;
   appState.repoTrafficClones = null;
   appState.repoTrafficPopularPaths = [];
@@ -27,7 +27,7 @@ export async function loadTraffic() {
       safe(getRepoTrafficPopularPaths(appState.token, owner, name, gen.signal)),
       safe(getRepoTrafficPopularReferrers(appState.token, owner, name, gen.signal)),
     ]);
-    if (isStale(gen)) { appState.loading = false; return; }
+    if (isStale(gen)) { finishLoading(gen); return; }
     appState.repoTraffic = views;
     appState.repoTrafficClones = clones;
     appState.repoTrafficPopularPaths = Array.isArray(paths) ? paths : [];
@@ -35,7 +35,7 @@ export async function loadTraffic() {
   } catch (e) {
     if (!isStale(gen)) showMessage('Failed to load traffic: ' + e.message, 'error');
   }
-  appState.loading = false;
+  finishLoading(gen);
   if (!isStale(gen)) render();
 }
 

@@ -1,7 +1,8 @@
 // Repos tab — your personal repositories.
 // v0.5+ polish: dismissable filter chips, cleaner density, better selected row.
 
-import { appState, render, startAsync, isStale, showMessage, setTab, upsertEntity } from '../state.mjs';
+import { appState, render, startAsync, isStale, showMessage, setTab, upsertEntity,
+  beginLoading, finishLoading, resetAccountState } from '../state.mjs';
 import { getAuthenticatedUser, getUserRepositories, getStarredRepos, isStarred, starRepo, unstarRepo } from '../github.mjs';
 import { removeToken } from '../config.mjs';
 import { startInput, registerInputHandler } from '../input.mjs';
@@ -83,30 +84,29 @@ function clearFilterChip(kind) {
 
 // ─── Loaders ──────────────────────────────────────────────────────
 
-export async function loadUserData({ loadDashboard = true } = {}) {
+export async function loadUserData({ loadDashboard = true, awaitBackground = false } = {}) {
   if (!appState.token) return;
   const gen = startAsync('repos');
-  appState.loading = true;
+  beginLoading(gen);
   render();
   try {
     appState.user = await getAuthenticatedUser(appState.token, gen.signal);
-    if (isStale(gen, 'repos')) { appState.loading = false; return; }
+    if (isStale(gen, 'repos')) { finishLoading(gen); return; }
     if (appState.user) {
       appState.repos = await getUserRepositories(appState.token, 1, REPOS_PER_PAGE, gen.signal);
       appState.reposPage = 1;
       appState.reposHasMore = appState.repos.length >= REPOS_PER_PAGE;
-      if (isStale(gen, 'repos')) { appState.loading = false; return; }
-      loadAllReposBackground(gen);
+      if (isStale(gen, 'repos')) { finishLoading(gen); return; }
+      const background = loadAllReposBackground(gen);
+      if (awaitBackground) await background;
       if (loadDashboard) loadDashboardWidgets().catch(() => {});
     }
   } catch (e) {
     if (!isStale(gen, 'repos')) {
       const msg = (e && e.message) || '';
       if (/401|Bad credentials|Unauthorized/i.test(msg)) {
+        resetAccountState();
         removeToken();
-        appState.token = null;
-        appState.user = null;
-        appState.repos = [];
         setTab(5);
         showError('Token rejected', 'Authentication', { retry: loadUserData });
       } else {
@@ -114,7 +114,7 @@ export async function loadUserData({ loadDashboard = true } = {}) {
       }
     }
   }
-  appState.loading = false;
+  finishLoading(gen);
   if (!isStale(gen, 'repos')) render();
 }
 
@@ -125,18 +125,27 @@ export async function loadAllReposBackground(gen) {
   const MAX_PAGES = 1000;
   let page = 2;
   let capped = false;
+  // Background pagination shares the account generation but owns a separate
+  // loading contribution; the foreground first-page request may finish while
+  // this work continues.
+  const loadingHandle = { ...gen, scope: 'repos-background' };
+  beginLoading(loadingHandle);
+  try {
   while (appState.reposHasMore && page <= MAX_PAGES) {
     try {
       const more = await getUserRepositories(appState.token, page, REPOS_PER_PAGE, gen.signal);
-      if (isStale(gen, 'repos')) { appState.loading = false; return; }
+      if (isStale(gen, 'repos')) { finishLoading(loadingHandle); return; }
       appState.repos = [...appState.repos, ...more];
+      // Actions consumes a snapshot of repositories; keep it complete while
+      // background pagination discovers additional account repos.
+      if (appState.actionsView === 'repos') appState.actionsRepos = appState.repos;
       appState.reposPage = page;
       appState.reposHasMore = more.length >= REPOS_PER_PAGE;
       recomputeDashboardDerived();
       page++;
     } catch (e) {
       if (!isStale(gen, 'repos')) showError(((e && e.message) || 'unknown'), 'Background repo load', { retry: () => loadAllReposBackground(gen) });
-      appState.loading = false;
+      finishLoading(loadingHandle);
       return;
     }
   }
@@ -152,18 +161,21 @@ export async function loadAllReposBackground(gen) {
       'info', 6000
     );
   }
+  } finally {
+    finishLoading(loadingHandle);
+  }
   if (!isStale(gen, 'repos')) render();
 }
 
 export async function loadMoreRepos() {
   if (!appState.token || !appState.reposHasMore) return;
   const gen = startAsync('repos');
-  appState.loading = true;
+  beginLoading(gen);
   render();
   try {
     const page = appState.reposPage + 1;
     const more = await getUserRepositories(appState.token, page, REPOS_PER_PAGE, gen.signal);
-    if (isStale(gen, 'repos')) { appState.loading = false; return; }
+    if (isStale(gen, 'repos')) { finishLoading(gen); return; }
     appState.repos = [...appState.repos, ...more];
     appState.reposPage = page;
     appState.reposHasMore = more.length >= REPOS_PER_PAGE;
@@ -172,7 +184,7 @@ export async function loadMoreRepos() {
   } catch (e) {
     if (!isStale(gen, 'repos')) showMessage('Failed to load more repos', 'error');
   }
-  appState.loading = false;
+  finishLoading(gen);
   if (!isStale(gen, 'repos')) render();
 }
 
@@ -569,14 +581,14 @@ function _seedStarredCache() {
 async function loadStarredRepos() {
   if (!appState.token) return;
   const gen = startAsync('repos');
-  appState.loading = true;
+  beginLoading(gen);
   render();
   try {
     const starred = await getStarredRepos(appState.token, 1, 100, gen.signal);
-    if (isStale(gen, 'repos')) { appState.loading = false; return; }
+    if (isStale(gen, 'repos')) { finishLoading(gen); return; }
     appState.starred = Array.isArray(starred) ? starred.map(s => ({
       ...s.repo,
-      starred_at: s.created_at,
+      starred_at: s.starred_at || s.repo?.starred_at || null,
     })) : [];
     _seedStarredCache();
     appState.starredPage = 1;
@@ -585,21 +597,21 @@ async function loadStarredRepos() {
   } catch (e) {
     if (!isStale(gen, 'repos')) showMessage('Failed to load starred repos: ' + e.message, 'error');
   }
-  appState.loading = false;
+  finishLoading(gen);
   if (!isStale(gen, 'repos')) render();
 }
 
 export async function loadMoreStarred() {
   if (!appState.token || !appState.starredHasMore) return;
   const gen = startAsync('repos');
-  appState.loading = true;
+  beginLoading(gen);
   render();
   try {
     const page = appState.starredPage + 1;
     const more = await getStarredRepos(appState.token, page, 100, gen.signal);
-    if (isStale(gen, 'repos')) { appState.loading = false; return; }
+    if (isStale(gen, 'repos')) { finishLoading(gen); return; }
     if (Array.isArray(more) && more.length > 0) {
-      const mapped = more.map(s => ({ ...(s.repo || s), starred_at: s.starred_at || s.created_at }));
+      const mapped = more.map(s => ({ ...(s.repo || s), starred_at: s.starred_at || s.repo?.starred_at || null }));
       appState.starred = [...appState.starred, ...mapped];
       // Seed only the newly-mapped delta — previously-seeds stay valid.
       // Full re-seed via _seedStarredCache() would re-upsert every page.
@@ -614,7 +626,7 @@ export async function loadMoreStarred() {
   } catch (e) {
     if (!isStale(gen, 'repos')) showMessage('Failed to load more starred repos', 'error');
   }
-  appState.loading = false;
+  finishLoading(gen);
   if (!isStale(gen, 'repos')) render();
 }
 
@@ -622,23 +634,23 @@ export function pageUp() {
   if (appState.reposView === 'starred' && appState.starredPage > 1) {
     const page = appState.starredPage - 1;
     const gen = startAsync('repos');
-    appState.loading = true;
+    beginLoading(gen);
     render();
     getStarredRepos(appState.token, page, 100, gen.signal).then(more => {
-      if (isStale(gen, 'repos')) { appState.loading = false; return; }
+      if (isStale(gen, 'repos')) { finishLoading(gen); return; }
       if (Array.isArray(more)) {
-        appState.starred = more.map(s => ({ ...(s.repo || s), starred_at: s.starred_at || s.created_at }));
+        appState.starred = more.map(s => ({ ...(s.repo || s), starred_at: s.starred_at || s.repo?.starred_at || null }));
         _seedStarredCache();
         appState.starredPage = page;
         appState.starredHasMore = more.length >= 100;
         appState.starredSelected = 0;
         appState.starredScroll = 0;
       }
-      appState.loading = false;
+      finishLoading(gen);
       render();
     }).catch((e) => {
       if (!isStale(gen, 'repos')) showMessage('Failed to load starred page: ' + ((e && e.message) || 'unknown'), 'error');
-      appState.loading = false;
+      finishLoading(gen);
       if (!isStale(gen, 'repos')) render();
     });
   }
@@ -648,12 +660,12 @@ export function pageDown() {
   if (appState.reposView === 'starred' && appState.starredHasMore) {
     const page = appState.starredPage + 1;
     const gen = startAsync('repos');
-    appState.loading = true;
+    beginLoading(gen);
     render();
     getStarredRepos(appState.token, page, 100, gen.signal).then(more => {
-      if (isStale(gen, 'repos')) { appState.loading = false; return; }
+      if (isStale(gen, 'repos')) { finishLoading(gen); return; }
       if (Array.isArray(more) && more.length > 0) {
-        appState.starred = more.map(s => ({ ...(s.repo || s), starred_at: s.starred_at || s.created_at }));
+        appState.starred = more.map(s => ({ ...(s.repo || s), starred_at: s.starred_at || s.repo?.starred_at || null }));
         _seedStarredCache();
         appState.starredPage = page;
         appState.starredHasMore = more.length >= 100;
@@ -662,11 +674,11 @@ export function pageDown() {
       } else {
         appState.starredHasMore = false;
       }
-      appState.loading = false;
+      finishLoading(gen);
       render();
     }).catch((e) => {
       if (!isStale(gen, 'repos')) showMessage('Failed to load starred page: ' + ((e && e.message) || 'unknown'), 'error');
-      appState.loading = false;
+      finishLoading(gen);
       if (!isStale(gen, 'repos')) render();
     });
   }

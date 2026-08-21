@@ -16,7 +16,7 @@ import {
 import * as palette from './palette.mjs';
 import * as onboarding from './tabs/onboarding.mjs';
 import { handleInputKey } from './input.mjs';
-import { copyToClipboard, openUrl, notificationToHtmlUrl } from './utils.mjs';
+import { copyToClipboard, openUrl, notificationToHtmlUrl, getLastClipboardMethod, getClipboardTempFilePath } from './utils.mjs';
 import { startInput, registerInputHandler } from './input.mjs';
 import * as bookmarks from './bookmarks.mjs';
 
@@ -99,8 +99,12 @@ async function openCurrent() {
 function copyCurrentUrl() {
   const url = currentUrl();
   if (!url) { showMessage('Nothing to copy', 'warning'); return; }
-  if (copyToClipboard(url)) showMessage('Copied to clipboard', 'success');
-  else showMessage('Clipboard copy failed', 'error');
+  if (copyToClipboard(url)) {
+    const method = getLastClipboardMethod();
+    const tmp = getClipboardTempFilePath();
+    showMessage(method === 'temp-file' && tmp ? 'Saved copy to ' + tmp :
+      method === 'tmux' ? 'Copied to tmux buffer' : 'Copied to clipboard', 'success');
+  } else showMessage('Clipboard copy failed', 'error');
 }
 
 let _starToggling = false;
@@ -568,7 +572,10 @@ export function handleKey(key) {
   const inFilesSubPane = tabState.current === 2
     && appState.analyzeView === 'details'
     && appState.detailsPane === 'files';
-  if (key === 's' && !inFilesSubPane) {
+  // Analyze owns lowercase `s` for pane-local filters/sorts. Never let the
+  // global star mutation preempt that handler (an accidental star is a public
+  // side effect, while the local command is only a view change).
+  if (key === 's' && !inFilesSubPane && tabState.current !== 2) {
     if (tabState.current === 5) {
       if (!appState.token) { showMessage('Login first (Settings → Login)', 'warning'); return; }
       Promise.resolve().then(() => settings.starRepo()).catch((e) => {

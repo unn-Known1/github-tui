@@ -1,7 +1,7 @@
 // Security sub-pane — Dependabot, Secret Scanning, Code Scanning,
 // Advisories, Branch Protection, and Dependencies views.
 
-import { appState, render, startAsync, isStale, showMessage, confirm } from '../state.mjs';
+import { appState, render, startAsync, isStale, showMessage, confirm, beginLoading, finishLoading } from '../state.mjs';
 import {
   getRepoDependabotAlerts, dismissDependabotAlert,
   getSecretScanningAlerts, getCodeScanningAlerts,
@@ -37,54 +37,60 @@ export async function loadSecurity() {
   }
   const apiState = stateOptions.length && appState.securityStateFilter !== 'all'
     ? appState.securityStateFilter : undefined;
+  appState.securityError = null;
   const gen = startAsync('analyze-security');
-  appState.loading = true;
+  beginLoading(gen);
   render();
   try {
     const [owner, name] = repo.full_name.split('/');
     if (sub === 'dependabot') {
       const state = apiState;
       const alerts = await getRepoDependabotAlerts(appState.token, owner, name, state, gen.signal);
-      if (isStale(gen, 'analyze-security')) { appState.loading = false; return; }
+      if (isStale(gen, 'analyze-security')) { finishLoading(gen); return; }
       appState.repoDependabotAlerts = Array.isArray(alerts) ? alerts : [];
     } else if (sub === 'secret') {
       const state = apiState;
       const alerts = await getSecretScanningAlerts(appState.token, owner, name, state, gen.signal);
-      if (isStale(gen, 'analyze-security')) { appState.loading = false; return; }
+      if (isStale(gen, 'analyze-security')) { finishLoading(gen); return; }
       appState.secretScanningAlerts = Array.isArray(alerts) ? alerts : [];
     } else if (sub === 'codescan') {
       const state = apiState;
       const alerts = await getCodeScanningAlerts(appState.token, owner, name, state, undefined, gen.signal);
-      if (isStale(gen, 'analyze-security')) { appState.loading = false; return; }
+      if (isStale(gen, 'analyze-security')) { finishLoading(gen); return; }
       appState.codeScanningAlerts = Array.isArray(alerts) ? alerts : [];
     } else if (sub === 'advisories') {
       const advisories = await getSecurityAdvisories(appState.token, owner, name, gen.signal);
-      if (isStale(gen, 'analyze-security')) { appState.loading = false; return; }
+      if (isStale(gen, 'analyze-security')) { finishLoading(gen); return; }
       appState.securityAdvisories = Array.isArray(advisories) ? advisories : [];
     } else if (sub === 'branch') {
       const branch = repo.default_branch || 'main';
       try {
         const prot = await getBranchProtection(appState.token, owner, name, branch, gen.signal);
-        if (isStale(gen, 'analyze-security')) { appState.loading = false; return; }
+        if (isStale(gen, 'analyze-security')) { finishLoading(gen); return; }
         appState.branchProtection = prot;
       } catch (e) {
-        if (isStale(gen, 'analyze-security')) { appState.loading = false; return; }
+        if (isStale(gen, 'analyze-security')) { finishLoading(gen); return; }
         appState.branchProtection = null;
+        appState.securityError = 'Branch protection unavailable: ' + (e.message || 'token may lack repo administration scope');
       }
     } else if (sub === 'deps') {
       try {
         const manifests = await getDependencyGraphManifests(appState.token, owner, name, gen.signal);
-        if (isStale(gen, 'analyze-security')) { appState.loading = false; return; }
+        if (isStale(gen, 'analyze-security')) { finishLoading(gen); return; }
         appState.dependencyManifests = (manifests && manifests.manifests) ? manifests.manifests : [];
       } catch (e) {
-        if (isStale(gen, 'analyze-security')) { appState.loading = false; return; }
+        if (isStale(gen, 'analyze-security')) { finishLoading(gen); return; }
         appState.dependencyManifests = [];
+        appState.securityError = 'Dependency graph unavailable: ' + (e.message || 'enable dependency graph or check token scopes');
       }
     }
   } catch (e) {
-    if (!isStale(gen, 'analyze-security')) showMessage('Security: ' + e.message, 'error');
+    if (!isStale(gen, 'analyze-security')) {
+      appState.securityError = 'Security request failed: ' + (e.message || 'check repository access and token scopes');
+      showMessage(appState.securityError, 'error');
+    }
   }
-  appState.loading = false;
+  finishLoading(gen);
   if (!isStale(gen, 'analyze-security')) render();
 }
 
@@ -168,6 +174,10 @@ export function renderSecurityPane(screen, y, maxH) {
   const stateOptions = securityStateOptions();
   const stateChip = stateOptions.length ? 'state: ' + appState.securityStateFilter : '';
   const sevChip = appState.securitySubPane === 'dependabot' ? '   severity: ' + appState.securityFilter : '';
+  if (appState.securityError && !appState.loading) {
+    screen.writeStr(2, y + 1, '⚠ ' + truncate(appState.securityError, W - 6), { fg: 'yellow', bold: true });
+    screen.writeStr(2, y + 2, '[r] Retry   [o] Open repository permissions', { dim: true });
+  }
   screen.writeStr(2, y, stateChip + sevChip, { fg: 'cyan' });
   const hints = [];
   if (appState.securitySubPane === 'dependabot') hints.push('[s] severity');

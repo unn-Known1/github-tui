@@ -2,7 +2,7 @@
 
 import { appState, render, showMessage } from './state.mjs';
 import { color } from './theme.mjs';
-import { truncate } from './utils.mjs';
+import { truncate, truncateToWidth } from './utils.mjs';
 
 const actions = [];
 const seen = new Set();
@@ -156,6 +156,6 @@ export function renderPalette(screen) {
   } else {
     const hint = list.length + ' action' + (list.length !== 1 ? 's' : '') +
       ' found   ↑↓ navigate   ⏎ run   Esc close';
-    screen.writeStr(x + 2, y + boxH - 2, hint.substring(0, boxW - 4), color('dim'));
+    screen.writeStr(x + 2, y + boxH - 2, truncateToWidth(hint, boxW - 4, ''), color('dim'));
   }
 }
