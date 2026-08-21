@@ -31,8 +31,8 @@
 | **Actions from TUI** — comment, react, close/reopen, merge (with confirmation) | ✅ |
 | **PR diff viewer** — unified diff with syntax coloring | ✅ |
 | **Inbox** — list, mark read, mark all, unsubscribe, filter cycle, pagination | ✅ |
-| **Repo explorer** — tree browsing, file view, save/clone/zipball, branch picker | ✅ |
-| **Actions/CI tab** — repos → runs → expandable jobs/steps, re-run, cancel | ✅ |
+| **Repo explorer** — tree browsing, syntax-highlighted file view, per-file history, local blame, save/clone/zipball, branch picker | ✅ |
+| **Actions/CI tab** — repos → runs → expandable jobs/steps, re-run, cancel, logs, dispatch, failure queue | ✅ |
 | **Bookmarks** — `b` toggle, `B` browse overlay, export to Markdown | ✅ |
 | **Command palette** — `Ctrl-P` / `:`, fuzzy match, ~30 actions | ✅ |
 | **Themes** — 2 themes: default (dark) and light | ✅ |
@@ -43,11 +43,11 @@
 | **ETag caching** — in-memory with auto `If-None-Match` | ✅ |
 | **Clipboard** — OSC-52 copy (`y`) works over SSH/tmux | ✅ |
 | **Rate limit indicator** — visual `█░` bar in header | ✅ |
-| **Security pane** — Dependabot alerts with severity icons | ✅ |
+| **Security pane** — Dependabot alerts with severity icons, plus cross-repository aggregation | ✅ |
 | **Traffic/Milestones/Labels/Checks panes** | ✅ |
-| **Modular architecture** — 24 modules, one file per tab | ✅ |
+| **Modular architecture** — focused modules with one file per tab and feature helpers | ✅ |
 | **Zero dependencies** — just `node app.mjs` | ✅ |
-| **249 tests** — Node built-in test runner, zero deps | ✅ |
+| **269 tests** — Node built-in test runner, zero deps | ✅ |
 | **Graceful shutdown** — atomic handlers, raw mode restore, crash logging | ✅ |
 | **Cross-platform rendering** — ASCII box fallback, FORCE_COLOR/NO_COLOR | ✅ |
 | **Input cursor movement** — arrow keys, Home/End, Ctrl-A/E/U/W | ✅ |
@@ -76,27 +76,32 @@
 
 ---
 
-### v0.7 — "CI Cockpit"
+### v0.7 — "CI Cockpit" ✅ core implemented, unreleased
 
 | Feature | Why |
 |---|---|
 | **Workflow log tail** | View logs in a pager view without leaving TUI |
 | **Workflow dispatch UI** | Trigger `workflow_dispatch` with inputs from the TUI |
 | **Failed-workflow aggregator** | See every red ✗ across watched repos |
-| **Runner utilization** | Runner stats if available via API |
+| **My Work queue** | Combine review requests, assigned work, notifications, and failed CI |
+| **Security aggregation** | See open security alerts across a bounded repository watchlist |
+| **Repository health** | Explainable CI, freshness, issue, security, and branch-protection score |
+| **Runner utilization** | Deferred; runner stats are not exposed by the current GitHub API surface |
 
 ---
 
 ### v0.8 — "Discovery & Read Mode"
 
+> Remaining discovery work follows the implemented 0.7.0 read and comparison foundation.
+
 | Feature | Why |
 |---|---|
-| **Syntax-highlighted file viewer** | Read code in-TUI with highlighting for top 10 languages |
+| ~~**Syntax-highlighted file viewer**~~ | Implemented in unreleased v0.7.0 |
 | **Topic explorer toggles** | 7d / 30d / 90d / by language facets |
-| **Branch/tag comparison** | Compare two refs side-by-side |
+| ~~**Branch/tag comparison**~~ | Implemented in unreleased v0.7.0 |
 | **Code search** | `searchCode` across orgs |
-| **Blame view** | See who wrote what line |
-| **File history** | Commit history per file |
+| ~~**Blame view**~~ | Implemented in unreleased v0.7.0 |
+| ~~**File history**~~ | Implemented in unreleased v0.7.0 |
 
 ---
 
@@ -106,9 +111,9 @@
 |---|---|
 | **OAuth device-flow login** | No PAT required; just authorize in browser |
 | **OS keychain integration** | macOS Keychain, libsecret, Windows Credential Manager |
-| **GitHub Enterprise Server** | Configurable hostname for corporate users |
+| ~~**GitHub Enterprise Server**~~ | Implemented in unreleased v0.7.0; profile-aware host configuration |
 | **Token scope auditor** | Warnings for over-privileged tokens |
-| **Dependabot aggregator** | Alerts across multiple repos |
+| ~~**Dependabot aggregator**~~ | Implemented in unreleased v0.7.0 as bounded security aggregation |
 
 ---
 
@@ -116,8 +121,8 @@
 
 | Feature | Why |
 |---|---|
-| **Screen-reader mode** | Linearized layout for accessibility |
-| **CLI subcommands** | `github-tui repos`, `github-tui inbox`, pipe-friendly output |
+| ~~**Screen-reader mode**~~ | Implemented in unreleased v0.7.0 with linear accessibility mode |
+| ~~**CLI subcommands**~~ | Implemented in unreleased v0.7.0 for repositories, Inbox, Actions, and config portability |
 | **Homebrew / Scoop / AUR / Nix** | Easy install on every platform |
 | **Static binary** | Optional `pkg` build for zero-install |
 | **Demo GIF** | Terminal recording for README |
@@ -231,9 +236,9 @@
 | AI summarise (BYO-key) | 🎯 v1.1 |
 | Themes + keybinding customisation | ✅ shipped |
 | Plugin system | 🎯 v2.0 |
-| Release automation | 🎯 v2.0 |
-| Offline + disk cache | 🎯 v0.6 |
-| Test suite (249 tests) | ✅ shipped |
+| Release automation | 🟡 partial in unreleased v0.7; full assistant remains 🎯 v2.0 |
+| Offline + disk cache | ✅ v0.6 |
+| Test suite (269 tests) | ✅ shipped |
 | Graceful shutdown + crash logging | ✅ shipped |
 
 ---
@@ -261,14 +266,14 @@
 1. `Ctrl-P` → "Since I was last here".
 2. Shows: merges missed, mentions waiting, new issues.
 
-### R5 — "Security Sweep" 🔲 v0.9
+### R5 — "Security Sweep" ✅ implemented in unreleased v0.7.0
 1. `Ctrl-P` → "Dependabot alerts".
 2. Aggregated, sorted by severity.
 
-### R6 — "Read a Repo Like a Book" 🟡
+### R6 — "Read a Repo Like a Book" ✅
 1. Search → Enter on repo. ✅
 2. `R` → README rendered. ✅
-3. *Pending:* `f` → file tree → `v` view file. *(v0.8)*
+3. `F` → file tree → view a file with syntax highlighting, history, and blame. ✅
 
 ### R7 — "AI-Assisted Review" 🎯 v2.0
 1. Open PR → `a` for AI review.
@@ -304,9 +309,9 @@
 | Forks ahead/behind | ❌ | ❌ | ❌ | ✅ |
 | Clipboard (SSH-safe) | ❌ | partial | n/a | ✅ |
 | Zero install | needs install | needs install | web app | ✅ |
-| Offline + disk cache | ❌ | ❌ | ❌ | 🎯 v0.6 |
+| Offline + disk cache | ❌ | ❌ | ❌ | ✅ v0.6 |
 | AI summarise | ❌ | ❌ | ❌ | 🎯 v1.1 |
-| Enterprise Server | ✅ | n/a | partial | 🎯 v0.9 |
+| Enterprise Server | ✅ | n/a | partial | 🟡 v0.7.0 (unreleased) |
 | Plugin system | ❌ | ❌ | ❌ | 🎯 v2.0 |
 | Release automation | ❌ | ❌ | ❌ | 🎯 v2.1 |
 

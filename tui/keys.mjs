@@ -11,7 +11,7 @@
 
 import {
   appState, tabState, setTab, showMessage, render, TABS, dismissConfirm, confirm,
-  consumeRetryHandler, SECURITY_SUB_PANES,
+  consumeRetryHandler, SECURITY_SUB_PANES, toggleFocusMode,
 } from './state.mjs';
 import * as palette from './palette.mjs';
 import * as onboarding from './tabs/onboarding.mjs';
@@ -28,8 +28,8 @@ import * as inbox     from './tabs/inbox.mjs';
 import * as detail    from './tabs/detail.mjs';
 import * as actions   from './tabs/actions.mjs';
 import * as help      from './tabs/help.mjs';
-import { addBookmark, removeBookmark, isBookmarked, addSavedSearch, removeSavedSearch } from './store.mjs';
-import { starRepo, unstarRepo, isStarred, createIssue, getSubscription, setSubscription, deleteSubscription } from './github.mjs';
+import { addBookmark, removeBookmark, isBookmarked, removeSavedSearch } from './store.mjs';
+import { starRepo, unstarRepo, isStarred, getSubscription, setSubscription, deleteSubscription } from './github.mjs';
 import { getScreen } from './render.mjs';
 import { parseMouseEvent, handleMouseEvent } from './mouse.mjs';
 import { getUndoInfo } from './undo.mjs';
@@ -432,6 +432,10 @@ export function handleKey(key) {
       showMessage('Edit ~/.github-tui/keybindings.json for custom key bindings — format: [{key, command, label, context}]', 'info', 6000);
       return;
     }
+    case '\x06': {
+      toggleFocusMode(appState.focusMode ? appState.focusMode : 'attention');
+      return;
+    }
     case 'q': quit(); return;
     case '\t': {
       // Dashboard uses Tab for in-page focus because its cards and widgets
@@ -488,7 +492,13 @@ export function handleKey(key) {
     }
     case 'o': openCurrent(); return;
     case 'y': copyCurrentUrl(); return;
-    case 'b': toggleBookmark(); return;
+    case 'b': {
+      if (tabState.current === 2 && appState.analyzeView === 'details' && appState.detailsPane === 'files') {
+        import('./tabs/files.mjs').then(m => m.openFileBlame()).catch(e => showMessage('Blame failed: ' + (e?.message || 'unknown'), 'error'));
+        return;
+      }
+      toggleBookmark(); return;
+    }
     case 'B': {
       // in the files pane, B opens the branch picker; everywhere
       // else it opens the bookmarks browser. Explicit dispatch.
@@ -626,6 +636,10 @@ export function handleKey(key) {
   // l (lowercase vi "right/forward") — acts as Enter on non-dashboard tabs
   // so vi users can drill into items without switching hands.
   if (key === 'l' && tabState.current !== 0) {
+    if (tabState.current === 3 && appState.actionsView === 'runs') {
+      actions.keys.l();
+      return;
+    }
     handleEnter();
     return;
   }
@@ -680,7 +694,7 @@ function handleSpace() {
   if (t === 0) dashboard.loadMoreTrending();
   else if (t === 1) repos.space();
   else if (t === 2) analyze.pageDown();
-  else if (t === 3) actions.enter();
+  else if (t === 3) actions.space();
   else if (t === 4) inbox.space();
 }
 function handlePageUp() {
@@ -725,8 +739,8 @@ function handleTop() {
   } else if (t === 2) {
     analyze.jumpTop();
   } else if (t === 3) {
-    appState.actionsSelected = 0;
-    appState.actionsScroll = 0;
+    if (appState.actionsLog) appState.actionsLogScroll = 0;
+    else { appState.actionsSelected = 0; appState.actionsScroll = 0; }
     render();
   } else if (t === 4) {
     appState.selectedNotification = 0;
@@ -776,8 +790,14 @@ function handleBottom() {
     }
     render();
   } else if (t === 3) {
-    actions.bottom(screen);
-    render();
+    if (appState.actionsLog) {
+      const lines = String(appState.actionsLog.text || '').split(/\r?\n/);
+      appState.actionsLogScroll = Math.max(0, lines.length - 1);
+      render();
+    } else {
+      actions.bottom(screen);
+      render();
+    }
   } else if (t === 4) {
     inbox.bottom(screen);
   } else if (t === 5) {
@@ -1002,6 +1022,18 @@ export function registerCoreActions() {
         run: () => { if (appState.showDetail) detail.mergePR(); } });
   reg({ id: 'detail.react', label: 'Add reaction to current issue/PR',
         run: () => { if (appState.showDetail) detail.toggleReactionPicker(); } });
+  reg({ id: 'detail.review.approve', label: 'Approve current pull request',
+        run: () => { if (appState.showDetail) detail.startReview('APPROVE'); } });
+  reg({ id: 'detail.review.changes', label: 'Request changes on current pull request',
+        run: () => { if (appState.showDetail) detail.startReview('REQUEST_CHANGES'); } });
+  reg({ id: 'detail.review.request', label: 'Request reviewers for current pull request',
+        run: () => { if (appState.showDetail) detail.startReviewerRequest(); } });
+  reg({ id: 'release.draft', label: 'Create draft release for current repo',
+        run: () => import('./release-actions.mjs').then(m => m.startReleaseDraft()) });
+  reg({ id: 'release.publish', label: 'Publish a release for current repo',
+        run: () => import('./release-actions.mjs').then(m => m.publishRelease()) });
+  reg({ id: 'release.edit', label: 'Edit a release for current repo',
+        run: () => import('./release-actions.mjs').then(m => m.editRelease()) });
 
   // Bookmarks browser
   reg({ id: 'bookmarks.browse', label: 'Browse bookmarks',
@@ -1011,6 +1043,51 @@ export function registerCoreActions() {
 
   reg({ id: 'actions.refresh', label: 'Actions: load workflow runs',
         run: () => { setTab(3); actions.loadActionsRepos(); } });
+  reg({ id: 'actions.logs', label: 'Actions: open selected workflow log', hint: 'l',
+        run: () => { setTab(3); actions.keys.l(); } });
+  reg({ id: 'actions.dispatch', label: 'Actions: dispatch workflow', hint: 'd',
+        run: () => { setTab(3); actions.startWorkflowDispatch(); } });
+  reg({ id: 'actions.failures', label: 'Actions: scan workflow failures', hint: 'F',
+        run: () => { setTab(3); actions.keys.F(); } });
+  reg({ id: 'security.aggregate', label: 'Security: scan repository alerts',
+        run: () => import('./security-aggregate.mjs').then(m => m.loadSecurityAggregate()) });
+  reg({ id: 'work.queue', label: 'Open My Work focus queue',
+        run: () => import('./work-queue.mjs').then(m => {
+          appState.myWorkQueue = m.buildMyWorkQueue({ notifications: appState.notifications, pullRequests: appState.dashboardRecentPRs, issues: appState.dashboardRecentIssues, failures: appState.actionsFailures });
+          setTab(0);
+          toggleFocusMode('work');
+          showMessage(appState.myWorkQueue.length ? 'My Work: ' + appState.myWorkQueue.length + ' item(s)' : 'My Work is clear', appState.myWorkQueue.length ? 'warning' : 'success', 5000);
+        }) });
+  reg({ id: 'focus.toggle', label: 'Toggle focus mode', hint: 'Ctrl-F',
+        run: () => toggleFocusMode(appState.focusMode || 'attention') });
+  reg({ id: 'sections.create', label: 'Create dashboard query section',
+        run: () => import('./custom-sections.mjs').then(m => m.startSectionEditor()) });
+  reg({ id: 'sections.edit', label: 'Edit dashboard query section',
+        run: () => startInput('Section number to edit: ', 'section-edit-index') });
+  reg({ id: 'sections.delete', label: 'Delete dashboard query section',
+        run: () => startInput('Section number to delete: ', 'section-delete-index') });
+  reg({ id: 'sections.preview', label: 'Preview dashboard query section',
+        run: () => startInput('Section number to preview: ', 'section-preview-index') });
+  reg({ id: 'config.export', label: 'Export GitHub TUI configuration',
+        run: () => startInput('Export path: ', 'config-export') });
+  reg({ id: 'config.import', label: 'Import GitHub TUI configuration',
+        run: () => startInput('Import path: ', 'config-import') });
+  reg({ id: 'enterprise.host', label: 'Configure GitHub Enterprise host',
+        run: () => startInput('API host (https://...): ', 'enterprise-host') });
+  reg({ id: 'profiles.list', label: 'List account/host profiles',
+        run: () => import('./profiles.mjs').then(m => showMessage(m.loadProfiles().map(p => p.id + ': ' + p.apiHost).join(' | ') || 'No profiles configured', 'info', 6000)) });
+  reg({ id: 'profiles.switch', label: 'Switch account/host profile',
+        run: () => startInput('Profile id (re-login if account changes): ', 'profile-switch') });
+  reg({ id: 'organizations.load', label: 'Load organization repositories and teams',
+        run: () => import('./organizations.mjs').then(m => m.loadOrganizations()) });
+  reg({ id: 'plugins.scan', label: 'Scan installed read-only plugins',
+        run: () => import('./plugins.mjs').then(m => { const p = m.discoverPlugins(); showMessage(p.length ? p.map(x => x.id + ': ' + x.status).join(' | ') : 'No plugins installed', 'info', 6000); }) });
+  reg({ id: 'smart.insight', label: 'Show rule-based repo insights',
+        run: () => import('./recommended-features.mjs').then(m => {
+          if (!appState.repoDetails) { showMessage('Open a repository first', 'warning'); return; }
+          const insight = m.buildSmartInsight(appState.repoDetails, { openIssues: appState.repoIssues.length, lastPushDays: appState.repoDetails.pushed_at ? Math.floor((Date.now() - Date.parse(appState.repoDetails.pushed_at)) / 86400000) : null, openSecurityAlerts: appState.securityAggregate.length });
+          showMessage(insight.findings.length ? insight.findings.join(' ') : 'No rule-based concerns detected', 'info', 7000);
+        }) });
 
   // Saved searches
   reg({ id: 'search.save', label: 'Save current search query...',
@@ -1018,6 +1095,49 @@ export function registerCoreActions() {
           if (!appState.searchQuery) { showMessage('No search query to save', 'warning'); return; }
           startInput('Label for this search: ', 'save-search');
         } });
+  registerInputHandler('section-edit-index', (value) => {
+    import('./custom-sections.mjs').then(m => m.startSectionEdit(Math.max(0, Number(value || 1) - 1))).catch(e => showMessage('Section edit failed: ' + e.message, 'error'));
+  });
+  registerInputHandler('section-delete-index', (value) => {
+    import('./custom-sections.mjs').then(m => m.deleteSection(Math.max(0, Number(value || 1) - 1))).catch(e => showMessage('Section delete failed: ' + e.message, 'error'));
+  });
+  registerInputHandler('section-preview-index', (value) => {
+    import('./custom-sections.mjs').then(m => m.previewSection(Math.max(0, Number(value || 1) - 1))).catch(e => showMessage('Section preview failed: ' + e.message, 'error'));
+  });
+  registerInputHandler('config-export', (path) => {
+    import('./portability.mjs').then(m => showMessage('Exported ' + m.exportPortableConfig(path), 'success'))
+      .catch(e => showMessage('Export failed: ' + e.message, 'error'));
+  });
+  registerInputHandler('config-import', (path) => {
+    import('./portability.mjs').then(m => { m.importPortableConfig(path); showMessage('Configuration imported — restart to apply all settings', 'success'); })
+      .catch(e => showMessage('Import failed: ' + e.message, 'error'));
+  });
+  registerInputHandler('profile-switch', (id) => {
+    import('./profiles.mjs').then(m => {
+      const result = m.activateProfileById(id);
+      if (!result.ok) throw new Error(result.error);
+      appState.activeProfile = result.profile.id;
+      appState.enterpriseHost = result.profile.apiHost;
+      appState.enterpriseWebHost = result.profile.webHost;
+      showMessage('Switched to ' + result.profile.label + ' — re-login if this is another account', 'success');
+      render();
+    }).catch(e => showMessage('Profile switch failed: ' + e.message, 'error'));
+  });
+  registerInputHandler('enterprise-host', (apiHost) => {
+    startInput('Web host (https://...): ', 'enterprise-web-host');
+    appState._pendingEnterpriseApiHost = apiHost;
+  });
+  registerInputHandler('enterprise-web-host', (webHost) => {
+    import('./profiles.mjs').then(m => {
+      const result = m.upsertProfile({ id: 'default', label: 'Default', apiHost: appState._pendingEnterpriseApiHost, webHost });
+      if (!result.ok) throw new Error(result.error);
+      m.activateProfile(result.profile);
+      appState.enterpriseHost = result.profile.apiHost;
+      appState.enterpriseWebHost = result.profile.webHost;
+      showMessage('Configured GitHub host: ' + result.profile.apiHost, 'success');
+    }).catch(e => showMessage('Host configuration failed: ' + e.message, 'error'));
+  });
+
   appState.savedSearches.forEach(s => {
     reg({ id: 'search.run.' + s.id, label: 'Run saved search: ' + s.label,
           hint: s.query,
@@ -1041,7 +1161,7 @@ export function registerCoreActions() {
 }
 
 import { submitSearch } from './tabs/analyze.mjs';
-import { focusNext, focusPrev, resetFocus, getFocusZone } from './focus.mjs';
+import { focusNext, focusPrev, resetFocus } from './focus.mjs';
 import { undo, redo } from './undo.mjs';
 
 // Lazy-loaded custom keybindings module — loaded once, not per-keypress.

@@ -17,14 +17,15 @@
 import { appState, render, startAsync, isStale, showMessage, confirm, beginLoading, finishLoading } from '../state.mjs';
 import {
   getRepoContents, getRepoFile, getBranches, getZipballUrl,
-  getFileCommits, downloadToFile, encodeRepoPath,
+  getFileCommits, downloadToFile, encodeRepoPath, getGitHubHosts,
 } from '../github.mjs';
 import {
-  formatBytes, relTime, writeFileSafe, safeCwdJoin, runCommand,
-  ghCloneUrl, copyToClipboard, dirExists, wrapTextWithMap, wrapText, truncateToWidth,
+  formatBytes, relTime, writeFileSafe, safeCwdJoin, runCommand, runCommandCapture,
+  ghCloneUrl, copyToClipboard, getClipboardTempFilePath, dirExists, wrapTextWithMap, wrapText, truncateToWidth, displayWidth,
 } from '../utils.mjs';
 import { color } from '../theme.mjs';
 import { join, resolve } from 'path';
+import { detectLanguage, tokenizeLine, parseBlamePorcelain } from '../recommended-features.mjs';
 
 // Limit how big a single file we'll fetch into memory (the API caps at 1MB).
 const MAX_VIEW_BYTES = 1_000_000;
@@ -75,6 +76,10 @@ export async function openFilesPane() {
   appState.fileViewing = null;
   appState.fileText = '';
   appState.fileScroll = 0;
+  appState.fileHistoryMode = false;
+  appState.fileBlameMode = false;
+  appState.fileHistory = [];
+  appState.fileBlame = [];
   appState.filesBranches = [];
   appState.filesBranchPicker = false;
   appState.filesBranchCursor = 0;
@@ -128,7 +133,67 @@ export async function drillInto() {
   }
 }
 
+export async function openFileHistory() {
+  const [owner, name] = repoOwnerName();
+  const selected = getSelectedEntry();
+  const path = appState.fileViewing || (selected && selected.type === 'file' ? selected.path : null);
+  if (!owner || !path) { showMessage('Select or open a file first', 'warning'); return; }
+  const gen = startAsync('files-history');
+  beginLoading(gen);
+  render();
+  try {
+    const commits = await getFileCommits(appState.token, owner, name, path, 50, gen.signal);
+    if (isStale(gen)) return;
+    appState.fileHistory = Array.isArray(commits) ? commits : [];
+    appState.fileBlameMode = false;
+    appState.fileHistoryPath = path;
+    appState.fileHistorySelected = 0;
+    appState.fileHistoryMode = true;
+  } catch (e) {
+    if (!isStale(gen)) showMessage('History: ' + e.message, 'error');
+  } finally { finishLoading(gen); }
+  if (!isStale(gen)) render();
+}
+
+export async function openFileBlame() {
+  const [owner, name] = repoOwnerName();
+  const path = appState.fileViewing || (getSelectedEntry()?.type === 'file' ? getSelectedEntry().path : null);
+  if (!owner || !path) { showMessage('Select or open a file first', 'warning'); return; }
+  const local = appState.localRepo;
+  if (!local || (local.owner + '/' + local.repo).toLowerCase() !== owner + '/' + name.toLowerCase()) {
+    showMessage('Blame requires the matching repository in the current directory', 'warning');
+    return;
+  }
+  const gen = startAsync('files-blame');
+  beginLoading(gen);
+  render();
+  try {
+    const result = await runCommandCapture('git', ['blame', '--line-porcelain', '--', path], { cwd: process.cwd() });
+    if (isStale(gen)) return;
+    if (result.code !== 0) throw new Error(result.stderr || 'git blame failed');
+    appState.fileBlame = parseBlamePorcelain(result.stdout);
+    appState.fileHistoryMode = false;
+    appState.fileHistoryPath = path;
+    appState.fileHistorySelected = 0;
+    appState.fileBlameMode = true;
+  } catch (e) {
+    if (!isStale(gen)) showMessage('Blame: ' + e.message, 'error');
+  } finally { finishLoading(gen); }
+  if (!isStale(gen)) render();
+}
+
+export function closeFileHistory() {
+  appState.fileHistoryMode = false;
+  appState.fileBlameMode = false;
+  appState.fileHistory = [];
+  appState.fileBlame = [];
+  appState.fileHistoryPath = '';
+  appState.fileHistorySelected = 0;
+  render();
+}
+
 export async function goUp() {
+  if (appState.fileHistoryMode || appState.fileBlameMode) { closeFileHistory(); return true; }
   if (appState.fileViewing) {
     // Leaving file viewer back to tree.
     appState.fileViewing = null;
@@ -456,9 +521,10 @@ export function copyRawUrl() {
 }
 
 export function rawFileUrl(owner, name, ref, path) {
-  return 'https://raw.githubusercontent.com/' + encodeURIComponent(owner) + '/' +
-    encodeURIComponent(name) + '/' + encodeRepoPath(ref || 'main') + '/' +
-    encodeRepoPath(path);
+  const hosts = getGitHubHosts();
+  const host = hosts.webHost === 'github.com' ? 'raw.githubusercontent.com' : hosts.webHost;
+  const prefix = hosts.webHost === 'github.com' ? '/' : '/' + encodeURIComponent(owner) + '/' + encodeURIComponent(name) + '/raw/';
+  return 'https://' + host + prefix + (hosts.webHost === 'github.com' ? encodeURIComponent(owner) + '/' + encodeURIComponent(name) + '/' : '') + encodeRepoPath(ref || 'main') + '/' + encodeRepoPath(path);
 }
 
 // ─── Render ───────────────────────────────────────────────────────
@@ -476,9 +542,13 @@ function renderBreadcrumb(screen, y, owner, name) {
 export function renderFilesPane(screen, y, maxH) {
   const W = screen.width;
   const [owner, name] = repoOwnerName();
-  if (!owner) return;
-
-  if (appState.fileViewing) { renderFileViewer(screen, y, maxH); return; }
+  if (!owner) return;  if (appState.fileHistoryMode || appState.fileBlameMode) {
+    renderFileHistory(screen, y, maxH);
+    return;
+  }
+  if (appState.fileViewing) {
+    renderFileViewer(screen, y, maxH); return;
+  }
 
   renderBreadcrumb(screen, y, owner, name);
   screen.hline(y + 1, '─');
@@ -586,7 +656,7 @@ function renderFileViewer(screen, y, maxH) {
     // Apply syntax style based on the SOURCE line so wrapped keyword/
     // string/etc. highlighting is preserved on continuations.
     const lineStyle = decorateLine(sourceLn, appState.fileViewing);
-    screen.writeStr(4 + lineNumW + 3, row, visualLines[start + i], lineStyle);
+    writeHighlightedLine(screen, 4 + lineNumW + 3, row, visualLines[start + i], appState.fileViewing, lineStyle);
   }
 
   // Second pass: overlay selection background via styleBuf. Column-aware so
@@ -625,6 +695,77 @@ function renderFileViewer(screen, y, maxH) {
     const hints = hintParts.join('  ');
     screen.writeStr(4, footerY, hints, color('dim'));
   }
+}
+
+function writeHighlightedLine(screen, x, y, text, path, fallbackStyle) {
+  const language = detectLanguage(path);
+  const spans = tokenizeLine(text, language);
+  let cx = x;
+  for (const span of spans) {
+    const style = span.kind === 'keyword' ? color('accent')
+      : span.kind === 'string' ? { fg: 'green' }
+      : span.kind === 'number' ? { fg: 'yellow' }
+      : span.kind === 'comment' ? color('dim') : fallbackStyle;
+    screen.writeStr(cx, y, span.text, style);
+    cx += displayWidth(span.text);
+  }
+}
+
+function renderFileHistory(screen, y, maxH) {
+  const W = screen.width;
+  if (appState.fileBlameMode) {
+    renderFileBlame(screen, y, maxH);
+    return;
+  }
+  screen.writeStr(2, y, 'FILE HISTORY', color('title'));
+  screen.writeStr(Math.max(2, W - 34), y, truncateToWidth(appState.fileHistoryPath || '', 32, ''), color('dim'));
+  screen.hline(y + 1, '─', color('dim'));
+  const history = appState.fileHistory || [];
+  if (history.length === 0) {
+    screen.writeStr(2, y + 3, 'No commits found for this file', color('dim'));
+    return;
+  }
+  const rows = Math.max(1, maxH - 4);
+  const selected = Math.max(0, Math.min(appState.fileHistorySelected, history.length - 1));
+  appState.fileHistorySelected = selected;
+  for (let i = 0; i < rows && i < history.length; i++) {
+    const c = history[i];
+    const row = y + 2 + i;
+    const sel = i === selected;
+    if (sel) for (let xx = 0; xx < W; xx++) screen.styleBuf[row][xx] = color('selection');
+    const sha = String(c.sha || '').slice(0, 8);
+    const author = c.author?.name || c.commit?.author?.name || c.committer?.login || '?';
+    const date = c.commit?.author?.date || c.commit?.committer?.date;
+    const subject = c.commit?.message?.split(/\\r?\\n/)[0] || '(no message)';
+    screen.writeStr(2, row, (sel ? '▶ ' : '  ') + sha, sel ? color('selection') : color('accent'));
+    screen.writeStr(14, row, truncateToWidth(author, 18, ''), sel ? color('selection') : null);
+    screen.writeStr(34, row, truncateToWidth(subject, Math.max(10, W - 50), ''), sel ? color('selection') : null);
+    screen.writeStr(Math.max(36, W - 12), row, relTime(date), sel ? color('selection') : color('dim'));
+  }
+  screen.writeStr(2, y + 2 + Math.min(rows, history.length), '[Enter] open commit   [Esc] back', color('dim'));
+}
+
+function renderFileBlame(screen, y, maxH) {
+  const W = screen.width;
+  const rows = Math.max(1, maxH - 4);
+  const blame = appState.fileBlame || [];
+  screen.writeStr(2, y, 'LOCAL BLAME', color('title'));
+  screen.writeStr(Math.max(2, W - 34), y, truncateToWidth(appState.fileHistoryPath || '', 32, ''), color('dim'));
+  screen.hline(y + 1, '─', color('dim'));
+  if (!blame.length) { screen.writeStr(2, y + 3, 'No blame lines found', color('dim')); return; }
+  const start = Math.max(0, Math.min(appState.fileHistorySelected, Math.max(0, blame.length - rows)));
+  appState.fileHistorySelected = start;
+  for (let i = 0; i < rows && start + i < blame.length; i++) {
+    const item = blame[start + i];
+    const row = y + 2 + i;
+    const selected = start + i === appState.fileHistorySelected;
+    if (selected) for (let x = 0; x < W; x++) screen.styleBuf[row][x] = color('selection');
+    const meta = String(item.sha || '').slice(0, 8) + ' ' + truncateToWidth(item.author || '?', 14, '');
+    screen.writeStr(2, row, meta, selected ? color('selection') : color('accent'));
+    screen.writeStr(28, row, String(item.line || '').padStart(5), selected ? color('selection') : color('dim'));
+    screen.writeStr(35, row, truncateToWidth(item.text || '', W - 37, ''), selected ? color('selection') : null);
+  }
+  screen.writeStr(2, y + 2 + Math.min(rows, blame.length), '[Esc] back   local git blame   lines ' + (start + 1) + '-' + Math.min(start + rows, blame.length), color('dim'));
 }
 
 function decorateLine(ln, path) {
@@ -784,6 +925,7 @@ function renderBranchPicker(screen) {
 // ─── Key handlers (consumed by analyze.mjs when detailsPane === 'files') ──
 
 export function up() {
+  if (appState.fileHistoryMode || appState.fileBlameMode) { appState.fileHistorySelected = Math.max(0, appState.fileHistorySelected - 1); render(); return; }
   if (appState.filesBranchPicker) {
     appState.filesBranchCursor = Math.max(0, appState.filesBranchCursor - 1);
     render(); return;
@@ -797,6 +939,7 @@ export function up() {
 }
 
 export function down(screen) {
+  if (appState.fileHistoryMode || appState.fileBlameMode) { const max = appState.fileBlameMode ? appState.fileBlame.length - 1 : appState.fileHistory.length - 1; appState.fileHistorySelected = Math.min(Math.max(0, max), appState.fileHistorySelected + 1); render(); return; }
   if (appState.filesBranchPicker) {
     appState.filesBranchCursor = Math.min(
       appState.filesBranches.length - 1, appState.filesBranchCursor + 1);
@@ -854,6 +997,11 @@ export function pgUp(screen) {
 }
 
 export function enter() {
+  if (appState.fileHistoryMode) {
+    const commit = appState.fileHistory[appState.fileHistorySelected];
+    if (commit?.html_url) showMessage('Commit ' + String(commit.sha || '').slice(0, 8) + ': ' + commit.html_url, 'info', 5000);
+    return;
+  }
   if (appState.filesBranchPicker) { pickBranch(); return; }
   drillInto();
 }
@@ -861,6 +1009,7 @@ export function enter() {
 let _backInProgress = false;
 export async function backOrLeave() {
   if (_backInProgress) return true;
+  if (appState.fileHistoryMode || appState.fileBlameMode) { closeFileHistory(); return true; }
   if (appState.filesBranchPicker) { appState.filesBranchPicker = false; render(); return true; }
   if (appState.fileViewing) {
     _backInProgress = true;
@@ -877,6 +1026,8 @@ export async function backOrLeave() {
 
 export const keys = {
   's': () => saveCurrentFile(),
+  'H': () => openFileHistory(),
+  'b': () => openFileBlame(),
   'S': () => saveCurrentFolder(),
   'Z': () => downloadZipball(),
   'C': () => cloneIntoCwd(),

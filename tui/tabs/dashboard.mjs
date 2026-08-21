@@ -11,7 +11,7 @@ import {
 } from '../github.mjs';
 import { relTime, eventGlyph, greeting, shortNum, truncate, openUrl } from '../utils.mjs';
 import { color } from '../theme.mjs';
-import { emptyState, collapsibleHeader, loadingIndicator, getScreen, errorState, getBreakpoint, getStatCardLayout } from '../render.mjs';
+import { emptyState, collapsibleHeader, loadingIndicator, getScreen, getStatCardLayout } from '../render.mjs';
 import { loadRepoDetails } from './analyze.mjs';
 import { showError } from '../error-recovery.mjs';
 
@@ -393,7 +393,33 @@ function ensureDashboardCollapseDefaults() {
   }
 }
 
+function renderFocusDashboard(screen, y, h) {
+  const W = screen.width;
+  const mode = appState.focusMode || 'attention';
+  screen.writeStr(2, y, 'FOCUS MODE: ' + mode.toUpperCase(), color('title'));
+  screen.hline(y + 1, '─', { dim: true });
+  const items = mode === 'ci' ? (appState.actionsFailures || []).map(r => ({ label: 'CI ' + (r.repo || '') + ' #' + (r.run_number || r.id), kind: 'failure' }))
+    : mode === 'work' ? (appState.myWorkQueue || []).map(item => ({ label: item.kind.toUpperCase() + ' ' + (item.repo || '?') + ' — ' + item.title, kind: item.kind }))
+    : mode === 'inbox' ? (appState.notifications || []).filter(n => n.unread).map(n => ({ label: (n.repository?.full_name || '?') + ' — ' + (n.subject?.title || ''), kind: 'notification' }))
+    : mode === 'review' ? (appState.dashboardRecentPRs || []).map(pr => ({ label: (pr.base?.repo?.full_name || '?') + ' — ' + (pr.title || ''), kind: 'review' }))
+    : (appState.dashboardAttentionItems || []).map(item => ({ label: item.label + ' (' + item.count + ')', kind: item.kind }));
+  if (items.length === 0) {
+    screen.writeStr(2, y + 3, 'Nothing needs attention in this focus view.', { fg: 'green' });
+  } else {
+    const rows = Math.max(1, h - 5);
+    appState.dashboardAttentionSelected = Math.min(appState.dashboardAttentionSelected, items.length - 1);
+    for (let i = 0; i < rows && i < items.length; i++) {
+      const selected = i === appState.dashboardAttentionSelected;
+      if (selected) for (let x = 0; x < W; x++) screen.styleBuf[y + 2 + i][x] = color('selection');
+      screen.writeStr(2, y + 2 + i, selected ? '▶ ' : '  ', selected ? color('selection') : color('dim'));
+      screen.writeStr(5, y + 2 + i, truncate(items[i].label, W - 7), selected ? color('selection') : null);
+    }
+  }
+  screen.writeStr(2, y + h - 1, '[Ctrl-F] exit focus   [↑↓] navigate   [Enter] open source', { dim: true });
+}
+
 export function renderDashboard(screen, y, h) {
+  if (appState.focusMode) { renderFocusDashboard(screen, y, h); return; }
   const W = screen.width;
   const user = appState.user;
   ensureDashboardCollapseDefaults();

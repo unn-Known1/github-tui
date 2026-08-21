@@ -2,16 +2,31 @@
 
 All notable changes to this project will be documented in this file.
 
-## [0.7.0] - 2026-08-19
+## [0.7.0] - Unreleased
 
-### Added — Dashboard gap closeout
-- Repaired Dashboard keyboard focus, mouse selection, custom-section navigation, and page scrolling.
-- Added complete Dashboard refresh behavior, loading/freshness states, partial-failure preservation, retryable Trending errors, local-repository filtering, and compact Needs Attention actions.
-- Added command-palette actions for Dashboard refresh, Inbox, Actions, repository search, and issue creation.
-- Added Dashboard regression coverage; **249 / 249 tests pass** with import and syntax checks clean.
+> This release is implemented locally but has not been published yet.
 
-### Deferred by design
-- Cross-account critical security aggregation and other advanced metrics remain deferred to preserve the Dashboard’s low-complexity information budget.
+### Added — CI cockpit and work queues
+- Added workflow log viewing with bounded redirected-log downloads, scrolling, truncation feedback, and retryable errors.
+- Added workflow dispatch with workflow selection, ref validation, required/unknown input validation, JSON inputs, and confirmation.
+- Added a bounded failed-workflow queue across repositories.
+- Added My Work aggregation for notifications, pull requests, and failed CI runs.
+- Added cross-repository security aggregation with severity sorting and partial-permission error reporting.
+
+### Added — Review, repository, and file workflows
+- Added pull-request review composition and submission, reviewer requests, issue/PR metadata and label updates, and release draft/publish/edit actions.
+- Added branch comparison, per-file commit history, local Git blame, and syntax-highlighted file viewing for the supported top language set.
+- Added repository health scoring using CI, security, freshness, issue, and branch-protection signals.
+- Added Inbox grouping, snoozing, saved filters, filter application, and local-repository context.
+- Added custom Dashboard section create/edit/delete/preview workflows.
+
+### Added — Portability and platform support
+- Added GitHub Enterprise host configuration, account profiles, organization/team context, JSON/Markdown configuration export/import, and read-only CLI commands for repositories, Inbox, Actions, and configuration.
+- Added linear accessibility mode for screen readers and a validated, discovery-only plugin/widget foundation; arbitrary plugin execution remains disabled until sandboxing is available.
+
+### Changed — Cleanup and verification
+- Removed confirmed dead imports and duplicate path-safety tests without changing runtime behavior.
+- **269 / 269 tests pass**; import audit is clean and `git diff --check` passes.
 
 ## [0.6.7] - 2026-08-04
 

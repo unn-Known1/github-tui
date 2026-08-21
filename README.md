@@ -15,10 +15,10 @@ A fast, zero-dependency terminal user interface for GitHub — six tabs, a comma
 
 - 🏠 **Real Dashboard** — greeting + 5 stat cards (★ stars, ⑂ forks, ◆ languages, ⏱ account age, ⚠ stale repos), profile mini with recent followers, **contribution heatmap**, **star history sparkline**, top repos, language bar chart, live activity feed, **recent issues/PRs**, stale repos alert, trending-this-week, unread-notifications badge, **collapsible sections**.
 - 📁 **Repos browser, supercharged** — row selection (`▶`), `Enter` drills into Analyze details, sortable columns, **type filter cycle** (`t`: all/sources/forks/archived/private/public/templates), **language facet** (`L`), **stale-only** toggle (`x`), **density toggle** (`D` switches between compact and comfortable), **pinned favorites** (`P` — stick to top, persisted on disk), inline visibility badges (🔒 private, 🔱 fork, 📦 archived, 🗄 template, 📌 pinned, ★ bookmarked), `g`/`G` jump-to-top/bottom.
-- 🗂️ **File explorer** — `F` on Analyze details opens a real in-terminal repo browser. Walk the tree, view files with line numbers + naive syntax coloring, switch branches, **save individual files** (`s`), **save whole folders** recursively (`S`), **download zipballs** (`Z`) streamed straight to disk, **`git clone`** into your CWD (`C`), **`gh repo clone`** for private repos (`G`), copy raw URLs (`y`) or file contents (`Y`) to clipboard.
-- 🔍 **Analyze any public repo** — search, 2-column detail view (metadata + languages bar + top contributors + latest releases), pane tabs `[O] Overview / [i] Issues / [P] PRs / [R] README / [F] Files / [T] Traffic / [M] Milestones / [L] Labels / [K] Checks / [S] Security`, parallel ahead/behind compares on forks.
-- 📊 **Repo Analytics** — Traffic (views/clones/popular paths/referrers), Milestones (title/state/due/issues), Labels (color dots/descriptions), Checks/CI (pass/fail/pending summary), Security (Dependabot alerts with severity icons).
-- 📥 **Inbox triage** — color-coded notification types, mark-as-read (`m`) / mark-all (`M`) / unsubscribe (`u`) / filter cycle (`f`: all/unread/mentions/review), repo-grouped summary.
+- 🗂️ **File explorer** — `F` on Explore details opens a real in-terminal repo browser. Walk the tree, view files with line numbers + syntax highlighting for the supported top languages, browse per-file commit history and local blame, switch branches, **save individual files** (`s`), **save whole folders** recursively (`S`), **download zipballs** (`Z`) streamed straight to disk, **`git clone`** into your CWD (`C`), **`gh repo clone`** for private repos (`G`), copy raw URLs (`y`) or file contents (`Y`) to clipboard.
+- 🔍 **Explore any public repo** — search, 2-column detail view (metadata + languages bar + top contributors + latest releases), pane tabs `[O] Overview / [i] Issues / [P] PRs / [R] README / [F] Files / [T] Traffic / [M] Milestones / [L] Labels / [K] Checks / [S] Security`, branch/ref comparison, file history, local blame, and parallel ahead/behind compares on forks.
+- 📊 **Repo Analytics** — Traffic (views/clones/popular paths/referrers), Milestones (title/state/due/issues), Labels (color dots/descriptions), Checks/CI (pass/fail/pending summary), Security (Dependabot alerts with severity icons), cross-repository security aggregation, health scoring, and branch comparison.
+- 📥 **Inbox triage** — color-coded notification types, grouping, snoozing, saved filters, mark-as-read (`m`) / mark-all (`M`) / unsubscribe (`u`) / filter cycle (`f`: all/unread/mentions/review), repo-grouped summary.
 - 🎨 **Themes** — `default` (dark) and `light` — each with a fully distinct palette using true-color (24-bit) and 256-color rendering. Persisted across sessions.
 - ⚡ **Command Palette** — `Ctrl-P` or `:` opens a fuzzy-search modal listing every action.
 - 📖 **README viewer** — `R` on the details pane renders the repo's README in-terminal with naive Markdown styling.
@@ -230,14 +230,14 @@ Your current token scopes are shown in the Settings → System panel so you can 
 
 ## 🗂️ Project Layout
 
-The app is split into 30 focused modules. Adding a new tab is: create one file, register it in `state.mjs`, import it in `render.mjs` and `keys.mjs`. The command palette picks up new actions automatically when you call `palette.register({ id, label, run })`.
+The app is split into focused zero-dependency modules. Adding a new tab is: create one file, register it in `state.mjs`, import it in `render.mjs` and `keys.mjs`. The command palette picks up new actions automatically when you call `palette.register({ id, label, run })`.
 
 ```
 .
-├── app.mjs                          # ~70-line entrypoint — lifecycle only
+├── app.mjs                          # Entrypoint — lifecycle, CLI, and terminal wiring
 ├── README.md
 ├── VISION.md                        # Roadmap + persona-driven brainstorm
-├── tests/                           # 249 tests (Node built-in test runner, zero deps)
+├── tests/                           # 269 tests (Node built-in test runner, zero deps)
 │   ├── utils.test.mjs
 │   ├── repos-logic.test.mjs
 │   ├── theme.test.mjs
@@ -263,12 +263,21 @@ The app is split into 30 focused modules. Adding a new tab is: create one file, 
     ├── layout.mjs                   # Responsive layout system with percentage-based sizing
     ├── focus.mjs                    # Focus management with Tab/Shift+Tab navigation
     ├── custom-keys.mjs              # Custom user keybindings with schema validation
+    ├── recommended-features.mjs     # Feature helpers: syntax, health, workflow, export, plugin validation
+    ├── work-queue.mjs               # My Work queue aggregation
+    ├── security-aggregate.mjs       # Cross-repository security alert aggregation
+    ├── portability.mjs               # Safe JSON/Markdown configuration export/import
+    ├── profiles.mjs                 # Account and GitHub Enterprise host profiles
+    ├── organizations.mjs            # Organization, team, and repository context
+    ├── plugins.mjs                  # Validated plugin discovery without execution
+    ├── release-actions.mjs          # Draft, publish, and edit release workflows
     └── tabs/
         ├── dashboard.mjs            # Home screen with widgets + collapsible sections
         ├── repos.mjs                # Your repositories (selection, badges, filters, pins, density)
         ├── analyze.mjs              # Search + details + Issues/PRs/README/Files/Traffic/Milestones/Labels/Checks/Security panes
         ├── detail.mjs               # Issue/PR detail popup with comments, reviews, reactions, diff viewer
-        ├── files.mjs                # In-terminal file explorer with save / clone / zipball
+        ├── files.mjs                # File explorer with history, blame, highlighting, save / clone / zipball
+        ├── analyze-compare.mjs      # Branch and ref comparison pane
         ├── forks.mjs                # Forks sub-view with concurrent ahead/behind
         ├── settings.mjs             # Settings + System info panel
         ├── inbox.mjs                # Notifications with triage actions
@@ -365,14 +374,15 @@ Every tab module exports `render(screen, y, h)`, an optional `keys` map for tab-
 
 - Token is stored in the OS keychain where available (macOS Keychain, Linux libsecret, Windows Credential Manager). On systems without a supported keychain tool, it falls back to plaintext with `chmod 600` file permissions.
 - **Optional system dependency:** GitHub CLI (`gh`) for one-click login. Not required — PAT login always works. Install from [cli.github.com](https://cli.github.com).
-- Mostly read-only client today — actions ship in waves:
+- Read/write actions are confirmation-protected and ship in waves:
   - ✅ **shipped:** star/unstar, bookmark, pin, save file, save folder, zipball, `git clone`, `gh clone`, notification mark/unsubscribe.
   - ✅ **shipped (v0.5):** commenting on issues/PRs, reactions, close/reopen, merge PRs, PR diff viewer, review comments.
   - ✅ **shipped (v0.5.8):** rate limit indicator, traffic/milestones/labels/checks/security panes, mouse support, collapsible sections, hover effects, followers section, Windows and terminal icon compatibility, File Explorer selection fixes, help overlay scroll clamping.
   - ✅ **shipped (v0.6.2):** Actions tab full rewrite (rerun, cancel, expand jobs/steps, correct key bindings), Inbox triage fixes (append-more, true unsubscribe, filtered scroll bounds, fallback URLs).
+  - 🟡 **implemented in unreleased v0.7.0:** workflow logs/dispatch/failure queue, PR review submission, issue metadata updates, release actions, security aggregation, repository health, compare/history/blame, Inbox grouping/snoozing/saved filters, configuration portability, Enterprise profiles, organization context, CLI output, and linear accessibility.
 - Only the GitHub REST v3 API is used (no GraphQL yet).
 - Requires a true TTY — won't run when stdin is piped.
-- The naive file-viewer syntax coloring is style-only — no real lexer. Adequate for reading, not editing.
+- File syntax highlighting is intentionally lightweight and read-only; it tokenizes common constructs for the supported top languages rather than providing a full compiler-grade lexer.
 
 ## 🔭 Roadmap (from VISION.md)
 
@@ -384,10 +394,12 @@ Every tab module exports `render(screen, y, h)`, an optional `keys` map for tab-
 
 **Shipped in v0.5:** Issue/PR detail popup with rendered body, labels, comments, and file diffs. Comment from TUI, emoji reactions, close/reopen, merge PRs with confirmation. PR diff viewer with unified diff and syntax coloring. Inbox notifications open detail popup for issues/PRs.
 
-**Shipped in v0.7.0:**
-- **Dashboard gap closeout** — repaired keyboard/mouse focus, custom-section navigation, page scrolling, refresh freshness, local filtering, partial-failure handling, retryable Trending errors, and compact Needs Attention actions.
-- **Quick actions** — added low-complexity command-palette actions for Dashboard refresh, Inbox, Actions, repository search, and issue creation.
-- **Regression coverage** — **249 / 249 tests pass** with import and syntax checks clean.
+**Unreleased in v0.7.0:**
+- **Dashboard and interaction hardening** — repaired keyboard/mouse focus, custom-section navigation, page scrolling, refresh freshness, local filtering, partial-failure handling, retryable Trending errors, and compact Needs Attention actions.
+- **CI cockpit** — added workflow logs, workflow dispatch with validated inputs, failed-run aggregation, pagination, and corrected Actions shortcuts.
+- **Review and repository workflows** — added PR review submission and reviewer requests, issue metadata updates, release draft/publish/edit actions, branch comparison, repository health scoring, security aggregation, per-file history, local blame, and syntax-highlighted file viewing.
+- **Inbox and portability** — added grouping, snoozing, saved filters, custom Dashboard section editing, Enterprise/account profiles, organization context, JSON/Markdown config export/import, read-only CLI commands, linear accessibility, and validated plugin discovery.
+- **Cleanup and regression coverage** — removed confirmed dead imports and duplicate tests; **269 / 269 tests pass** with import and syntax checks clean.
 
 **Shipped in v0.6.7:**
 - **Audit hardening** — fixed lifecycle cleanup, upgrade-note gating, account-safe logout/reset, token-partitioned ETag caching, secure streamed downloads, stale-request cancellation, filtered Inbox actions, Settings navigation, starred pagination, and Unicode input cursor handling.

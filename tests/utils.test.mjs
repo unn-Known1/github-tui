@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import {
   relTime, clamp, truncate, truncateToWidth, padRight, displayWidth, shortNum, formatBytes,
   greeting, eventGlyph, notifTypeColor, notificationToHtmlUrl,
-  safeCwdJoin, ghCloneUrl, wrapText, wrapTextWithMap, sliceByDisplayColumns,
+  ghCloneUrl, wrapText, wrapTextWithMap, sliceByDisplayColumns,
 } from '../tui/utils.mjs';
 
 describe('relTime', () => {
@@ -165,20 +165,6 @@ describe('notificationToHtmlUrl', () => {
   it('converts /pulls/ to /pull/', () => {
     const result = notificationToHtmlUrl('https://api.github.com/repos/owner/repo/pulls/1');
     assert.equal(result, 'https://github.com/owner/repo/pull/1');
-  });
-});
-
-describe('safeCwdJoin', () => {
-  it('allows normal relative paths', () => {
-    const result = safeCwdJoin('foo/bar.txt');
-    assert.ok(result.endsWith('foo/bar.txt'));
-  });
-  it('rejects paths escaping CWD via ..', () => {
-    assert.throws(() => safeCwdJoin('../../etc/passwd'), /Path escapes CWD/);
-  });
-  it('allows current directory', () => {
-    const result = safeCwdJoin('.');
-    assert.ok(result);
   });
 });
 

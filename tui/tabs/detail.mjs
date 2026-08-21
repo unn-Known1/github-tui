@@ -4,8 +4,8 @@
 import { appState, render, startAsync, isStale, showMessage, confirm, beginLoading, finishLoading } from '../state.mjs';
 import {
   getIssue, getPullRequest, getIssueComments, getPullRequestReviews,
-  getPullRequestFiles, postComment, createReaction,
-  closeIssue, reopenIssue, mergePullRequest,
+  getPullRequestFiles, postComment, createReaction, submitPullRequestReview, requestReview,
+  closeIssue, reopenIssue, mergePullRequest, updateIssue,
 } from '../github.mjs';
 import { startInput, registerInputHandler } from '../input.mjs';
 import { truncate, relTime, copyToClipboard } from '../utils.mjs';
@@ -53,6 +53,7 @@ export function openDetail(type, owner, repo, number) {
   appState.detailLoading = true;
   appState.detailReactionPicker = false;
   appState.detailReactionCursor = 0;
+  appState.detailReviewDraft = null;
   render();
   loadDetail();
 }
@@ -162,10 +163,112 @@ export function submitComment(value) {
 }
 registerInputHandler('comment', submitComment);
 
+export function startReview(event) {
+  if (!appState.showDetail || appState.detailType !== 'pull_request' || !appState.token) return;
+  appState.detailReviewDraft = { event, body: '' };
+  startInput((event === 'APPROVE' ? 'Approval' : 'Change request') + ' comment: ', 'review');
+}
+
+registerInputHandler('review', (value) => {
+  const draft = appState.detailReviewDraft;
+  if (!draft || !appState.detailData) return;
+  const body = (value || '').trim();
+  const { detailOwner: owner, detailRepo: repo, detailNumber: number } = appState;
+  confirm((draft.event === 'APPROVE' ? 'Approve' : 'Request changes on') +
+    ' PR #' + number + '?', async () => {
+    try {
+      await submitPullRequestReview(appState.token, owner, repo, number, draft.event, body);
+      showMessage(draft.event === 'APPROVE' ? 'PR approved' : 'Changes requested', 'success');
+      appState.detailReviewDraft = null;
+      await loadDetail();
+    } catch (e) { showMessage('Review failed: ' + e.message, 'error'); }
+  }, 'Submit review');
+});
+
+export function startReviewerRequest() {
+  if (!appState.showDetail || appState.detailType !== 'pull_request' || !appState.token) return;
+  startInput('Reviewer usernames (comma separated): ', 'reviewers');
+}
+registerInputHandler('reviewers', (value) => {
+  const names = String(value || '').split(',').map(v => v.trim()).filter(Boolean);
+  if (!names.length || !appState.detailData) return;
+  const { detailOwner: owner, detailRepo: repo, detailNumber: number } = appState;
+  confirm('Request review from ' + names.join(', ') + ' on PR #' + number + '?', async () => {
+    try {
+      await requestReview(appState.token, owner, repo, number, names);
+      showMessage('Review requested', 'success');
+    } catch (e) { showMessage('Request review failed: ' + e.message, 'error'); }
+  }, 'Request reviewers');
+});
+
+export function startReviewComment() {
+  if (!appState.showDetail || appState.detailType !== 'pull_request' || !appState.token) return;
+  appState.detailReviewDraft ||= { event: 'COMMENT', body: '', comments: [] };
+  startInput('Review comment path:line|text: ', 'review-comment');
+}
+registerInputHandler('review-comment', (value) => {
+  const raw = String(value || '');
+  const split = raw.indexOf('|');
+  const location = split >= 0 ? raw.slice(0, split) : '';
+  const body = split >= 0 ? raw.slice(split + 1).trim() : '';
+  const match = location.match(/^(.+):(\\d+)$/);
+  if (!match || !body) { showMessage('Use path:line|comment text', 'warning'); return; }
+  appState.detailReviewDraft ||= { event: 'COMMENT', body: '', comments: [] };
+  appState.detailReviewDraft.comments ||= [];
+  appState.detailReviewDraft.comments.push({ path: match[1], line: Number(match[2]), side: 'RIGHT', body });
+  showMessage('Draft review comment added (' + appState.detailReviewDraft.comments.length + ') — press [S] to submit', 'info');
+  render();
+});
+
+export function submitReviewDraft() {
+  const draft = appState.detailReviewDraft;
+  if (!draft || !draft.comments?.length || !appState.detailData) { showMessage('No draft review comments', 'warning'); return; }
+  const { detailOwner: owner, detailRepo: repo, detailNumber: number } = appState;
+  confirm('Submit ' + draft.comments.length + ' review comment(s) on PR #' + number + '?', async () => {
+    try {
+      await submitPullRequestReview(appState.token, owner, repo, number, 'COMMENT', draft.body || '', draft.comments);
+      appState.detailReviewDraft = null;
+      showMessage('Review comments submitted', 'success');
+      await loadDetail();
+    } catch (e) { showMessage('Review submission failed: ' + e.message, 'error'); }
+  }, 'Submit review comments');
+}
+
 export function openCommentInput() {
   if (!appState.showDetail) return;
   startInput('Comment: ', 'comment');
 }
+
+export function editMetadata() {
+  if (!appState.token || !appState.detailData) return;
+  startInput('Labels (comma separated, blank clears): ', 'detail-labels');
+}
+registerInputHandler('detail-fields', async (value) => {
+  if (!appState.detailData) return;
+  let patch;
+  try { patch = JSON.parse(String(value || '{}')); } catch { showMessage('Fields must be valid JSON', 'error'); return; }
+  const allowed = ['title', 'body', 'labels', 'assignees', 'milestone'];
+  patch = Object.fromEntries(Object.entries(patch).filter(([key]) => allowed.includes(key)));
+  if (!Object.keys(patch).length) { showMessage('No supported fields supplied', 'warning'); return; }
+  const { detailOwner: owner, detailRepo: repo, detailNumber: number } = appState;
+  confirm('Update issue/PR #' + number + ' fields?', async () => {
+    try { await updateIssue(appState.token, owner, repo, number, patch); showMessage('Issue/PR updated', 'success'); await loadDetail(); }
+    catch (e) { showMessage('Update failed: ' + e.message, 'error'); }
+  }, 'Edit issue/PR');
+});
+
+registerInputHandler('detail-labels', (value) => {
+  if (!appState.detailData) return;
+  const labels = String(value || '').split(',').map(v => v.trim()).filter(Boolean);
+  const { detailOwner: owner, detailRepo: repo, detailNumber: number } = appState;
+  confirm('Update labels on #' + number + '?', async () => {
+    try {
+      await updateIssue(appState.token, owner, repo, number, { labels });
+      showMessage('Labels updated', 'success');
+      await loadDetail();
+    } catch (e) { showMessage('Update failed: ' + e.message, 'error'); }
+  }, 'Edit labels');
+});
 
 export function closeOrReopen() {
   if (!appState.token || !appState.detailData) return;
@@ -455,6 +558,11 @@ function renderReviews(screen, x, y, w, h, scroll) {
 
 function renderFiles(screen, x, y, w, h, scroll) {
   const files = appState.detailFiles;
+  if (appState.detailReviewDraft?.comments?.length) {
+    screen.writeStr(x, y, 'Draft review comments: ' + appState.detailReviewDraft.comments.length + '  [c] add  [S] submit', color('accent'));
+    y++;
+    h--;
+  }
   if (files.length === 0) {
     screen.writeStr(x, y, '(no files changed)', color('dim'));
     return;
@@ -531,10 +639,16 @@ function renderReactionPicker(screen, bx, by, bw) {
 // ─── Key handlers ───────────────────────────────────────────────
 
 export const keys = {
-  'c': openCommentInput,
+  'c': () => appState.detailTab === 'files' ? startReviewComment() : openCommentInput(),
   'r': toggleReactionPicker,
+  'a': () => startReview('APPROVE'),
+  'v': () => startReview('REQUEST_CHANGES'),
+  'R': startReviewerRequest,
+  'S': submitReviewDraft,
   'M': () => { if (appState.detailType === 'pull_request') mergePR(); },
   'x': closeOrReopen,
+  'e': editMetadata,
+  'E': () => startInput('Fields JSON (title/body/labels/assignees/milestone): ', 'detail-fields'),
   'C': async () => {
     if (appState.detailType !== 'pull_request' || !appState.detailData) return;
     const pr = appState.detailData;

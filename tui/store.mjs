@@ -4,6 +4,7 @@
 import { BOOKMARKS_FILE, SAVED_SEARCHES_FILE, CONFIG_DIR, readJson, writeJson } from './config.mjs';
 import { join } from 'path';
 const PINS_FILE = join(CONFIG_DIR, 'pins.json');
+const INBOX_FILTERS_FILE = join(CONFIG_DIR, 'inbox-filters.json');
 
 // ── In-memory caches (loaded once, written through) ──
 let _bookmarks = null;
@@ -115,4 +116,20 @@ export function togglePin(fullName) {
   if (i >= 0) list.splice(i, 1); else list.unshift(fullName);
   savePins(list);
   return list;
+}
+
+let _inboxFilters = null;
+export function loadInboxFilters() {
+  if (_inboxFilters === null) _inboxFilters = readJson(INBOX_FILTERS_FILE, []);
+  return _inboxFilters;
+}
+export function saveInboxFilters(filters) {
+  _inboxFilters = filters;
+  writeJson(INBOX_FILTERS_FILE, filters);
+  return _inboxFilters;
+}
+export function addInboxFilter(label, filter) {
+  const list = loadInboxFilters().filter(f => f.label !== label);
+  list.unshift({ id: 'if_' + Date.now(), label, filter, createdAt: new Date().toISOString() });
+  return saveInboxFilters(list.slice(0, 30));
 }

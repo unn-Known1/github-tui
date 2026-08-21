@@ -8,7 +8,7 @@ import { removeToken } from '../config.mjs';
 import { startInput, registerInputHandler } from '../input.mjs';
 import { shortNum, relTime, truncate } from '../utils.mjs';
 import { color } from '../theme.mjs';
-import { emptyState, scrollIndicators, errorState, getBreakpoint } from '../render.mjs';
+import { emptyState, scrollIndicators, getBreakpoint } from '../render.mjs';
 import { loadDashboardWidgets, recomputeDashboardDerived } from './dashboard.mjs';
 import { isBookmarked } from '../store.mjs';
 import { togglePin } from '../store.mjs';

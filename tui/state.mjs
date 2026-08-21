@@ -98,6 +98,9 @@ export function resetAccountState() {
   appState.notifications = [];
   appState.inboxPage = 1;
   appState.inboxHasMore = false;
+  appState.inboxGrouped = false;
+  appState.inboxSnoozed = {};
+  appState.inboxSavedFilters = [];
   appState.selectedNotification = 0;
   appState.actionsRepos = [];
   appState.actionsRuns = [];
@@ -105,7 +108,21 @@ export function resetAccountState() {
   appState.actionsRunsHasMore = false;
   appState.actionsJobs = {};
   appState.actionsJobSteps = {};
+  appState.actionsLog = null;
+  appState.actionsLogScroll = 0;
+  appState.actionsWorkflowList = [];
+  appState.actionsWorkflowCursor = 0;
+  appState.actionsDispatch = null;
+  appState.actionsFailures = [];
+  appState.actionsFailureLoading = false;
   appState.actionsFilter = '';
+  appState.myWorkQueue = [];
+  appState.securityAggregate = [];
+  appState.securityAggregateErrors = [];
+  appState.securityAggregateLoading = false;
+  appState.securityAggregateVisible = false;
+  appState.repoHealth = null;
+  appState.compareData = null;
   appState.repoDetails = null;
   appState.repoLanguages = null;
   appState.repoContributors = [];
@@ -128,6 +145,9 @@ export function resetAccountState() {
   appState.branchProtection = null;
   appState.dependencyManifests = [];
   appState.forks = [];
+  appState.organizations = [];
+  appState.organizationRepos = [];
+  appState.organizationTeams = [];
   appState.searchResults = [];
   appState.searchPage = 1;
   appState.searchHasMore = true;
@@ -144,6 +164,12 @@ export function resetAccountState() {
   appState.filesPath = '';
   appState.fileViewing = null;
   appState.fileText = '';
+  appState.fileHistory = [];
+  appState.fileHistoryPath = '';
+  appState.fileHistorySelected = 0;
+  appState.fileHistoryMode = false;
+  appState.fileBlame = [];
+  appState.fileBlameMode = false;
   appState._readmeText = null;
   appState.showDetail = false;
   appState.detailData = null;
@@ -151,6 +177,7 @@ export function resetAccountState() {
   appState.detailReviews = [];
   appState.detailFiles = [];
   appState.detailDiffContent = '';
+  appState.detailReviewDraft = null;
   appState.detailDiffFile = null;
   appState.securityAlertDetail = null;
   appState.securityError = null;
@@ -288,6 +315,12 @@ export function setTab(i) {
   render();
 }
 
+export function toggleFocusMode(mode = 'attention') {
+  appState.focusMode = appState.focusMode === mode ? null : String(mode);
+  showMessage(appState.focusMode ? 'Focus mode: ' + appState.focusMode : 'Focus mode off', 'info');
+  render();
+}
+
 // Big shared state bag. Grouped by concern in comments for navigation.
 
 export const appState = {
@@ -330,6 +363,12 @@ export const appState = {
   fileViewing: null,
   fileText: '',
   fileScroll: 0,
+  fileHistory: [],
+  fileHistoryPath: '',
+  fileHistorySelected: 0,
+  fileHistoryMode: false,
+  fileBlame: [],
+  fileBlameMode: false,
   filesBranches: [],
   filesBranchPicker: false,
   filesBranchCursor: 0,
@@ -459,6 +498,35 @@ export const appState = {
   dashboardCustomSectionSelected: 0,
   dashboardCustomItemSelected: 0,
 
+  // ── Recommended feature state ──
+  compareData: null,
+  compareBase: '',
+  compareHead: '',
+  fileHistory: [],
+  fileHistorySelected: 0,
+  repoHealth: null,
+  focusMode: null,
+  myWorkQueue: [],
+  securityAggregate: [],
+  securityAggregateWatchlist: [],
+  securityAggregateLoading: false,
+  securityAggregateErrors: [],
+  securityAggregateVisible: false,
+  securityAggregateCursor: 0,
+  securityAggregateScroll: 0,
+  profiles: [],
+  activeProfile: 'default',
+  enterpriseHost: 'api.github.com',
+  enterpriseWebHost: 'github.com',
+  organizations: [],
+  organizationSelected: 0,
+  organizationRepos: [],
+  organizationTeams: [],
+  exportPath: null,
+  linearAccessibility: false,
+  smartInsight: null,
+  plugins: [],
+
   // ── Auto-refresh ──
   autoRefreshEnabled: false,
   autoRefreshIntervalMs: 300000,  // 5 minutes default
@@ -486,6 +554,13 @@ export const appState = {
   actionsExpandedRun: null,   // run id when expanded to show jobs
   actionsJobs: {},            // { [runId]: jobs[] }
   actionsJobSteps: {},        // { [jobId]: steps[] }
+  actionsLog: null,           // { jobId, text, truncated, bytes }
+  actionsLogScroll: 0,
+  actionsWorkflowList: [],
+  actionsWorkflowCursor: 0,
+  actionsDispatch: null,
+  actionsFailures: [],
+  actionsFailureLoading: false,
 
   // ── Inbox ──
   notifications: [],
@@ -496,6 +571,10 @@ export const appState = {
   inboxHideProcessed: false,
   inboxPage: 1,
   inboxHasMore: false,
+  inboxGrouped: false,
+  inboxSnoozed: {},
+  inboxSavedFilters: [],
+  inboxSavedFilterCursor: 0,
 
   // ── Settings ──
   settingsCursor: 0,
@@ -561,6 +640,7 @@ export const appState = {
   detailDiffView: false,   // true when viewing a file diff
   detailDiffFile: null,    // the file object being diffed
   detailDiffContent: '',   // the raw diff content
+  detailReviewDraft: null,
   detailDiffScroll: 0,
   detailDiffVisibleH: 0,   // visible height for diff scrolling
 

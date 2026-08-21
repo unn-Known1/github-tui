@@ -8,10 +8,12 @@ import {
 } from '../github.mjs';
 import { relTime, notifTypeColor, notificationToHtmlUrl, openUrl, truncate } from '../utils.mjs';
 import { color } from '../theme.mjs';
-import { emptyState, loadingIndicator, scrollIndicators, errorState } from '../render.mjs';
+import { emptyState, loadingIndicator, scrollIndicators } from '../render.mjs';
 import { openDetail } from './detail.mjs';
 import { startInput, registerInputHandler } from '../input.mjs';
 import { showError } from '../error-recovery.mjs';
+import { groupNotifications } from '../recommended-features.mjs';
+import { addInboxFilter } from '../store.mjs';
 
 const FILTERS = ['all', 'unread', 'mentions', 'review'];
 const INBOX_PER_PAGE = 50;
@@ -96,6 +98,9 @@ export function getFilteredNotifications() {
     case 'mentions': list = list.filter(n => n.reason === 'mention'); break;
     case 'review':   list = list.filter(n => n.reason === 'review_requested'); break;
   }
+  const snoozed = appState.inboxSnoozed || {};
+  const now = Date.now();
+  list = list.filter(n => !snoozed[n.id] || snoozed[n.id] <= now);
   const q = (appState.inboxTextFilter || '').trim().toLowerCase();
   if (q) {
     list = list.filter(n => {
@@ -103,6 +108,14 @@ export function getFilteredNotifications() {
       const repo = (n.repository && n.repository.full_name || '').toLowerCase();
       return title.includes(q) || repo.includes(q);
     });
+  }
+  if (appState.inboxGrouped) {
+    return groupNotifications(list).map(group => ({
+      ...(group.latest || {}),
+      _groupCount: group.count,
+      _groupUnread: group.unread,
+      _groupNotifications: group.notifications,
+    }));
   }
   return list;
 }
@@ -167,6 +180,24 @@ export async function unsubscribeCurrent() {
       render();
     } catch (e) { showMessage('Failed: ' + e.message, 'error'); }
   }, 'Unsubscribe');
+}
+
+export function toggleGrouped() {
+  appState.inboxGrouped = !appState.inboxGrouped;
+  appState.inboxScroll = 0;
+  appState.selectedNotification = 0;
+  normalizeInboxCursor();
+  showMessage('Grouped notifications: ' + (appState.inboxGrouped ? 'on' : 'off'), 'info');
+  render();
+}
+
+export function snoozeCurrent() {
+  const n = selected();
+  if (!n) return;
+  appState.inboxSnoozed[n.id] = Date.now() + 60 * 60 * 1000;
+  normalizeInboxCursor();
+  showMessage('Snoozed notification for 1 hour', 'info');
+  render();
 }
 
 export function toggleHideProcessed() {
@@ -316,7 +347,7 @@ export function renderInbox(screen, y, h) {
     const n = list[start + i];
     const row = headerY + 2 + i;
     const sel = start + i === appState.selectedNotification;
-    const unread = n.unread;
+    const unread = n._groupUnread > 0 ? true : n.unread;
 
     if (sel) {
       for (let x = 0; x < listW + 4; x++) screen.styleBuf[row][x] = color('selection');
@@ -339,7 +370,7 @@ export function renderInbox(screen, y, h) {
     const repoName = (n.repository && n.repository.full_name || '?').split('/')[1] ||
       (n.repository && n.repository.full_name) || '?';
     const title = (n.subject && n.subject.title) || '';
-    const combined = repoName + ' / ' + title;
+    const combined = repoName + ' / ' + title + (n._groupCount > 1 ? ' (' + n._groupCount + ')' : '');
     const titleW = Math.min(listW - 30, 40);
     screen.writeStr(14, row, truncate(combined, titleW),
       sel ? color('selection') : (unread ? color('listItem') : color('listItemDim')));
@@ -357,9 +388,47 @@ export function renderInbox(screen, y, h) {
     screen.writeStr(2, infoY,
       '[/] Search   [r] Refresh   [m] Mark read   [M] Mark all   [f] Filter   [u] Unsubscribe   [Enter] Open' +
       (appState.inboxHasMore ? '   [Space] More' : '') +
-      '   [H] Hide processed: ' + (appState.inboxHideProcessed ? 'on' : 'off'), { dim: true });
+      '   [H] Hide processed: ' + (appState.inboxHideProcessed ? 'on' : 'off') +
+      '   [G] Group: ' + (appState.inboxGrouped ? 'on' : 'off') + '   [z] Snooze 1h', { dim: true });
   }
 }
+
+registerInputHandler('inbox-filter-save', (value) => {
+  const label = String(value || '').trim();
+  if (!label) return;
+  appState.inboxSavedFilters = addInboxFilter(label, {
+    inboxFilter: appState.inboxFilter,
+    inboxTextFilter: appState.inboxTextFilter,
+    inboxHideProcessed: appState.inboxHideProcessed,
+    inboxGrouped: appState.inboxGrouped,
+  });
+  showMessage('Saved Inbox filter: ' + label, 'success');
+});
+
+export function saveCurrentFilter() {
+  startInput('Name this Inbox filter: ', 'inbox-filter-save');
+}
+
+export function applySavedFilter() {
+  const saved = appState.inboxSavedFilters || [];
+  if (!saved.length) { showMessage('No saved Inbox filters', 'info'); return; }
+  showMessage(saved.map((f, i) => (i + 1) + '=' + f.label).join(' | '), 'info', 7000);
+  startInput('Saved filter number: ', 'inbox-filter-apply');
+}
+registerInputHandler('inbox-filter-apply', (value) => {
+  const item = (appState.inboxSavedFilters || [])[Math.max(0, Number(value || 1) - 1)];
+  if (!item) { showMessage('Unknown saved filter', 'warning'); return; }
+  const filter = item.filter || {};
+  appState.inboxFilter = FILTERS.includes(filter.inboxFilter) ? filter.inboxFilter : 'all';
+  appState.inboxTextFilter = String(filter.inboxTextFilter || '');
+  appState.inboxHideProcessed = !!filter.inboxHideProcessed;
+  appState.inboxGrouped = !!filter.inboxGrouped;
+  appState.selectedNotification = 0;
+  appState.inboxScroll = 0;
+  normalizeInboxCursor();
+  showMessage('Applied Inbox filter: ' + item.label, 'success');
+  render();
+});
 
 registerInputHandler('inbox-filter', (value) => {
   appState.inboxTextFilter = (value || '').trim();
@@ -379,6 +448,10 @@ export const keys = {
   'u': unsubscribeCurrent,
   'f': cycleFilter,
   'H': toggleHideProcessed,
+  'G': toggleGrouped,
+  'z': snoozeCurrent,
+  'v': saveCurrentFilter,
+  'V': applySavedFilter,
 };
 
 export function bottom(screen) {

@@ -7,11 +7,11 @@ import {
   getRepositoryDetails,
   getRepositoryLanguages, getRepositoryContributors,
   getRepositoryReleases, getRepositoryIssues, getRepositoryPullRequests,
+  getRepoCheckRuns, getRepoDependabotAlerts, getBranchProtection,
 } from '../github.mjs';
 import { startInput } from '../input.mjs';
 import { shortNum, truncate, openUrl, sectionHeader, formatBytes } from '../utils.mjs';
 import { color } from '../theme.mjs';
-import { scrollIndicators } from '../render.mjs';
 import { loadForks, loadMoreForks, renderForks, toggleForkSort } from './forks.mjs';
 import * as files from './files.mjs';
 import { loadLabels, renderLabelsPane } from './analyze-labels.mjs';
@@ -30,12 +30,16 @@ import {
   submitSearch, submitUserSearch, submitCodeSearch,
   loadMoreSearchResults, openUserRepos,
   renderSearchInput, renderResultsList,
-  pageUp, pageDown, getResultList, maxVisibleResults,
+  pageUp, pageDown, maxVisibleResults,
   toggleUserReposSort,
   loadExploreTrending, getExploreLanding,
   exploreUp, exploreDown,
 } from './analyze-search.mjs';
 import { openDetail as _openDetail } from './detail.mjs';
+import { startCompare, renderComparePane } from './analyze-compare.mjs';
+import { calculateRepoHealth } from '../recommended-features.mjs';
+import { renderSecurityAggregate, securityAggregateUp, securityAggregateDown, securityAggregateEnter } from '../security-aggregate.mjs';
+import { renderOrganizations, organizationUp, organizationDown, organizationEnter } from '../organizations.mjs';
 export { _openDetail as openDetail, submitSearch, submitUserSearch, submitCodeSearch, openUserRepos };
 export { loadSecurity, cycleSecurityFilter, cycleSecurityStateFilter, securityUp, securityDown, securityEnter, securityDismiss } from './analyze-security.mjs';
 export { loadTraffic } from './analyze-traffic.mjs';
@@ -125,7 +129,38 @@ export async function loadRepoDetails(owner, name) {
     appState.repoPullRequests = Array.isArray(prs) ? prs : [];
     appState.repoPullRequestsPage = 1;
     appState.repoPullRequestsHasMore = Array.isArray(prs) && prs.length >= 100;
+    const ageDays = details.updated_at ? Math.max(0, Math.floor((Date.now() - Date.parse(details.updated_at)) / 86400000)) : null;
+    appState.repoHealth = calculateRepoHealth({
+      ciSuccessRate: null,
+      lastPushDays: ageDays,
+      openIssues: appState.repoIssues.length,
+      openSecurityAlerts: null,
+      branchProtection: null,
+    });
     showMessage('Loaded ' + owner + '/' + name, 'success');
+    // Complete the advisory health score with independent, permission-aware
+    // signals. A denied endpoint remains null instead of being reported as
+    // healthy, and the overview is refreshed when the optional metrics arrive.
+    Promise.allSettled([
+      getRepoCheckRuns(appState.token, owner, name, details.default_branch || 'HEAD', gen.signal),
+      getRepoDependabotAlerts(appState.token, owner, name, 'open', gen.signal),
+      getBranchProtection(appState.token, owner, name, details.default_branch || 'main', gen.signal),
+    ]).then(results => {
+      if (isStale(gen, 'analyze-details')) return;
+      const checks = results[0].status === 'fulfilled' ? (results[0].value?.check_runs || []) : null;
+      const security = results[1].status === 'fulfilled' ? (Array.isArray(results[1].value) ? results[1].value : results[1].value?.alerts || []) : null;
+      const protection = results[2].status === 'fulfilled' ? true : null;
+      const completed = checks ? checks.filter(c => c.conclusion).length : 0;
+      const success = checks ? checks.filter(c => c.conclusion === 'success').length : 0;
+      appState.repoHealth = calculateRepoHealth({
+        ciSuccessRate: checks && completed ? success / completed : null,
+        lastPushDays: ageDays,
+        openIssues: appState.repoIssues.length,
+        openSecurityAlerts: security ? security.length : null,
+        branchProtection: protection,
+      });
+      render();
+    }).catch(() => {});
   } catch (e) {
     if (!isStale(gen, 'analyze-details')) showMessage(e.message || 'Failed to load repository', 'error');
   }
@@ -146,6 +181,11 @@ function renderRepoDetails(screen, y, maxH) {
 
   // Repo name.
   screen.writeStr(2, y, repo.full_name, color('title') || { fg: 'white', bold: true });
+  if (appState.repoHealth?.score != null) {
+    const health = 'Health ' + appState.repoHealth.score + (appState.repoHealth.complete ? '/100' : '/100*');
+    screen.writeStr(Math.max(2, W - health.length - 2), y, health,
+      appState.repoHealth.score >= 70 ? { fg: 'green' } : appState.repoHealth.score >= 40 ? { fg: 'yellow' } : { fg: 'red' });
+  }
 
   // Pane tabs as chips.
   const panes = [
@@ -158,8 +198,8 @@ function renderRepoDetails(screen, y, maxH) {
     ['traffic',  'Traffic',                                     'T'],
     ['milestones', 'Milestones',                                'M'],
     ['labels',   'Labels',                                      'L'],
-    ['checks',   'Checks',                                      'K'],
-    ['security', 'Security',                                    'S'],
+    ['checks',   'Checks',                                      'K'],  ['security',  'Security',                                    'S'],
+    ['compare',   'Compare',                                     'D'],
   ];
   let px = 2;
   for (const [id, label, k] of panes) {
@@ -181,6 +221,7 @@ function renderRepoDetails(screen, y, maxH) {
   if (appState.detailsPane === 'labels') { renderLabelsPane(screen, y + 3, maxH - 3); return; }
   if (appState.detailsPane === 'checks') { renderChecksPane(screen, y + 3, maxH - 3); return; }
   if (appState.detailsPane === 'security') { renderSecurityPane(screen, y + 3, maxH - 3); return; }
+  if (appState.detailsPane === 'compare') { renderComparePane(screen, y + 3, maxH - 3); return; }
 
   // Overview pane: 2-column layout.
   const leftWidth = Math.min(48, Math.floor(W / 2));
@@ -275,6 +316,8 @@ export function renderAnalyze(screen, y, h) {
   screen.writeStr(2, y, 'EXPLORE REPOSITORY', color('title') || { fg: 'white', bold: true });
   screen.hline(y + 1, '─', { dim: true });
   const v = appState.analyzeView;
+  if (v === 'security-aggregate') { renderSecurityAggregate(screen, y + 2, h - 2); return; }
+  if (v === 'organizations') { renderOrganizations(screen, y + 2, h - 2); return; }
   if (v === 'search')   { loadExploreTrending(); renderSearchInput(screen, y, h); return; }
   if (v === 'results')  { renderResultsList(screen, y, h); return; }
   if (v === 'details')  { renderRepoDetails(screen, y + 2, h - 2); return; }
@@ -297,6 +340,7 @@ export function handleBack() {
     return;
   }
   const v = appState.analyzeView;
+  if (v === 'security-aggregate' || v === 'organizations') { appState.analyzeView = 'search'; appState.securityAggregateVisible = false; render(); return; }
   if (v === 'forks') {
     appState.forks = [];
     appState.selectedFork = 0;
@@ -489,6 +533,7 @@ export const keys = {
       startSearchInputFor('code');
     }
   },
+  'D': () => { if (appState.analyzeView === 'details') startCompare(); },
   'u': () => {
     if (appState.analyzeView === 'search' || appState.analyzeView === 'results') {
       startSearchInputFor('users');
@@ -496,6 +541,7 @@ export const keys = {
   },
   'G': () => { if (isFilesPane()) files.keys.G(); },
   'B': () => { if (isFilesPane()) files.keys.B(); },
+  'H': () => { if (isFilesPane()) files.keys.H(); },
   'Y': () => { if (isFilesPane()) files.keys.Y(); },
   'g': () => { jumpTop(); },
   'n': () => { if (appState.analyzeView === 'forks') toggleForkSort('name'); },
@@ -572,6 +618,8 @@ function isSecurityPane() {
 }
 
 export function up(screen) {
+  if (appState.analyzeView === 'security-aggregate') { securityAggregateUp(); return; }
+  if (appState.analyzeView === 'organizations') { organizationUp(); return; }
   if (isFilesPane()) { files.up(); return; }
   if (isSecurityPane()) { securityUp(); return; }
   if (appState.analyzeView === 'details' && appState.detailsPane !== 'overview') {
@@ -616,6 +664,8 @@ export function up(screen) {
   }
 }
 export function down(screen) {
+  if (appState.analyzeView === 'security-aggregate') { securityAggregateDown(); return; }
+  if (appState.analyzeView === 'organizations') { organizationDown(); return; }
   if (isFilesPane()) { files.down(screen); return; }
   if (isSecurityPane()) { securityDown(screen); return; }
   if (appState.analyzeView === 'details' && appState.detailsPane !== 'overview') {
@@ -704,6 +754,8 @@ export function exploreEnter() {
 }
 
 export function enter() {
+  if (appState.analyzeView === 'security-aggregate') { securityAggregateEnter(); return; }
+  if (appState.analyzeView === 'organizations') { organizationEnter(); return; }
   if (isFilesPane()) { files.enter(); return; }
   if (isSecurityPane()) { securityEnter(); return; }
   const v = appState.analyzeView;
@@ -771,7 +823,7 @@ export function space() {
 }
 
 // ── Collapsible sections ──
-const ANALYZE_SECTIONS = ['overview', 'issues', 'prs', 'readme', 'files', 'packages', 'traffic', 'milestones', 'labels', 'checks', 'security'];
+const ANALYZE_SECTIONS = ['overview', 'issues', 'prs', 'readme', 'files', 'packages', 'traffic', 'milestones', 'labels', 'checks', 'security', 'compare'];
 
 export function getSections() {
   return ANALYZE_SECTIONS.map(s => 'analyze:' + s);

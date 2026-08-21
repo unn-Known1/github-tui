@@ -443,8 +443,23 @@ export function runCommand(cmd, args, opts = {}) {
   });
 }
 
-export function ghCloneUrl(owner, repo) {
-  return 'https://github.com/' + owner + '/' + repo + '.git';
+export function runCommandCapture(cmd, args, opts = {}) {
+  return new Promise(async (resolve, reject) => {
+    try {
+      const { spawn } = await import('child_process');
+      const child = spawn(cmd, args, { cwd: opts.cwd || process.cwd(), stdio: ['ignore', 'pipe', 'pipe'] });
+      let stdout = '', stderr = '';
+      child.stdout.on('data', chunk => { stdout += chunk; });
+      child.stderr.on('data', chunk => { stderr += chunk; });
+      child.on('error', reject);
+      child.on('exit', code => resolve({ code: code ?? 0, stdout, stderr }));
+    } catch (e) { reject(e); }
+  });
+}
+
+export function ghCloneUrl(owner, repo, webHost = 'github.com') {
+  const host = String(webHost).replace(/^https?:\/\//, '').replace(/\/$/, '');
+  return 'https://' + host + '/' + owner + '/' + repo + '.git';
 }
 
 export function sectionHeader(screen, x, y, text, hint) {

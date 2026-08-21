@@ -2,11 +2,15 @@
 // v0.7 milestone: runs list, status indicators, re-run, cancel.
 // v0.6 enhancement: expandable run detail with jobs and steps.
 
-import { appState, render, startAsync, isStale, showMessage, setTab, confirm } from '../state.mjs';
-import { getWorkflowRuns, getWorkflowJobs, rerunWorkflow, cancelWorkflowRun } from '../github.mjs';
+import { appState, render, startAsync, isStale, showMessage, confirm } from '../state.mjs';
+import {
+  getWorkflowRuns, getWorkflowJobs, getWorkflowJobLogs, getWorkflows,
+  dispatchWorkflow, rerunWorkflow, cancelWorkflowRun,
+} from '../github.mjs';
+import { validateWorkflowInputs, buildFailureQueue } from '../recommended-features.mjs';
 import { openUrl, relTime, truncate } from '../utils.mjs';
 import { color } from '../theme.mjs';
-import { emptyState, loadingIndicator, scrollIndicators, collapsibleHeader, errorState } from '../render.mjs';
+import { emptyState, loadingIndicator, scrollIndicators, collapsibleHeader } from '../render.mjs';
 import { startInput, registerInputHandler } from '../input.mjs';
 import { showError } from '../error-recovery.mjs';
 
@@ -60,6 +64,138 @@ export async function loadActionsRepos() {
   appState.actionsRepoSelected = 0;
   appState.actionsRepoScroll = 0;
   render();
+}
+
+export async function openWorkflowLog(jobId) {
+  const repos = getFilteredRepos();
+  const repo = repos[appState.actionsRepoSelected];
+  if (!repo || !jobId) return;
+  const [owner, name] = repo.full_name.split('/');
+  const gen = startAsync('actions-log');
+  appState.actionsLoading = true;
+  appState.actionsLog = { jobId, text: '', truncated: false, bytes: 0 };
+  appState.actionsLogScroll = 0;
+  render();
+  try {
+    const result = await getWorkflowJobLogs(appState.token, owner, name, jobId, gen.signal);
+    if (isStale(gen)) return;
+    appState.actionsLog = { jobId, ...result };
+    showMessage(result.truncated ? 'Workflow log truncated at 2 MB' : 'Loaded workflow log', result.truncated ? 'warning' : 'success');
+  } catch (e) {
+    if (!isStale(gen)) showError(e.message || 'Failed to load workflow log', 'Workflow log', { retry: () => openWorkflowLog(jobId) });
+  } finally {
+    if (!isStale(gen)) {
+      appState.actionsLoading = false;
+      render();
+    }
+  }
+}
+
+export async function startWorkflowDispatch() {
+  const repos = getFilteredRepos();
+  const repo = repos[appState.actionsRepoSelected];
+  if (!repo || !appState.token) return;
+  const [owner, name] = repo.full_name.split('/');
+  const gen = startAsync('actions-dispatch-workflows');
+  appState.actionsLoading = true;
+  render();
+  try {
+    const result = await getWorkflows(appState.token, owner, name, gen.signal);
+    if (isStale(gen)) return;
+    const workflows = Array.isArray(result) ? result : (result?.workflows || []);
+    const active = workflows.filter(w => w.state === 'active' || w.active);
+    const available = active.length ? active : workflows;
+    if (!available.length) { showMessage('No workflows found in ' + repo.full_name, 'warning'); return; }
+    appState.actionsWorkflowList = available;
+    appState.actionsDispatch = { repo, workflow: available.length === 1 ? available[0] : null };
+    if (available.length > 1) {
+      showMessage('Workflows: ' + available.map((w, i) => (i + 1) + '=' + (w.name || w.path || w.id)).join(' | '), 'info', 7000);
+      startInput('Workflow number/name: ', 'actions-dispatch-workflow');
+    } else startInput('Dispatch ref (branch or tag): ', 'actions-dispatch-ref');
+  } catch (e) {
+    if (!isStale(gen)) showError(e.message || 'Failed to load workflows', 'Workflow dispatch');
+  } finally {
+    if (!isStale(gen)) { appState.actionsLoading = false; render(); }
+  }
+}
+
+async function submitWorkflowDispatch(dispatch, ref, inputs) {
+  const validation = validateWorkflowInputs(dispatch.workflow, ref, inputs);
+  if (!validation.ok) { showMessage(validation.error, 'error'); return; }
+  confirm('Dispatch ' + (dispatch.workflow.name || dispatch.workflow.path || 'workflow') +
+    ' on ' + dispatch.repo.full_name + ' at ref ' + ref +
+    (Object.keys(inputs).length ? ' with ' + Object.keys(inputs).length + ' input(s)' : '') + '?', async () => {
+    const [owner, name] = dispatch.repo.full_name.split('/');
+    try {
+      await dispatchWorkflow(appState.token, owner, name, dispatch.workflow.id || dispatch.workflow.path, ref, inputs);
+      showMessage('Workflow dispatched on ' + ref, 'success');
+      appState.actionsDispatch = null;
+      appState.actionsWorkflowList = [];
+      await loadWorkflowRuns();
+    } catch (e) { showError(e.message || 'Dispatch failed', 'Workflow dispatch'); }
+  }, 'Dispatch workflow');
+}
+
+registerInputHandler('actions-dispatch-workflow', (value) => {
+  const dispatch = appState.actionsDispatch;
+  const workflows = appState.actionsWorkflowList || [];
+  const raw = String(value || '').trim();
+  const index = /^\\d+$/.test(raw) ? Number(raw) - 1 : -1;
+  const workflow = index >= 0 ? workflows[index] : workflows.find(w => String(w.name || w.path || w.id) === raw);
+  if (!workflow) { showMessage('Unknown workflow — choose a listed number or exact name', 'warning'); return; }
+  dispatch.workflow = workflow;
+  startInput('Dispatch ref (branch or tag): ', 'actions-dispatch-ref');
+});
+
+registerInputHandler('actions-dispatch-ref', (value) => {
+  const dispatch = appState.actionsDispatch;
+  if (!dispatch) return;
+  const ref = String(value || '').trim();
+  const declared = dispatch.workflow.inputs || dispatch.workflow.workflow_dispatch?.inputs || {};
+  if (Object.keys(declared).length) {
+    dispatch.ref = ref;
+    startInput('Inputs JSON ({} for defaults): ', 'actions-dispatch-inputs');
+    return;
+  }
+  submitWorkflowDispatch(dispatch, ref, {});
+});
+registerInputHandler('actions-dispatch-inputs', (value) => {
+  const dispatch = appState.actionsDispatch;
+  if (!dispatch) return;
+  let inputs;
+  try { inputs = JSON.parse(String(value || '{}')); } catch { showMessage('Inputs must be valid JSON', 'error'); return; }
+  submitWorkflowDispatch(dispatch, dispatch.ref, inputs || {});
+});
+
+export async function loadFailureQueue() {
+  if (!appState.token || appState.actionsRepos.length === 0) {
+    showMessage('Load repositories before scanning workflow failures', 'warning');
+    return;
+  }
+  const gen = startAsync('actions-failures');
+  appState.actionsFailureLoading = true;
+  appState.actionsFailures = [];
+  render();
+  const groups = [];
+  try {
+    // Keep the aggregate deliberately bounded to protect rate limits. Users
+    // can still drill into the normal per-repository run view.
+    for (const repo of appState.actionsRepos.slice(0, 20)) {
+      if (isStale(gen)) return;
+      const [owner, name] = (repo.full_name || '').split('/');
+      if (!owner || !name) continue;
+      try {
+        const result = await getWorkflowRuns(appState.token, owner, name, 1, 10, gen.signal);
+        groups.push({ repo: repo.full_name, runs: result?.workflow_runs || [] });
+      } catch { /* preserve partial aggregate */ }
+    }
+    if (!isStale(gen)) {
+      appState.actionsFailures = buildFailureQueue(groups);
+      showMessage('Found ' + appState.actionsFailures.length + ' failed workflow runs', 'info');
+    }
+  } finally {
+    if (!isStale(gen)) { appState.actionsFailureLoading = false; render(); }
+  }
 }
 
 export async function loadWorkflowRuns() {
@@ -209,6 +345,17 @@ function openSelectedRun() {
 }
 
 export function goBack() {
+  if (appState.actionsLog) {
+    appState.actionsLog = null;
+    appState.actionsLogScroll = 0;
+    render();
+    return;
+  }
+  if (appState.actionsView === 'failures') {
+    appState.actionsView = 'repos';
+    render();
+    return;
+  }
   if (appState.actionsView === 'runs') {
     if (appState.actionsExpandedRun) {
       appState.actionsExpandedRun = null;
@@ -220,8 +367,29 @@ export function goBack() {
   // repos view: fall through to handleBack → setTab(0)
 }
 
+function renderWorkflowLog(screen, y, h, W) {
+  const log = appState.actionsLog;
+  screen.writeStr(2, y, 'WORKFLOW LOG #' + (log?.jobId || '?'), color('title'));
+  screen.writeStr(Math.max(2, W - 28), y, log?.truncated ? 'TRUNCATED' : 'FULL LOG', log?.truncated ? { fg: 'yellow', bold: true } : { dim: true });
+  screen.hline(y + 1, '─', color('dim'));
+  if (appState.actionsLoading && !log?.text) { loadingIndicator(screen, 2, y + 3, 'loading log'); return; }
+  const lines = String(log?.text || '(empty log)').split(/\\r?\\n/);
+  const rows = Math.max(1, h - 5);
+  const maxScroll = Math.max(0, lines.length - rows);
+  appState.actionsLogScroll = Math.max(0, Math.min(maxScroll, appState.actionsLogScroll || 0));
+  for (let i = 0; i < rows && i + appState.actionsLogScroll < lines.length; i++) {
+    const line = lines[i + appState.actionsLogScroll];
+    const style = /error|fail|exception|fatal/i.test(line) ? { fg: 'red' } : /warning|warn/i.test(line) ? { fg: 'yellow' } : null;
+    screen.writeStr(2, y + 2 + i, truncate(line, W - 4), style);
+  }
+  screen.writeStr(2, y + 2 + Math.min(rows, lines.length),
+    'Lines ' + (appState.actionsLogScroll + 1) + '-' + Math.min(appState.actionsLogScroll + rows, lines.length) +
+    ' of ' + lines.length + '   [Esc] back  [g/G] top/bottom', { dim: true });
+}
+
 export function renderActions(screen, y, h) {
   const W = screen.width;
+  if (appState.actionsLog) { renderWorkflowLog(screen, y, h, W); return; }
   appState._actionsListBounds = null;
   if (!appState.token) {
     emptyState(screen, y, h, {
@@ -236,14 +404,16 @@ export function renderActions(screen, y, h) {
   screen.writeStr(2, y, 'CI / ACTIONS', color('title') || { fg: 'white', bold: true });
   screen.hline(y + 1, '─', { dim: true });
 
-  const section = appState.actionsView === 'runs' ? 'actions:runs' : 'actions:repos';
+  const section = appState.actionsView === 'runs' ? 'actions:runs' : appState.actionsView === 'failures' ? 'actions:failures' : 'actions:repos';
   const expanded = collapsibleHeader(screen, 2, y + 2, section,
-    appState.actionsView === 'runs' ? 'WORKFLOW RUNS' : 'REPOSITORIES',
-    appState.actionsView === 'runs' ? '[t] back to repos' : null);
+    appState.actionsView === 'runs' ? 'WORKFLOW RUNS' : appState.actionsView === 'failures' ? 'FAILURE QUEUE' : 'REPOSITORIES',
+    appState.actionsView === 'runs' ? '[t] back to repos' : appState.actionsView === 'failures' ? '[t] back to repos' : null);
   if (!expanded) return;
 
   if (appState.actionsView === 'repos') {
     renderRepoList(screen, y + 4, h - 4, W);
+  } else if (appState.actionsView === 'failures') {
+    renderFailureList(screen, y + 4, h - 4, W);
   } else {
     renderRunList(screen, y + 4, h - 4, W);
   }
@@ -286,6 +456,31 @@ function renderRepoList(screen, y, h, W) {
     screen.writeStr(W - stars.length - 2, row, stars, sel ? color('selection') : { fg: 'yellow' });
   }
   scrollIndicators(screen, y, y + maxVisible - 1, appState.actionsRepoScroll, repos.length);
+}
+
+function renderFailureList(screen, y, h, W) {
+  if (appState.actionsFailureLoading) { loadingIndicator(screen, 2, y, 'scanning workflow failures'); return; }
+  const failures = appState.actionsFailures || [];
+  if (failures.length === 0) {
+    emptyState(screen, y, h, { icon: '✓', title: 'No recent workflow failures', message: 'Press [F] to scan up to 20 repositories' });
+    return;
+  }
+  screen.writeStr(2, y, 'CONCLUSION', { fg: 'cyan', bold: true });
+  screen.writeStr(18, y, 'REPOSITORY / WORKFLOW', { fg: 'cyan', bold: true });
+  y++;
+  const max = Math.max(1, h - 3);
+  appState._actionsListBounds = { rowStart: y, maxRows: max, scroll: appState.actionsScroll, length: failures.length };
+  for (let i = 0; i < max && i + appState.actionsScroll < failures.length; i++) {
+    const idx = i + appState.actionsScroll;
+    const run = failures[idx];
+    const selected = idx === appState.actionsSelected;
+    if (selected) for (let x = 0; x < W; x++) screen.styleBuf[y + i][x] = color('selection');
+    screen.writeStr(2, y + i, selected ? '▶ ✗' : '  ✗', selected ? color('selection') : { fg: 'red', bold: true });
+    screen.writeStr(18, y + i, truncate(run.repo + ' / ' + (run.name || run.display_title || '?'), W - 36), selected ? color('selection') : null);
+    screen.writeStr(W - 16, y + i, '#' + (run.run_number || run.id || '?') + ' ' + relTime(run.updated_at || run.created_at), selected ? color('selection') : { dim: true });
+  }
+  scrollIndicators(screen, y, y + max - 1, appState.actionsScroll, failures.length);
+  screen.writeStr(2, y + Math.min(max, failures.length) + 1, '[F] rescan   [Enter] open repo runs   [Esc] back', { dim: true });
 }
 
 function renderRunList(screen, y, h, W) {
@@ -430,8 +625,18 @@ registerInputHandler('actions-filter', (value) => {
 
 export const keys = {
   '/': () => startInput('Filter repos: ', 'actions-filter'),
-  't': () => {
+  'F': () => { appState.actionsView = 'failures'; appState.actionsSelected = 0; appState.actionsScroll = 0; loadFailureQueue(); },
+  'd': () => { if (appState.actionsView === 'runs') startWorkflowDispatch(); },
+  'l': () => {
     if (appState.actionsView === 'runs') {
+      const run = appState.actionsRuns[appState.actionsSelected];
+      const jobs = run && appState.actionsJobs[run.id];
+      const job = jobs && jobs.find(j => j.conclusion === 'failure') || jobs && jobs[0];
+      if (job) openWorkflowLog(job.id); else showMessage('Expand a run first to load its jobs', 'warning');
+    }
+  },
+  't': () => {
+    if (appState.actionsView === 'runs' || appState.actionsView === 'failures') {
       appState.actionsView = 'repos';
       appState.actionsExpandedRun = null;
       render();
@@ -445,7 +650,14 @@ export const keys = {
 };
 
 export function up() {
-  if (appState.actionsView === 'repos') {
+  if (appState.actionsLog) {
+    appState.actionsLogScroll = Math.max(0, appState.actionsLogScroll - 1);
+    render();
+  } else if (appState.actionsView === 'failures') {
+    appState.actionsSelected = Math.max(0, appState.actionsSelected - 1);
+    appState.actionsScroll = Math.min(appState.actionsScroll, appState.actionsSelected);
+    render();
+  } else if (appState.actionsView === 'repos') {
     const repos = getFilteredRepos();
     if (repos.length === 0) return;
     appState.actionsRepoSelected = Math.max(0, appState.actionsRepoSelected - 1);
@@ -467,7 +679,14 @@ export function up() {
 }
 
 export function down() {
-  if (appState.actionsView === 'repos') {
+  if (appState.actionsLog) {
+    const lines = String(appState.actionsLog.text || '').split(/\\r?\\n/);
+    appState.actionsLogScroll = Math.min(Math.max(0, lines.length - 1), appState.actionsLogScroll + 1);
+    render();
+  } else if (appState.actionsView === 'failures') {
+    appState.actionsSelected = Math.min(Math.max(0, appState.actionsFailures.length - 1), appState.actionsSelected + 1);
+    render();
+  } else if (appState.actionsView === 'repos') {
     const repos = getFilteredRepos();
     const maxVisible = Math.max(1, (process.stdout.rows || 24) - 12);
     if (repos.length === 0) return;
@@ -490,7 +709,10 @@ export function down() {
 }
 
 export function bottom(screen) {
-  if (appState.actionsView === 'repos') {
+  if (appState.actionsLog) {
+    const lines = String(appState.actionsLog.text || '').split(/\\r?\\n/);
+    appState.actionsLogScroll = Math.max(0, lines.length - 1);
+  } else if (appState.actionsView === 'repos') {
     const repos = getFilteredRepos();
     appState.actionsRepoSelected = Math.max(0, repos.length - 1);
     const maxVisible = Math.max(1, (screen ? screen.height : process.stdout.rows || 24) - 12);
@@ -507,12 +729,19 @@ export function bottom(screen) {
 export function enter() {
   if (appState.actionsView === 'repos') {
     loadWorkflowRuns();
+  } else if (appState.actionsView === 'failures') {
+    const failure = appState.actionsFailures[appState.actionsSelected];
+    if (failure?.repo) {
+      const idx = appState.actionsRepos.findIndex(r => r.full_name === failure.repo);
+      if (idx >= 0) { appState.actionsRepoSelected = idx; appState.actionsView = 'runs'; loadWorkflowRuns(); }
+    }
   } else {
     toggleRunDetail();
   }
 }
 
 export function space() {
+  if (appState.actionsView === 'failures') { loadFailureQueue(); return; }
   if (appState.actionsView === 'repos') {
     // Repository metadata is loaded in the Repos tab.
     return;
@@ -524,12 +753,12 @@ export function space() {
   }
 }
 
-const ACTIONS_SECTIONS = ['repos', 'runs'];
+const ACTIONS_SECTIONS = ['repos', 'runs', 'failures'];
 
 export function getSections() {
   return ACTIONS_SECTIONS.map(s => 'actions:' + s);
 }
 
 export function getCurrentSection() {
-  return appState.actionsView === 'runs' ? 'actions:runs' : 'actions:repos';
+  return appState.actionsView === 'runs' ? 'actions:runs' : appState.actionsView === 'failures' ? 'actions:failures' : 'actions:repos';
 }

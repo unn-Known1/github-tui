@@ -11,18 +11,18 @@ import {
   loadCollapsed, loadSession, registerShutdownCallback, runShutdownCallbacks,
 } from './tui/state.mjs';
 import { enableMouse, disableMouse } from './tui/mouse.mjs';
-import { checkLoadingWatchdog } from './tui/state.mjs';
 import { enableBracketedPaste, disableBracketedPaste } from './tui/input.mjs';
 import { loadToken } from './tui/config.mjs';
 import { loadTheme } from './tui/theme.mjs';
-import { initScreen, getScreen, render } from './tui/render.mjs';
+import { initScreen, render } from './tui/render.mjs';
 import { handleKey, registerCoreActions } from './tui/keys.mjs';
 import { registerInputHandler } from './tui/input.mjs';
 import { loadUserData } from './tui/tabs/repos.mjs';
-import { loadBookmarks, loadSavedSearches, loadPins, loadRepoPrefs, saveRepoPrefs } from './tui/store.mjs';
-import { getRateLimit, lastRateLimit } from './tui/github.mjs';
+import { loadBookmarks, loadSavedSearches, loadPins, loadInboxFilters, loadRepoPrefs, saveRepoPrefs } from './tui/store.mjs';
+import { getRateLimit, lastRateLimit, getUserRepositories, getNotifications, getWorkflowRuns } from './tui/github.mjs';
+import { exportPortableConfig, importPortableConfig } from './tui/portability.mjs';
 
-import { readFileSync, appendFileSync } from 'fs';
+import { readFileSync, appendFileSync, writeFileSync } from 'fs';
 import { fileURLToPath } from 'url';
 import { dirname, join } from 'path';
 import { homedir } from 'os';
@@ -97,6 +97,65 @@ async function refreshRateLimit() {
   } catch (e) { debugAsync('rate-limit refresh error:', e.message); }
 }
 
+async function runCliCommand(args) {
+  const command = args[0];
+  if (!['repos', 'inbox', 'actions', 'export', 'import'].includes(command)) return false;
+  const json = args.includes('--json');
+  if (command === 'export') {
+    const formatIndex = args.indexOf('--format');
+    const format = formatIndex >= 0 ? String(args[formatIndex + 1] || 'json').toLowerCase() : 'json';
+    const pathArg = args.find((arg, index) => index > 0 && !arg.startsWith('-') && args[index - 1] !== '--format');
+    const path = pathArg || (format === 'markdown' ? 'github-tui-config.md' : 'github-tui-config.json');
+    if (format === 'markdown') {
+      const bundle = (await import('./tui/portability.mjs')).buildPortableConfig();
+      const lines = ['# GitHub TUI configuration', '', '- Schema: ' + bundle.schemaVersion, '- App version: ' + bundle.appVersion, '- Exported: ' + bundle.exportedAt, '', '## Counts', '', '- Bookmarks: ' + bundle.bookmarks.length, '- Saved searches: ' + bundle.savedSearches.length, '- Pins: ' + bundle.pins.length, '- Custom sections: ' + bundle.sections.length, ''];
+      writeFileSync(path, lines.join('\\n'));
+      console.log(path);
+    } else console.log(exportPortableConfig(path));
+    return true;
+  }
+  if (command === 'import') {
+    const path = args[1];
+    if (!path) throw new Error('Usage: github-tui import <config.json>');
+    importPortableConfig(path);
+    console.log('Imported configuration from ' + path);
+    return true;
+  }
+  const token = loadToken();
+  if (!token) throw new Error('Not authenticated. Log in from Settings first.');
+  let rows = [];
+  if (command === 'repos') {
+    rows = await getUserRepositories(token, 1, 100);
+  } else if (command === 'inbox') {
+    rows = await getNotifications(token, 1, 100);
+    if (args.includes('--unread')) rows = rows.filter(n => n.unread);
+  } else if (command === 'actions') {
+    const repos = await getUserRepositories(token, 1, 20);
+    const groups = [];
+    for (const repo of repos) {
+      const [owner, name] = String(repo.full_name || '').split('/');
+      if (!owner || !name) continue;
+      try {
+        const result = await getWorkflowRuns(token, owner, name, 1, 10);
+        const runs = result?.workflow_runs || [];
+        groups.push(...runs.filter(r => !args.includes('--failed') || ['failure', 'timed_out', 'startup_failure', 'action_required'].includes(r.conclusion))
+          .map(r => ({ ...r, repository: repo.full_name })));
+      } catch {}
+    }
+    rows = groups;
+  }
+  if (json) {
+    process.stdout.write(JSON.stringify(rows, null, 2) + '\n');
+  } else if (command === 'repos') {
+    for (const r of rows) console.log((r.full_name || '?') + '\t★' + (r.stargazers_count || 0) + '\t' + (r.language || ''));
+  } else if (command === 'inbox') {
+    for (const n of rows) console.log((n.unread ? '*' : ' ') + '\t' + (n.repository?.full_name || '?') + '\t' + (n.subject?.title || ''));
+  } else {
+    for (const r of rows) console.log('✗\t' + (r.repository || '?') + '\t' + (r.name || '?') + '\t#' + (r.run_number || r.id || '?'));
+  }
+  return true;
+}
+
 async function main() {
   // CLI flags.
   if (process.argv.includes('--version') || process.argv.includes('-v')) {
@@ -106,8 +165,9 @@ async function main() {
   // --accessible flag — turn on a11y mode for screen readers / high-
   // contrast safe rendering. Color is disabled, unicode glyphs replaced
   // with bracketed ASCII labels.
-  if (process.argv.includes('--accessible') || process.argv.includes('--a11y')) {
+  if (process.argv.includes('--accessible') || process.argv.includes('--a11y') || process.argv.includes('--accessible=linear')) {
     appState.accessible = true;
+    appState.linearAccessibility = process.argv.includes('--accessible=linear');
   }
   if (process.argv.includes('--help') || process.argv.includes('-h')) {
     console.log('github-tui ' + pkg.version);
@@ -119,9 +179,13 @@ async function main() {
     console.log('  -h, --help       Show this help message');
     console.log('  -v, --version    Show version number');
     console.log('      --accessible Enable screen-reader friendly mode (text-only glyphs, no color)');
+    console.log('      --accessible=linear  Use a linear screen-reader layout');
     console.log('      --no-mouse  Disable terminal mouse capture for screen readers and copy-mode');
     process.exit(0);
   }
+
+  const cliHandled = await runCliCommand(process.argv.slice(2));
+  if (cliHandled) return;
 
   if (!process.stdin.isTTY) {
     console.log('GitHub TUI requires an interactive terminal.');
@@ -155,6 +219,7 @@ async function main() {
   appState.bookmarks = loadBookmarks();
   appState.savedSearches = loadSavedSearches();
   appState.repoPins = loadPins();
+  appState.inboxSavedFilters = loadInboxFilters();
   loadCollapsed();
   loadSession();
 

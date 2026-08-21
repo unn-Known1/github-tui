@@ -152,9 +152,6 @@ const MIN_H = 20;
 // unicode glyphs are replaced with bracketed ASCII labels so screen
 // readers and high-contrast displays get a clear text-only picture.
 // Settable via appState.accessible (set by app.mjs from --accessible arg).
-function a11ySymbol(unicode, label, accessible) {
-  return accessible ? label : unicode;
-}
 // P0-2 a11y heatmap char set: 5 buckets (none/light/medium/heavy/full)
 // vs the unicode ░▒▓█ + space. Falls back to bracketed labels.
 export function a11yHeatChar(level, accessible) {
@@ -163,10 +160,6 @@ export function a11yHeatChar(level, accessible) {
   }
   return [' ', '░', '▒', '▓', '█'][Math.max(0, Math.min(4, level))];
 }
-
-// recordModalBounds / readModalBounds were P0-4 helpers that became dead
-// code once _dispatchOverlayClick in mouse.mjs used inline bounds. Removed
-// to keep the surface area minimal.
 
 // Layout constants — single source of truth for the chrome heights.
 export const HEADER_HEIGHT = 4;     // 3-row header + 1 separator
@@ -242,27 +235,6 @@ export function emptyState(screen, y, h, { icon, title, message, hint, keyHint }
   if (keyHint) lines.push({ text: keyHint, style: { fg: 'cyan' }, yOff: 7 });
 
   if (lines.length === 0) return;
-  const totalH = lines[lines.length - 1].yOff + 1;
-  const startY = y + Math.max(0, Math.floor((h - totalH) / 2));
-
-  for (const line of lines) {
-    const row = startY + line.yOff;
-    if (row >= y + h) break;
-    const cx = Math.max(CONTENT_PADDING, Math.floor((W - line.text.length) / 2));
-    screen.writeStr(cx, row, line.text, line.style);
-  }
-}
-
-// Draw a centered error-state card: icon + message + retry hint.
-export function errorState(screen, y, h, { message, detail }) {
-  const W = screen.width;
-  const lines = [];
-  lines.push({ text: '⚠',    style: { fg: 'red', bold: true },  yOff: 0 });
-  lines.push({ text: 'Error', style: { fg: 'red', bold: true },  yOff: 2 });
-  if (message) lines.push({ text: message, style: color('dim'),   yOff: 4 });
-  if (detail)  lines.push({ text: detail,  style: color('dim'),   yOff: 5 });
-  lines.push({ text: 'Press [r] to retry', style: { fg: 'red' }, yOff: 7 });
-
   const totalH = lines[lines.length - 1].yOff + 1;
   const startY = y + Math.max(0, Math.floor((h - totalH) / 2));
 
@@ -643,12 +615,46 @@ function renderCompact(W, H) {
   screen.hline(H - 1, '─', { dim: true });
 }
 
+function renderLinear(W, H) {
+  const labels = ['Dashboard', 'Repositories', 'Explore', 'Actions', 'Inbox', 'Settings'];
+  const title = labels[tabState.current] || 'View';
+  screen.writeStr(0, 0, 'GitHub TUI — ' + title, { bold: true });
+  screen.writeStr(0, 1, 'Breadcrumb: ' + buildBreadcrumb().join(' > '), { dim: true });
+  screen.writeStr(0, 2, appState.loading ? 'Status: loading' : appState.message ? 'Status: ' + appState.message.text : 'Status: ready', { dim: true });
+  const lines = [];
+  if (!appState.token) lines.push('Not signed in. Open Settings and choose Login.');
+  else if (tabState.current === 0) {
+    lines.push('User: @' + (appState.user?.login || 'unknown'));
+    lines.push('Repositories: ' + appState.repos.length);
+    lines.push('Unread notifications: ' + getUnreadCount());
+    for (const item of (appState.dashboardAttentionItems || [])) lines.push('Attention: ' + item.label + ' (' + item.count + ')');
+  } else if (tabState.current === 1) {
+    for (const repo of appState.repos.slice(0, Math.max(1, H - 7))) lines.push((repo.full_name || '?') + ' — ' + (repo.description || ''));
+  } else if (tabState.current === 2) {
+    lines.push('Search: ' + (appState.searchQuery || '(none)'));
+    for (const repo of (appState.searchResults || []).slice(0, Math.max(1, H - 7))) lines.push((repo.full_name || '?') + ' — ' + (repo.description || ''));
+  } else if (tabState.current === 3) {
+    for (const run of (appState.actionsRuns || []).slice(0, Math.max(1, H - 7))) lines.push((run.name || '?') + ' #' + (run.run_number || run.id || '?') + ' ' + (run.conclusion || run.status || ''));
+  } else if (tabState.current === 4) {
+    for (const note of (appState.notifications || []).slice(0, Math.max(1, H - 7))) lines.push((note.unread ? '[unread] ' : '') + (note.repository?.full_name || '?') + ' — ' + (note.subject?.title || ''));
+  } else lines.push('Settings menu. Use arrow keys and Enter.');
+  for (let i = 0; i < Math.min(lines.length, H - 5); i++) screen.writeStr(0, 4 + i, truncateToWidth(lines[i], W, ''), null);
+  screen.writeStr(0, H - 2, '[↑↓] navigate  [Enter] select  [1-6] tabs  [q] quit  [?] help', { dim: true });
+  screen.hline(H - 1, '─', { dim: true });
+}
+
 function doRender() {
   if (!screen) return;
   const W = screen.width;
   const H = screen.height;
   // Buffer is already clear from the previous render's swap — no clear() needed.
   appState._sectionHeaders = {};
+
+  if (appState.linearAccessibility && W >= 40 && H >= 10) {
+    renderLinear(W, H);
+    screen.render();
+    return;
+  }
 
   // ── Compact terminal mode ──
   if (W >= 40 && H >= 12 && (W < MIN_W || H < MIN_H)) {

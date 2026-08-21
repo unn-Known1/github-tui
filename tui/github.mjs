@@ -3,12 +3,21 @@
 
 import https from 'https';
 import { createHash } from 'crypto';
-import { readFileSync, writeFileSync, existsSync, mkdirSync, chmodSync, unlinkSync } from 'fs';
+import { readFileSync, writeFileSync, existsSync, mkdirSync, chmodSync, unlinkSync, createWriteStream } from 'fs';
 import { dirname } from 'path';
 import { ETAG_CACHE_FILE, LAST_SYNCED_FILE } from './config.mjs';
 
-const GITHUB_API = 'api.github.com';
+let GITHUB_API = 'api.github.com';
+let GITHUB_WEB = 'github.com';
 const USER_AGENT = 'GitHub-TUI';
+
+/** Configure the API/web hosts for GitHub Enterprise Server profiles. */
+export function configureGitHubHosts({ apiHost, webHost } = {}) {
+  if (apiHost) GITHUB_API = String(apiHost).replace(/^https?:\/\//, '').replace(/\/$/, '');
+  if (webHost) GITHUB_WEB = String(webHost).replace(/^https?:\/\//, '').replace(/\/$/, '');
+  return getGitHubHosts();
+}
+export function getGitHubHosts() { return { apiHost: GITHUB_API, webHost: GITHUB_WEB }; }
 
 // Structured API error — carries HTTP status and endpoint for better diagnostics.
 export class GitHubApiError extends Error {
@@ -41,7 +50,7 @@ function tokenIdentity(token) {
 export function cacheKeyFor(method, path, accept, raw, token) {
   // Keep credentials out of the persisted key while partitioning private
   // responses between accounts. An empty identity is the anonymous cache.
-  return `v2:${method}:${path}:${accept || ''}:${raw ? 'raw' : 'json'}:${tokenIdentity(token)}`;
+  return `v2:${GITHUB_API}:${method}:${path}:${accept || ''}:${raw ? 'raw' : 'json'}:${tokenIdentity(token)}`;
 }
 
 export function encodeRepoPath(path) {
@@ -554,6 +563,13 @@ export const cancelWorkflowRun = (token, owner, repo, runId) =>
     { token, method: 'POST' });
 export const getWorkflowJobs = (token, owner, repo, runId, signal) =>
   request('/repos/' + owner + '/' + repo + '/actions/runs/' + runId + '/jobs', { token, signal });
+export const getWorkflowJobLogs = (token, owner, repo, jobId, signal) =>
+  fetchTextUrl('https://' + GITHUB_API + '/repos/' + owner + '/' + repo +
+    '/actions/jobs/' + jobId + '/logs', token, signal);
+export const dispatchWorkflow = (token, owner, repo, workflowId, ref, inputs = {}) =>
+  request('/repos/' + owner + '/' + repo + '/actions/workflows/' + encodeURIComponent(workflowId) + '/dispatches', {
+    token, method: 'POST', body: { ref, inputs },
+  });
 
 // ─── Branches, zipball, per-file commits, raw bytes ──────────────────
 export const getBranches = (token, owner, repo, perPage, signal) =>
@@ -562,6 +578,12 @@ export const getBranches = (token, owner, repo, perPage, signal) =>
 export const getFileCommits = (token, owner, repo, path, perPage, signal) =>
   request('/repos/' + owner + '/' + repo + '/commits?path=' +
     encodeURIComponent(path) + '&per_page=' + (perPage||10), { token, signal });
+export const getRepoCommits = (token, owner, repo, page, perPage, ref, signal) =>
+  request('/repos/' + owner + '/' + repo + '/commits?page=' + (page || 1) +
+    '&per_page=' + (perPage || 30) + (ref ? '&sha=' + encodeURIComponent(ref) : ''), { token, signal });
+export const getFileBlame = (token, owner, repo, path, ref, signal) =>
+  request('/repos/' + owner + '/' + repo + '/commits?path=' + encodeURIComponent(path) +
+    '&sha=' + encodeURIComponent(ref || 'HEAD') + '&per_page=100', { token, signal });
 
 // Returns the *redirect URL* to the zipball without following it. Used by the
 // file-tree pane to hand the URL to a streaming download routine that writes
@@ -576,13 +598,12 @@ export function getZipballUrl(owner, repo, ref) {
   const r = ref || 'main';
   // Use the API archive endpoint — the codeload redirect heuristic was
   // unreliable for tag/branch names that don't start with "v?digits.digits".
-  return 'https://api.github.com/repos/' + owner + '/' + repo +
+  return 'https://' + GITHUB_API + '/repos/' + owner + '/' + repo +
     '/zipball/' + encodeURIComponent(r);
 }
 
 // Download an arbitrary URL straight to a local file path, streaming.
 // Used for zipballs. Requires only built-in https.
-import { createWriteStream } from 'fs';
 export function downloadToFile(url, destPath, token) {
   let parsedUrl;
   try {
@@ -662,6 +683,49 @@ export function downloadToFile(url, destPath, token) {
   });
 }
 
+// Fetch a redirected GitHub log as bounded text. This intentionally does not
+// reuse JSON request(): the Actions logs endpoint redirects to a short-lived
+// plain-text URL, often on a different host, and credentials must not follow
+// that redirect.
+export function fetchTextUrl(url, token, signal, maxBytes = 2_000_000) {
+  return new Promise((resolve, reject) => {
+    let current;
+    try { current = new URL(url); } catch { return reject(new Error('Invalid log URL')); }
+    if (current.protocol !== 'https:') return reject(new Error('Log URL must use HTTPS'));
+    let settled = false;
+    const finish = (fn, value) => { if (settled) return; settled = true; fn(value); };
+    const get = (u, redirectsLeft) => {
+      if (signal?.aborted) return finish(reject, new Error('Aborted'));
+      const headers = { 'User-Agent': USER_AGENT };
+      if (token && u.hostname === GITHUB_API) headers.Authorization = 'token ' + token;
+      const req = https.get({ hostname: u.hostname, path: u.pathname + u.search, headers }, (res) => {
+        if (res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) {
+          if (redirectsLeft <= 0) { res.resume(); return finish(reject, new Error('Too many log redirects')); }
+          let next;
+          try { next = new URL(res.headers.location, u); } catch { res.resume(); return finish(reject, new Error('Invalid log redirect')); }
+          if (next.protocol !== 'https:') { res.resume(); return finish(reject, new Error('Log redirect must use HTTPS')); }
+          res.resume();
+          return get(next, redirectsLeft - 1);
+        }
+        if (res.statusCode !== 200) { res.resume(); return finish(reject, new GitHubApiError('Workflow log HTTP ' + res.statusCode, res.statusCode, u.pathname)); }
+        let data = '', bytes = 0;
+        res.setEncoding('utf8');
+        res.on('data', chunk => {
+          if (bytes >= maxBytes) return;
+          const remaining = maxBytes - bytes;
+          data += chunk.slice(0, remaining);
+          bytes += Math.min(chunk.length, remaining);
+        });
+        res.on('end', () => finish(resolve, { text: data, truncated: bytes >= maxBytes, bytes, url: u.toString() }));
+        res.on('error', e => finish(reject, e));
+      });
+      req.on('error', e => finish(reject, e));
+      signal?.addEventListener('abort', () => { try { req.destroy(); } catch {} finish(reject, new Error('Aborted')); }, { once: true });
+    };
+    get(current, 5);
+  });
+}
+
 // ─── Issue / PR detail, comments, actions ──────────────────────────
 export const getIssue = (token, owner, repo, number, signal) =>
   request('/repos/' + owner + '/' + repo + '/issues/' + number, { token, signal });
@@ -675,6 +739,13 @@ export const getPullRequestReviews = (token, owner, repo, number, signal) =>
 export const getPullRequestFiles = (token, owner, repo, number, page, perPage, signal) =>
   request('/repos/' + owner + '/' + repo + '/pulls/' + number +
     '/files?page=' + (page||1) + '&per_page=' + (perPage||30), { token, signal });
+export const getPullRequestReviewComments = (token, owner, repo, number, page, perPage, signal) =>
+  request('/repos/' + owner + '/' + repo + '/pulls/' + number + '/comments?page=' +
+    (page || 1) + '&per_page=' + (perPage || 50), { token, signal });
+export const submitPullRequestReview = (token, owner, repo, number, event, body, comments = []) =>
+  request('/repos/' + owner + '/' + repo + '/pulls/' + number + '/reviews', {
+    token, method: 'POST', body: { event, body: body || '', comments: Array.isArray(comments) ? comments : [] },
+  });
 export const postComment = (token, owner, repo, number, body) =>
   request('/repos/' + owner + '/' + repo + '/issues/' + number + '/comments', {
     token, method: 'POST', body: { body },
@@ -696,10 +767,12 @@ export const mergePullRequest = (token, owner, repo, number, mergeMethod) =>
   request('/repos/' + owner + '/' + repo + '/pulls/' + number + '/merge', {
     token, method: 'PUT', body: { merge_method: mergeMethod || 'merge' },
   });
-export const requestReview = (token, owner, repo, number, reviewers) =>
+export const requestReview = (token, owner, repo, number, reviewers, teamReviewers = []) =>
   request('/repos/' + owner + '/' + repo + '/pulls/' + number + '/requested_reviewers', {
-    token, method: 'POST', body: { reviewers },
+    token, method: 'POST', body: { reviewers: reviewers || [], team_reviewers: teamReviewers || [] },
   });
+export const updateIssue = (token, owner, repo, number, patch) =>
+  request('/repos/' + owner + '/' + repo + '/issues/' + number, { token, method: 'PATCH', body: patch || {} });
 
 // ─── Rate Limit ────────────────────────────────────────────────────
 export const getRateLimit = (token) =>
@@ -805,3 +878,17 @@ export const createIssue = (token, owner, repo, title, body, labels, assignees) 
     token, method: 'POST',
     body: { title, body: body || '', labels: labels || [], assignees: assignees || [] },
   });
+export const getUserOrganizations = (token, page, perPage, signal) =>
+  request('/user/orgs?page=' + (page || 1) + '&per_page=' + (perPage || 50), { token, signal });
+export const getOrganizationRepos = (token, org, page, perPage, signal) =>
+  request('/orgs/' + encodeURIComponent(org) + '/repos?page=' + (page || 1) +
+    '&per_page=' + (perPage || 50) + '&sort=updated', { token, signal });
+export const getOrganizationTeams = (token, org, page, perPage, signal) =>
+  request('/orgs/' + encodeURIComponent(org) + '/teams?page=' + (page || 1) +
+    '&per_page=' + (perPage || 50), { token, signal });
+export const getRelease = (token, owner, repo, releaseId, signal) =>
+  request('/repos/' + owner + '/' + repo + '/releases/' + releaseId, { token, signal });
+export const createRelease = (token, owner, repo, payload) =>
+  request('/repos/' + owner + '/' + repo + '/releases', { token, method: 'POST', body: payload || {} });
+export const updateRelease = (token, owner, repo, releaseId, payload) =>
+  request('/repos/' + owner + '/' + repo + '/releases/' + releaseId, { token, method: 'PATCH', body: payload || {} });
