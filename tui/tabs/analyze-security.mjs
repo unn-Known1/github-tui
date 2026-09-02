@@ -159,10 +159,15 @@ export function renderSecurityPane(screen, y, maxH) {
     const sp = subPanes[i];
     const sel = appState.securitySubPane === sp;
     const label = SECURITY_SUB_LABELS[sp];
+    // Tabs are padded pills: the active one renders as a filled chip
+    // (theme-aware chipActive) and inactive ones stay dim, matching the
+    // detail-popup tab treatment. Bounds cover the full tile so clicks on
+    // the padding count too — no dead zones between tabs.
     const text = '[' + SECURITY_SUB_KEYS[i] + '] ' + label;
-    screen.writeStr(px, y, text, sel ? { bg: 'cyan', fg: 'darkGray', bold: true } : { dim: true });
-    subTabBounds.push({ x1: px, x2: px + text.length, pane: sp });
-    px += text.length + 2;
+    const txt = ' ' + text + ' ';
+    screen.writeStr(px, y, txt, sel ? color('chipActive') : color('chipInactive'));
+    subTabBounds.push({ x1: px, x2: px + txt.length, pane: sp });
+    px += txt.length;
   }
   appState._securitySubTabBounds = { y, bounds: subTabBounds };
   y++;

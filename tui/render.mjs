@@ -14,6 +14,11 @@ import { dirname, join } from 'path';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 const VERSION = JSON.parse(readFileSync(join(__dirname, '..', 'package.json'), 'utf8')).version;
+
+// Per-tab icon glyphs — a color-coded dashboard-nav signature. Each icon is
+// painted in its own theme hue (see iconHues in renderTabStrip); the glyphs
+// stay fixed so custom themes change colors, never meaning.
+const TAB_ICONS = ['◈', '▦', '◎', '▶', '✉', '⚙'];
 import { renderDashboard } from './tabs/dashboard.mjs';
 import { renderRepos } from './tabs/repos.mjs';
 import { renderAnalyze } from './tabs/analyze.mjs';
@@ -431,34 +436,52 @@ function renderTabStrip(y, W) {
     cx += tabW;
   }
 
+  // Per-tab hue palette (theme tokens): Dash/blue, Repos/green,
+  // Explore/purple, Actions/yellow, Inbox/orange, Settings/teal.
+  const iconHues = [
+    color('accent'), color('success'), color('trending'),
+    color('warning'), color('unread'), color('fork'),
+  ];
+
   TABS.forEach((tab, i) => {
     const isActive = i === tabState.current;
     const bx = tabXs[i];
     const label = tab.label;
     const key = tab.key;
 
-    // Background: active gets a chip-like colored bg.
+    // Active tab gets the full-band selection chip; inactive tabs keep a
+    // transparent band and emphasize the number instead. All colors come
+    // from the theme (tabActive / tabInactive / accent / breadcrumbSep),
+    // so custom themes drive the nav too.
     if (isActive) {
       for (let xx = bx; xx < bx + tabW && xx < W - 1; xx++) {
-        screen.styleBuf[tabRowY][xx] = { bg: 'cyan', fg: 'white', bold: true };
+        screen.styleBuf[tabRowY][xx] = color('tabActive');
       }
     } else {
-      // Subtle dimmed style for inactive tabs.
       for (let xx = bx; xx < bx + tabW && xx < W - 1; xx++) {
         screen.styleBuf[tabRowY][xx] = { dim: true };
       }
     }
 
-    // Tab text: "[1] Dash"
-    const text = '[' + key + '] ' + label;
+    // Tab text: colored icon chip + dim label; the active tab renders on
+    // the selection chip with a leading ▸ pointer. On narrow terminals the
+    // icon is dropped per-tab so labels never clip into the divider.
     const tx = bx + 1;
-    screen.writeStr(tx, tabRowY, text, isActive ? { bg: 'cyan', fg: 'white', bold: true } : { fg: 'gray', dim: true });
+    const kt = '[' + key + ']' + (tabW >= 14 ? ' ' + TAB_ICONS[i] : '');
+    const lt = ' ' + label;
+    const text = isActive ? '▸ ' + kt + lt : kt + lt;
+    if (isActive) {
+      screen.writeStr(tx, tabRowY, text, color('tabActive'));
+    } else {
+      screen.writeStr(tx, tabRowY, kt, { ...iconHues[i], bold: true });
+      screen.writeStr(tx + kt.length, tabRowY, lt, color('tabInactive'));
+    }
 
     // Badge for inbox with unread items.
     if (i === 4 && unreadCount > 0) {
       const badgeText = ' ' + (unreadCount > 99 ? '99+' : String(unreadCount)) + ' ';
       const bx2 = bx + tabW - badgeText.length - 1;
-      if (bx2 > tx + text.length + 1) {
+      if (bx2 >= tx + text.length + 1) {
         for (let xx = bx2; xx < bx2 + badgeText.length && xx < W - 1; xx++) {
           screen.styleBuf[tabRowY][xx] = color('tabBadge');
         }
@@ -473,7 +496,7 @@ function renderTabStrip(y, W) {
   if (activeTab) {
     const ax = tabXs[tabState.current];
     for (let xx = ax; xx < ax + tabW && xx < W - 1; xx++) {
-      screen.setCell(xx, sepY, '━', { fg: 'cyan', bold: true });
+      screen.setCell(xx, sepY, '━', { ...color('accent'), bold: true });
     }
   }
 }
