@@ -2,7 +2,7 @@
 
 > *The fastest way to live in GitHub without a browser tab — discovery, triage, review, and CI in one terminal.*
 
-**Current version:** v0.7.0
+**Current version:** v0.7.1
 
 ---
 
@@ -20,7 +20,7 @@
 
 ---
 
-## 📊 What's Built (v0.1 → v0.7.0)
+## 📊 What's Built (v0.1 → v0.7.1)
 
 | Feature | Status |
 |---|---|
@@ -96,12 +96,12 @@
 
 | Feature | Why |
 |---|---|
-| ~~**Syntax-highlighted file viewer**~~ | Implemented in unreleased v0.7.0 |
+| ~~**Syntax-highlighted file viewer**~~ | Implemented in v0.7.0 |
 | **Topic explorer toggles** | 7d / 30d / 90d / by language facets |
-| ~~**Branch/tag comparison**~~ | Implemented in unreleased v0.7.0 |
+| ~~**Branch/tag comparison**~~ | Implemented in v0.7.0 |
 | **Code search** | `searchCode` across orgs |
-| ~~**Blame view**~~ | Implemented in unreleased v0.7.0 |
-| ~~**File history**~~ | Implemented in unreleased v0.7.0 |
+| ~~**Blame view**~~ | Implemented in v0.7.0 |
+| ~~**File history**~~ | Implemented in v0.7.0 |
 
 ---
 
@@ -111,9 +111,9 @@
 |---|---|
 | **OAuth device-flow login** | No PAT required; just authorize in browser |
 | **OS keychain integration** | macOS Keychain, libsecret, Windows Credential Manager |
-| ~~**GitHub Enterprise Server**~~ | Implemented in unreleased v0.7.0; profile-aware host configuration |
+| ~~**GitHub Enterprise Server**~~ | Implemented in v0.7.0; profile-aware host configuration |
 | **Token scope auditor** | Warnings for over-privileged tokens |
-| ~~**Dependabot aggregator**~~ | Implemented in unreleased v0.7.0 as bounded security aggregation |
+| ~~**Dependabot aggregator**~~ | Implemented in v0.7.0 as bounded security aggregation |
 
 ---
 
@@ -121,8 +121,8 @@
 
 | Feature | Why |
 |---|---|
-| ~~**Screen-reader mode**~~ | Implemented in unreleased v0.7.0 with linear accessibility mode |
-| ~~**CLI subcommands**~~ | Implemented in unreleased v0.7.0 for repositories, Inbox, Actions, and config portability |
+| ~~**Screen-reader mode**~~ | Implemented in v0.7.0 with linear accessibility mode |
+| ~~**CLI subcommands**~~ | Implemented in v0.7.0 for repositories, Inbox, Actions, and config portability |
 | **Homebrew / Scoop / AUR / Nix** | Easy install on every platform |
 | **Static binary** | Optional `pkg` build for zero-install |
 | **Demo GIF** | Terminal recording for README |
@@ -266,7 +266,7 @@
 1. `Ctrl-P` → "Since I was last here".
 2. Shows: merges missed, mentions waiting, new issues.
 
-### R5 — "Security Sweep" ✅ implemented in unreleased v0.7.0
+### R5 — "Security Sweep" ✅ implemented in v0.7.0
 1. `Ctrl-P` → "Dependabot alerts".
 2. Aggregated, sorted by severity.
 
@@ -311,7 +311,7 @@
 | Zero install | needs install | needs install | web app | ✅ |
 | Offline + disk cache | ❌ | ❌ | ❌ | ✅ v0.6 |
 | AI summarise | ❌ | ❌ | ❌ | 🎯 v1.1 |
-| Enterprise Server | ✅ | n/a | partial | 🟡 v0.7.0 (unreleased) |
+| Enterprise Server | ✅ | n/a | partial | ✅ v0.7.0 |
 | Plugin system | ❌ | ❌ | ❌ | 🎯 v2.0 |
 | Release automation | ❌ | ❌ | ❌ | 🎯 v2.1 |
 

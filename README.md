@@ -2,7 +2,7 @@
 
 A fast, zero-dependency terminal user interface for GitHub — six tabs, a command palette, an in-terminal file explorer that can clone or save anything to your CWD, an inbox triage workflow, themes, persistent bookmarks & pins, OSC-52 clipboard, ETag-aware caching, mouse support, collapsible sections, and comprehensive repo analytics. All driven by your keyboard (and mouse).
 
-![status](https://img.shields.io/badge/status-active-success) ![node](https://img.shields.io/badge/node-%E2%89%A518-blue) ![deps](https://img.shields.io/badge/deps-0-green) [![Socket Badge](https://badge.socket.dev/npm/package/github-tui/0.7.0)](https://badge.socket.dev/npm/package/github-tui/0.7.0) ![license](https://img.shields.io/badge/license-MIT-blue)
+![status](https://img.shields.io/badge/status-active-success) ![node](https://img.shields.io/badge/node-%E2%89%A518-blue) ![deps](https://img.shields.io/badge/deps-0-green) [![Socket Badge](https://badge.socket.dev/npm/package/github-tui/0.7.1)](https://badge.socket.dev/npm/package/github-tui/0.7.1) ![license](https://img.shields.io/badge/license-MIT-blue)
 
 ![GitHub TUI Screenshot](https://raw.githubusercontent.com/unn-Known1/github-tui/main/Screenshot.png)
 
@@ -337,7 +337,7 @@ Every tab module exports `render(screen, y, h)`, an optional `keys` map for tab-
 ### 5 · Settings
 - **Authentication:** Login (GitHub CLI) — uses `gh auth token` if `gh` is installed; Login (PAT) — paste a Personal Access Token; Logout.
 - **Actions:** Refresh Dashboard, Refresh User Data, Auto-Refresh, **Change Theme**, Clear Token File, Token display.
-- **System panel:** app version (`0.7.0`), config dir, token file path, Node version, platform/arch, terminal size, **API remaining / limit / reset-in minutes**, **token scopes**, active keychain backend.
+- **System panel:** app version (`0.7.1`), config dir, token file path, Node version, platform/arch, terminal size, **API remaining / limit / reset-in minutes**, **token scopes**, active keychain backend.
 
 ### 6 · Inbox
 - Per-row: ▶ selection, ● yellow unread dot, color-coded subject type (PR/cyan, Issue/yellow, Release/green, Discussion/magenta, Commit/blue, CheckSuite/red), repo·title, reason, relative time.
@@ -383,7 +383,7 @@ Every tab module exports `render(screen, y, h)`, an optional `keys` map for tab-
   - ✅ **shipped (v0.5):** commenting on issues/PRs, reactions, close/reopen, merge PRs, PR diff viewer, review comments.
   - ✅ **shipped (v0.5.8):** rate limit indicator, traffic/milestones/labels/checks/security panes, mouse support, collapsible sections, hover effects, followers section, Windows and terminal icon compatibility, File Explorer selection fixes, help overlay scroll clamping.
   - ✅ **shipped (v0.6.2):** Actions tab full rewrite (rerun, cancel, expand jobs/steps, correct key bindings), Inbox triage fixes (append-more, true unsubscribe, filtered scroll bounds, fallback URLs).
-  - 🟡 **implemented in unreleased v0.7.0:** workflow logs/dispatch/failure queue, PR review submission, issue metadata updates, release actions, security aggregation, repository health, compare/history/blame, Inbox grouping/snoozing/saved filters, configuration portability, Enterprise profiles, organization context, CLI output, and linear accessibility.
+  - ✅ **shipped (v0.7.0):** workflow logs/dispatch/failure queue, PR review submission, issue metadata updates, release actions, security aggregation, repository health, compare/history/blame, Inbox grouping/snoozing/saved filters, configuration portability, Enterprise profiles, organization context, CLI output, and linear accessibility.
 - Only the GitHub REST v3 API is used (no GraphQL yet).
 - Requires a true TTY — won't run when stdin is piped.
 - File syntax highlighting is intentionally lightweight and read-only; it tokenizes common constructs for the supported top languages rather than providing a full compiler-grade lexer.
@@ -398,12 +398,21 @@ Every tab module exports `render(screen, y, h)`, an optional `keys` map for tab-
 
 **Shipped in v0.5:** Issue/PR detail popup with rendered body, labels, comments, and file diffs. Comment from TUI, emoji reactions, close/reopen, merge PRs with confirmation. PR diff viewer with unified diff and syntax coloring. Inbox notifications open detail popup for issues/PRs.
 
-**Unreleased in v0.7.0:**
+**Shipped in v0.7.0:**
 - **Dashboard and interaction hardening** — repaired keyboard/mouse focus, custom-section navigation, page scrolling, refresh freshness, local filtering, partial-failure handling, retryable Trending errors, and compact Needs Attention actions.
 - **CI cockpit** — added workflow logs, workflow dispatch with validated inputs, failed-run aggregation, pagination, and corrected Actions shortcuts.
 - **Review and repository workflows** — added PR review submission and reviewer requests, issue metadata updates, release draft/publish/edit actions, branch comparison, repository health scoring, security aggregation, per-file history, local blame, and syntax-highlighted file viewing.
 - **Inbox and portability** — added grouping, snoozing, saved filters, custom Dashboard section editing, Enterprise/account profiles, organization context, JSON/Markdown config export/import, read-only CLI commands, linear accessibility, and validated plugin discovery.
 - **Cleanup and regression coverage** — removed confirmed dead imports and duplicate tests; **269 / 269 tests pass** with import and syntax checks clean.
+
+**Shipped in v0.7.1:**
+- **Inbox** — Enter opens issue/PR popups (retryable inline errors instead of silent close), other notification types open the actual thread in the browser with an Explore fallback, empty-state diagnostics reveal hidden filters, `/` search prefills the active filter, `G`/`z` keys dispatch, stale-scroll self-healing, snoozed-count indicators.
+- **Repos** — true open-issue counts (ISSUES column excludes pull requests), double-click opens a row like Enter with ±2-cell jitter tolerance, starring from Explore details.
+- **Actions** — lists only repositories with GitHub workflows (`R` rescans).
+- **Dashboard** — trending fills the window and single-click highlight is reliable.
+- **Detail popup** — key routing and overlay layering fixed; inline load errors with retry.
+- **Removed** the Milestones/Labels detail panes and their modules.
+- **269 / 269 tests pass** with import and syntax checks clean.
 
 **Shipped in v0.6.7:**
 - **Audit hardening** — fixed lifecycle cleanup, upgrade-note gating, account-safe logout/reset, token-partitioned ETag caching, secure streamed downloads, stale-request cancellation, filtered Inbox actions, Settings navigation, starred pagination, and Unicode input cursor handling.

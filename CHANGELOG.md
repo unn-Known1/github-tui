@@ -2,6 +2,28 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.7.1] - 2026-09-02
+
+### Added
+- Star/unstar (`s`) on the Explore tab's repo Overview — toggles the GitHub star with a toast alert, matching the Repos-tab behavior.
+- Actions tab now lists only repositories that have GitHub workflow files (`R` rescans).
+- Repos tab "ISSUES" column now counts open issues only, separate from pull requests (true issue counts), with the combined number shown in the PR column.
+- Double-click on a Repos-tab row opens the repo exactly like `Enter` — with a ±2-cell jitter tolerance so trackpad/scaled-mouse double-clicks register reliably.
+
+### Fixed
+- PR/issue detail popup key routing — every action key (comment, reaction, close/reopen, merge, review) now works while the popup is open.
+- Dashboard Trending — single click reliably highlights the selected repo (was a silent no-op when the focus-zone guard bailed); the list now fills the available window height instead of a hard ~7-row budget, with a draw-time scroll/selection clamp keeping the highlight visible at any size.
+- Inbox Enter — Issue/PR notifications open the inline detail popup and keep it open with an inline error + `[r] Retry` when the load fails (previously the popup blinked shut, looking like nothing happened); other notification types open the actual thread in the browser with a toast, falling back to the repo in Explore only when no browser can be launched.
+- Inbox empty-state diagnostics — stale scroll positions self-heal at render time, and the "No matches" state now names the exact hidden filter (local-repo context, leftover `/` text search, hide-processed, snoozed) plus how to undo it; active passive filters are shown in the header (`· repo: o/r`, `· search: "…"`, `· N snoozed`).
+- Inbox `/` search prompt prefills with the active filter so a stuck query is visible and can be cleared with Enter.
+- Inbox `G` (group) and `z` (snooze) keys now dispatch — they were being swallowed by the global jump-to-bottom / collapse handlers.
+
+### Removed
+- `[M] Milestones` and `[L] Labels` detail sub-tabs (Explore) and their now-unused `analyze-milestones.mjs` / `analyze-labels.mjs` modules; the milestone/label state backing issue-edit fields remains.
+
+### Verification
+- **269 / 269 tests pass**; import audit and syntax checks clean.
+
 ## [0.7.0] - 2026-08-21
 
 ### Added — CI cockpit and work queues
