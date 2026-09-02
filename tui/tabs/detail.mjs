@@ -51,6 +51,7 @@ export function openDetail(type, owner, repo, number) {
   appState.detailTab = 'body';      // 'body' | 'comments' | 'files'
   appState.detailFileCursor = 0;
   appState.detailLoading = true;
+  appState.detailError = null;
   appState.detailReactionPicker = false;
   appState.detailReactionCursor = 0;
   appState.detailReviewDraft = null;
@@ -87,11 +88,29 @@ async function loadDetail() {
     appState.detailLoading = false;
     showMessage('Loaded #' + number, 'success');
   } catch (e) {
-    if (!isStale(gen, 'detail')) showError(e.message || 'Unknown error', 'Load detail', { retry: loadDetail });
-    appState.showDetail = false;
+    if (!isStale(gen, 'detail')) {
+      // Keep the popup OPEN with an inline error instead of silently
+      // closing it — a flash-close reads as "Enter did nothing" (e.g. a
+      // rate-limit or 404 on the detail fetch). `r` and the error toast
+      // both offer a retry; Esc closes.
+      appState.detailLoading = false;
+      appState.detailError = e.message || 'Unknown error';
+      showError(e.message || 'Unknown error', 'Load detail', { retry: loadDetail });
+      render();
+      return;
+    }
     appState.detailLoading = false;
   }
   if (!isStale(gen, 'detail')) render();
+}
+
+// Retry a failed detail load (bound to 'r' while the popup shows an error).
+export function retryLoadDetail() {
+  if (!appState.detailError) return;
+  appState.detailError = null;
+  appState.detailLoading = true;
+  render();
+  loadDetail();
 }
 
 export function closeDetail() {
@@ -349,7 +368,14 @@ export function renderDetail(screen) {
   screen.box(bx, by, boxW, boxH, title);
 
   if (appState.detailLoading || !data) {
-    screen.writeStr(bx + 2, by + 2, 'Loading...', color('dim'));
+    if (appState.detailError) {
+      screen.writeStr(bx + 2, by + 2,
+        'Failed to load ' + typeName + ' #' + (appState.detailNumber || '?') + ': ' +
+          truncate(appState.detailError, boxW - 16), color('error'));
+      screen.writeStr(bx + 2, by + 3, 'Press [r] to retry or [Esc] to close', color('dim'));
+    } else {
+      screen.writeStr(bx + 2, by + 2, 'Loading...', color('dim'));
+    }
     return;
   }
 
@@ -640,7 +666,9 @@ function renderReactionPicker(screen, bx, by, bw) {
 
 export const keys = {
   'c': () => appState.detailTab === 'files' ? startReviewComment() : openCommentInput(),
-  'r': toggleReactionPicker,
+  // 'r' is the reaction picker, but while a failed load has left the popup
+  // open with an inline error it retries the fetch instead.
+  'r': () => appState.detailError ? retryLoadDetail() : toggleReactionPicker(),
   'a': () => startReview('APPROVE'),
   'v': () => startReview('REQUEST_CHANGES'),
   'R': startReviewerRequest,

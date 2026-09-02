@@ -16,8 +16,8 @@ A fast, zero-dependency terminal user interface for GitHub — six tabs, a comma
 - 🏠 **Real Dashboard** — greeting + 5 stat cards (★ stars, ⑂ forks, ◆ languages, ⏱ account age, ⚠ stale repos), profile mini with recent followers, **contribution heatmap**, **star history sparkline**, top repos, language bar chart, live activity feed, **recent issues/PRs**, stale repos alert, trending-this-week, unread-notifications badge, **collapsible sections**.
 - 📁 **Repos browser, supercharged** — row selection (`▶`), `Enter` drills into Analyze details, sortable columns, **type filter cycle** (`t`: all/sources/forks/archived/private/public/templates), **language facet** (`L`), **stale-only** toggle (`x`), **density toggle** (`D` switches between compact and comfortable), **pinned favorites** (`P` — stick to top, persisted on disk), inline visibility badges (🔒 private, 🔱 fork, 📦 archived, 🗄 template, 📌 pinned, ★ bookmarked), `g`/`G` jump-to-top/bottom.
 - 🗂️ **File explorer** — `F` on Explore details opens a real in-terminal repo browser. Walk the tree, view files with line numbers + syntax highlighting for the supported top languages, browse per-file commit history and local blame, switch branches, **save individual files** (`s`), **save whole folders** recursively (`S`), **download zipballs** (`Z`) streamed straight to disk, **`git clone`** into your CWD (`C`), **`gh repo clone`** for private repos (`G`), copy raw URLs (`y`) or file contents (`Y`) to clipboard.
-- 🔍 **Explore any public repo** — search, 2-column detail view (metadata + languages bar + top contributors + latest releases), pane tabs `[O] Overview / [i] Issues / [P] PRs / [R] README / [F] Files / [T] Traffic / [M] Milestones / [L] Labels / [K] Checks / [S] Security`, branch/ref comparison, file history, local blame, and parallel ahead/behind compares on forks.
-- 📊 **Repo Analytics** — Traffic (views/clones/popular paths/referrers), Milestones (title/state/due/issues), Labels (color dots/descriptions), Checks/CI (pass/fail/pending summary), Security (Dependabot alerts with severity icons), cross-repository security aggregation, health scoring, and branch comparison.
+- 🔍 **Explore any public repo** — search, 2-column detail view (metadata + languages bar + top contributors + latest releases), pane tabs `[O] Overview / [i] Issues / [P] PRs / [R] README / [F] Files / [T] Traffic / [K] Checks / [S] Security`, branch/ref comparison, file history, local blame, and parallel ahead/behind compares on forks.
+- 📊 **Repo Analytics** — Traffic (views/clones/popular paths/referrers), Checks/CI (pass/fail/pending summary), Security (Dependabot alerts with severity icons), cross-repository security aggregation, health scoring, and branch comparison.
 - 📥 **Inbox triage** — color-coded notification types, grouping, snoozing, saved filters, mark-as-read (`m`) / mark-all (`M`) / unsubscribe (`u`) / filter cycle (`f`: all/unread/mentions/review), repo-grouped summary.
 - 🎨 **Themes** — `default` (dark) and `light` — each with a fully distinct palette using true-color (24-bit) and 256-color rendering. Persisted across sessions.
 - ⚡ **Command Palette** — `Ctrl-P` or `:` opens a fuzzy-search modal listing every action.
@@ -120,7 +120,7 @@ Your current token scopes are shown in the Settings → System panel so you can 
 
 | Key | Action |
 |---|---|
-| `Enter` | Open the highlighted repo in Analyze → details |
+| `Enter` | Open the highlighted repo in Analyze → details (**double-click** a repo row does the same) |
 | `/` | Substring filter (name + description + language) |
 | `c` | Clear **ALL** filters in one go |
 | `t` | Cycle type filter: all → sources → forks → archived → private → public → templates |
@@ -128,6 +128,7 @@ Your current token scopes are shown in the Settings → System panel so you can 
 | `x` | Toggle stale-only (no push in last 6 months) |
 | `D` | Density toggle (compact ↔ comfortable / shows description) |
 | `P` | Pin / unpin highlighted repo (sticky top, persisted on disk) |
+| `s` | Star / unstar highlighted repo — click the `[s] ★ Star` button too |
 | `V` | Toggle starred / own repos |
 | `g` / `G` | Jump to top / bottom |
 | `n` `s` `f` `i` `u` | Sort by name / stars / forks / issues / updated (press again to reverse) |
@@ -143,11 +144,10 @@ Your current token scopes are shown in the Settings → System panel so you can 
 | `Enter` | View details → from details: view Forks / **open Issue/PR detail popup** |
 | `P` | Toggle PRs pane (on details view) |
 | `O` | Reset to Overview pane (on details view) |
+| `s` (Overview pane) | Star / unstar the open repo — also click the `[s] ★ Star` button in the title row |
 | `R` | Open the README pane (renders Markdown in-terminal) |
 | `F` | Open the **File explorer** pane |
 | `T` | Open the **Traffic** pane (views/clones/popular paths) |
-| `M` | Open the **Milestones** pane |
-| `L` | Open the **Labels** pane |
 | `K` | Open the **Checks/CI** pane |
 | `S` | Open the **Security** pane (Dependabot alerts) |
 | `Space` | Load more search results or more forks |
@@ -198,7 +198,7 @@ Your current token scopes are shown in the Settings → System panel so you can 
 |---|---|
 | `↑↓` `j` `k` | Navigate repos or runs |
 | `Enter` | View runs for selected repo / expand or collapse job details |
-| `r` / `R` | Re-run selected workflow (runs view) |
+| `r` / `R` | Re-run selected workflow (runs view) — in the repo list, `R` rescans for repos with workflows |
 | `x` / `X` | Cancel selected running workflow (runs view) |
 | `o` | Open selected run in browser |
 | `t` / `Esc` | Back to repo list (from runs view) |
@@ -208,13 +208,17 @@ Your current token scopes are shown in the Settings → System panel so you can 
 
 | Key | Action |
 |---|---|
-| `Enter` | Open Issue/PR inline detail popup; other types open in browser |
+| `Enter` | Open Issue/PR inline detail popup; other notification types open the thread in the browser (falls back to the repo in Explore if no browser is available) |
+| `Enter` (popup) | If the issue/PR failed to load, the popup stays open with the error — `r` retries, `Esc` closes |
 | `o` | Open notification subject in browser |
 | `m` | Mark the current thread as read |
 | `M` | Mark all notifications as read |
 | `u` | Unsubscribe from thread (DELETE subscription) |
 | `f` | Cycle filter: all → unread → mentions → review |
 | `/` | Text search across title and repo name |
+| `G` | Toggle grouping by thread |
+| `z` | Snooze thread for 1 hour |
+| `v` / `V` | Save / apply named filters |
 | `Space` | Load more notifications (append next page) |
 | `r` | Refresh notifications |
 
@@ -274,7 +278,7 @@ The app is split into focused zero-dependency modules. Adding a new tab is: crea
     └── tabs/
         ├── dashboard.mjs            # Home screen with widgets + collapsible sections
         ├── repos.mjs                # Your repositories (selection, badges, filters, pins, density)
-        ├── analyze.mjs              # Search + details + Issues/PRs/README/Files/Traffic/Milestones/Labels/Checks/Security panes
+        ├── analyze.mjs              # Search + details + Issues/PRs/README/Files/Traffic/Checks/Security panes
         ├── detail.mjs               # Issue/PR detail popup with comments, reviews, reactions, diff viewer
         ├── files.mjs                # File explorer with history, blame, highlighting, save / clone / zipball
         ├── analyze-compare.mjs      # Branch and ref comparison pane
@@ -305,24 +309,24 @@ Every tab module exports `render(screen, y, h)`, an optional `keys` map for tab-
 - **Density (`D`)** toggles between compact (1 line/row) and comfortable (description shown on row+1).
 - **Pins (`P`)** float favorites to the top with a `★ PINNED` section header — persisted on disk so they survive restarts.
 - Each row shows visibility badges (🔒 private, 🔱 fork, 📦 archived, 🗄 template, 📌 pinned, ★ bookmarked) and a relative push time.
+- **Real issue counts** — GitHub's `open_issues_count` combines issues *and* PRs, so the ISSUES column (and header total) subtracts each repo's open PR count (probed lazily via `/pulls`, cached 10 min) to show true open issues. The Analyze detail's "Open Issues" row uses the same value.
 - `Space` paginates beyond the first 30. `Enter` opens the repo in Analyze details.
 
 ### 3 · Analyze
 - Search any public repo. `Enter` opens a 2-column detail view.
 - `u` searches GitHub users; `Enter` on a user lists all their public repos (paginated with `Space`), and `Enter` on a repo drills into full details.
 - `C` searches code across GitHub.
-- **Pane tabs:** `[O] Overview`, `[i] Issues (N)`, `[P] PRs (N)`, `[R] README`, `[F] Files`, `[T] Traffic`, `[M] Milestones`, `[L] Labels`, `[K] Checks`, `[S] Security`.
+- **Pane tabs:** `[O] Overview`, `[i] Issues (N)`, `[P] PRs (N)`, `[R] README`, `[F] Files`, `[T] Traffic`, `[K] Checks`, `[S] Security`.
 - Overview = metadata column + (languages bar chart / top contributors / latest releases) column.
 - README pane renders Markdown with naive styling (headings bold, lists in accent color, code fences dimmed).
 - **Traffic pane** = views, clones, popular paths, popular referrers.
-- **Milestones pane** = title, state, due date, open/closed issues.
-- **Labels pane** = color dots, name, description.
 - **Checks/CI pane** = check runs with pass/fail/pending summary.
 - **Security pane** = Dependabot alerts with severity icons.
 - **Files pane** = full in-terminal file browser + viewer with save/clone/zipball actions (see above).
 - From details: `Enter` opens Forks with ahead/behind columns; `Space` paginates more.
 
 ### 4 · Actions (CI)
+- The repo list shows **only repositories that have GitHub Actions workflows** — detected once per session by probing each repo's `/actions/workflows` endpoint (bounded 5-way concurrency; repos that can't be probed stay visible). Press `R` in the repo list to rescan, e.g. after adding a workflow.
 - Select a repo from the list to browse its workflow runs.
 - Each run row shows: status icon (`✓`/`✗`/`~`/`ø`), run number, workflow name, branch, trigger event, and relative age.
 - `Enter` expands a run to show its jobs and steps inline; press `Enter` again to collapse.

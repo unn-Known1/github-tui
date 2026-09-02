@@ -102,8 +102,10 @@ export function recoverScrollPositions() {
     appState.inboxScroll = Math.max(0, appState.selectedNotification - contentH + 1);
   }
 
-  // Dashboard trending
-  const trendingMaxVisible = Math.max(3, Math.floor((H - 17) * 0.30));
+  // Dashboard trending. The list fills the remaining right-column height
+  // (renderDashboard re-clamps with the exact per-frame window), so this
+  // pre-pass only needs a generous estimate to avoid over-scrolling.
+  const trendingMaxVisible = Math.max(1, H - 18);
   if (appState.trendingSelected >= appState.trending.length) {
     appState.trendingSelected = Math.max(0, appState.trending.length - 1);
   }
@@ -477,6 +479,25 @@ function renderTabStrip(y, W) {
 }
 
 // Render the bottom status bar (1 row + separator above).
+//
+// Draw the modal-input prompt line (footer). Also re-invoked after the
+// overlay pass so the prompt stays legible on top of the issue/PR detail
+// popup's full-screen backdrop.
+function renderFooterInput(screen, statusY, W) {
+  screen.fillRow(statusY, ' ', color('statusBar'));
+  const buf = Array.from(appState.inputBuffer);
+  const cursor = appState.inputCursor != null ? appState.inputCursor : buf.length;
+  const shown = appState.inputMask
+    ? Array.from('•'.repeat(buf.length)) : buf;
+  // Insert cursor character at the correct code-point position.
+  const before = shown.slice(0, cursor).join('');
+  const after = shown.slice(cursor).join('');
+  // input cursor uses a plain '_' in --accessible mode.
+  const cursorChar = appState.accessible ? '_' : '█';
+  const line = appState.inputPrompt + before + cursorChar + after;
+  screen.writeStr(1, statusY, truncateToWidth(line, W - 2, ''), color('inputBox'));
+}
+
 function renderFooter(W, H) {
   const sepY = H - FOOTER_HEIGHT;
   const statusY = sepY + 1;
@@ -487,17 +508,7 @@ function renderFooter(W, H) {
   screen.fillRow(statusY, ' ', statusStyle);
 
   if (appState.inputMode === 'input') {
-    const buf = Array.from(appState.inputBuffer);
-    const cursor = appState.inputCursor != null ? appState.inputCursor : buf.length;
-    const shown = appState.inputMask
-      ? Array.from('•'.repeat(buf.length)) : buf;
-    // Insert cursor character at the correct code-point position.
-    const before = shown.slice(0, cursor).join('');
-    const after = shown.slice(cursor).join('');
-    // input cursor uses a plain '_' in --accessible mode.
-    const cursorChar = appState.accessible ? '_' : '█';
-    const line = appState.inputPrompt + before + cursorChar + after;
-    screen.writeStr(1, statusY, truncateToWidth(line, W - 2, ''), color('inputBox'));
+    renderFooterInput(screen, statusY, W);
     return;
   }
 
@@ -704,14 +715,21 @@ function doRender() {
   // ── Footer ──
   renderFooter(W, H);
 
-  // ── Overlays (rendered last, on top) ──
-  if (appState.confirmAction) renderConfirmDialog(screen);
+  // ── Overlays (rendered last, on top; later = on top) ──
+  if (appState.showDetail) renderDetail(screen);
   if (appState.showOnboarding) renderOnboarding(screen);
   if (appState.showWelcome) renderOnboarding(screen, { welcomeMode: true });
   if (appState.showHelp) help.render(screen);
-  if (appState.showDetail) renderDetail(screen);
+  // Confirm + typed input sit ABOVE the detail popup: detail actions
+  // (c/r/x/M/...) open them while showDetail stays true, and renderDetail
+  // paints a full-screen backdrop that would otherwise hide them.
+  if (appState.confirmAction) renderConfirmDialog(screen);
   if (appState.showPalette) renderPalette(screen);
   if (appState.showBookmarks) renderBookmarksOverlay(screen);
+  // Redraw the input prompt on top of the detail popup's backdrop.
+  if (appState.inputMode === 'input') {
+    renderFooterInput(screen, H - FOOTER_HEIGHT + 1, W);
+  }
 
   screen.render();
 }

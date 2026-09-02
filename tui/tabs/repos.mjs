@@ -2,8 +2,8 @@
 // v0.5+ polish: dismissable filter chips, cleaner density, better selected row.
 
 import { appState, render, startAsync, isStale, showMessage, setTab, upsertEntity,
-  beginLoading, finishLoading, resetAccountState } from '../state.mjs';
-import { getAuthenticatedUser, getUserRepositories, getStarredRepos, isStarred, starRepo, unstarRepo } from '../github.mjs';
+  beginLoading, finishLoading, resetAccountState, filterReposByWorkflowState } from '../state.mjs';
+import { getAuthenticatedUser, getUserRepositories, getStarredRepos, isStarred, starRepo, unstarRepo, getRepositoryPullRequests } from '../github.mjs';
 import { removeToken } from '../config.mjs';
 import { startInput, registerInputHandler } from '../input.mjs';
 import { shortNum, relTime, truncate } from '../utils.mjs';
@@ -97,6 +97,8 @@ export async function loadUserData({ loadDashboard = true, awaitBackground = fal
       appState.reposPage = 1;
       appState.reposHasMore = appState.repos.length >= REPOS_PER_PAGE;
       if (isStale(gen, 'repos')) { finishLoading(gen); return; }
+      // Backfill true issue counts (PRs excluded) for the visible page.
+      enrichIssueCounts();
       const background = loadAllReposBackground(gen);
       if (awaitBackground) await background;
       if (loadDashboard) loadDashboardWidgets().catch(() => {});
@@ -137,8 +139,10 @@ export async function loadAllReposBackground(gen) {
       if (isStale(gen, 'repos')) { finishLoading(loadingHandle); return; }
       appState.repos = [...appState.repos, ...more];
       // Actions consumes a snapshot of repositories; keep it complete while
-      // background pagination discovers additional account repos.
-      if (appState.actionsView === 'repos') appState.actionsRepos = appState.repos;
+      // background pagination discovers additional account repos. Once the
+      // Actions workflow scan has run, drop repos confirmed workflow-less so
+      // late pages don't resurrect them.
+      if (appState.actionsView === 'repos') appState.actionsRepos = filterReposByWorkflowState(appState.repos);
       appState.reposPage = page;
       appState.reposHasMore = more.length >= REPOS_PER_PAGE;
       recomputeDashboardDerived();
@@ -180,6 +184,7 @@ export async function loadMoreRepos() {
     appState.reposPage = page;
     appState.reposHasMore = more.length >= REPOS_PER_PAGE;
     recomputeDashboardDerived();
+    enrichIssueCounts();
     showMessage('Loaded ' + appState.repos.length + ' repos total', 'info');
   } catch (e) {
     if (!isStale(gen, 'repos')) showMessage('Failed to load more repos', 'error');
@@ -205,6 +210,59 @@ registerInputHandler('lang-filter', (value) => {
   appState.repoSelected = 0;
   showMessage(v ? 'Language: ' + v : 'Language filter cleared', 'info');
 });
+
+// ─── Issue-count enrichment ────────────────────────────────────────
+// GitHub's open_issues_count field counts open issues AND open pull
+// requests together. Since the REST issues endpoint can't exclude PRs,
+// we probe each visible repo's open PRs and subtract them, so the Issues
+// column shows real issue counts. Cached per repo with a TTL.
+const ISSUE_ENRICH_CAP = 30;              // repos per pass (~ one page / screen)
+const ISSUE_ENRICH_CONCURRENCY = 4;
+const ISSUE_ENRICH_TTL = 10 * 60 * 1000;  // 10 min
+
+export function trueIssueCount(repo) {
+  if (!repo || !repo.full_name) return null;
+  const e = appState.repoTrueIssues[repo.full_name];
+  return e && typeof e.count === 'number' ? e.count : null;
+}
+
+export async function enrichIssueCounts() {
+  if (!appState.token || !Array.isArray(appState.repos) || appState.repos.length === 0) return;
+  const gen = startAsync('repos-issue-counts');
+  let list = sortRepos(appState.repos, appState.repoSort);
+  list = applyAllFilters(list);
+  list = floatPinsToTop(list);
+  const now = Date.now();
+  const targets = list.slice(0, ISSUE_ENRICH_CAP).filter(r => {
+    const e = appState.repoTrueIssues[r.full_name];
+    return !e || now - e.ts > ISSUE_ENRICH_TTL;
+  });
+  if (targets.length === 0) return;
+  const queue = targets.slice();
+  const worker = async () => {
+    while (queue.length > 0) {
+      if (isStale(gen)) return;
+      const r = queue.shift();
+      if (!r || !r.full_name) continue;
+      const [owner, name] = r.full_name.split('/');
+      if (!owner || !name) continue;
+      let prCount = 0;
+      try {
+        const prs = await getRepositoryPullRequests(appState.token, owner, name, 1, 100, 'open', gen.signal);
+        if (isStale(gen)) return;
+        if (Array.isArray(prs)) prCount = prs.length;
+      } catch {
+        if (isStale(gen)) return;
+        continue; // probe failed — keep the combined-count fallback
+      }
+      const combined = Math.max(0, r.open_issues_count || 0);
+      appState.repoTrueIssues[r.full_name] = { count: Math.max(0, combined - prCount), ts: Date.now() };
+    }
+  };
+  const workers = Array.from({ length: Math.min(ISSUE_ENRICH_CONCURRENCY, Math.max(1, queue.length)) }, worker);
+  await Promise.all(workers);
+  if (!isStale(gen)) render();
+}
 
 // ─── Action helpers ───────────────────────────────────────────────
 export function visibleRows(screen) {
@@ -235,6 +293,9 @@ export function isStarredLocal(fullName) {
 /// ─── Render ───────────────────────────────────────────────────────
 
 function renderStarredList(screen, y, h) {
+  // No star button in the starred view — stale click bounds from the
+  // own-repos view must not linger.
+  appState._reposStarBounds = null;
   const W = screen.width;
   const list = appState.starred;
 
@@ -304,7 +365,7 @@ export function renderRepos(screen, y, h) {
   // Aggregate stats.
   const totalStars = appState.repos.reduce((a, r) => a + (r.stargazers_count || 0), 0);
   const totalForks = appState.repos.reduce((a, r) => a + (r.forks_count || 0), 0);
-  const totalIssues = appState.repos.reduce((a, r) => a + (r.open_issues_count || 0), 0);
+  const totalIssues = appState.repos.reduce((a, r) => a + (trueIssueCount(r) != null ? trueIssueCount(r) : (r.open_issues_count || 0)), 0);
 
   screen.writeStr(2, y, 'YOUR REPOSITORIES', color('title') || { fg: 'white', bold: true });
   const statsText = '★ ' + shortNum(totalStars) + '   Y ' + shortNum(totalForks) + '   ◉ ' + shortNum(totalIssues);
@@ -315,6 +376,23 @@ export function renderRepos(screen, y, h) {
   const chips = activeFilterChips();
   let chipX = 2;
   const chipY = y + 2;
+
+  // Star / unstar button for the highlighted repo — mirrors the [s] key.
+  // Click target stored so mouse.mjs can trigger the same toggle.
+  let starRight = W; // right-aligned content must end left of the button
+  const selRepo = currentRepo();
+  if (appState.token && selRepo) {
+    const starred = isStarredLocal(selRepo.full_name);
+    const starLabel = starred ? '[s] ★ Unstar' : '[s] ★ Star';
+    const starStyle = { fg: 'yellow', bold: true };
+    const starX = W - starLabel.length - 2;
+    screen.writeStr(starX, chipY, starLabel, starStyle);
+    appState._reposStarBounds = { y: chipY, x1: starX, x2: starX + starLabel.length };
+    starRight = starX - 2;
+  } else {
+    appState._reposStarBounds = null;
+  }
+
   if (chips.length > 0) {
     for (const chip of chips) {
       const text = ' ' + chip.label + ' ✕ ';
@@ -324,11 +402,12 @@ export function renderRepos(screen, y, h) {
       chip._x2 = chipX + text.length;
       chipX += text.length + 1;
     }
-    // Sort + density indicator on the right.
+    // Sort + density indicator on the right (kept clear of the star button).
     const sortInfo = REPO_SORT_OPTIONS.find(o => o.field === appState.repoSort.field);
     const sortDir = appState.repoSort.asc ? ' ↑' : ' ↓';
     const sortText = 'sort: ' + sortInfo.label + sortDir;
-    screen.writeStr(W - sortText.length - 2, chipY, sortText, { fg: 'cyan' });
+    const sortX = Math.max(chipX + 2, starRight - sortText.length - 2);
+    screen.writeStr(sortX, chipY, sortText, { fg: 'cyan' });
   } else {
     const sortInfo = REPO_SORT_OPTIONS.find(o => o.field === appState.repoSort.field);
     const sortDir = appState.repoSort.asc ? ' ↑' : ' ↓';
@@ -336,7 +415,8 @@ export function renderRepos(screen, y, h) {
     const statusText = 'sort: ' + sortInfo.label + sortDir + '   density: ' + densityLabel;
     screen.writeStr(2, chipY, statusText, { dim: true });
     const hint = '[c] clear all';
-    screen.writeStr(W - hint.length - 2, chipY, hint, { dim: true });
+    const hintX = Math.max(statusText.length + 4, starRight - hint.length - 2);
+    screen.writeStr(hintX, chipY, hint, { dim: true });
   }
   // Store chips for click handling.
   appState._filterChips = chips;
@@ -437,7 +517,8 @@ export function renderRepos(screen, y, h) {
     screen.writeStr(langCol, curY, truncate(repo.language || '—', 10), langStyle);
     screen.writeStr(starsCol, curY, shortNum(repo.stargazers_count || 0), statStyle);
     screen.writeStr(forksCol, curY, shortNum(repo.forks_count || 0), statStyle);
-    screen.writeStr(issuesCol, curY, shortNum(repo.open_issues_count || 0), statStyle);
+    const issues = trueIssueCount(repo);
+    screen.writeStr(issuesCol, curY, shortNum(issues != null ? issues : (repo.open_issues_count || 0)), statStyle);
     if (pushedCol + 8 < W) {
       screen.writeStr(pushedCol, curY, relTime(repo.pushed_at || repo.updated_at), statStyle);
     }
@@ -515,19 +596,64 @@ function togglePinCurrent() {
   render();
 }
 
-export async function toggleStarCurrent() {
-  const r = currentRepo();
-  if (!r) return;
+// Shared star / unstar toggle for any repo object. Ask GitHub for the
+// authoritative state instead of trusting the local entity cache, which
+// may not have been seeded for every view yet. Updates every in-memory
+// copy of stargazers_count so all views agree, then syncs the cache +
+// starred-list via upsertEntity.
+export async function toggleStarRepo(r) {
+  if (!r || !appState.token) { showMessage('Login + select a repo first', 'warning'); return; }
   const fullName = r.full_name;
-  if (isStarredLocal(fullName)) {
-    await unstarRepo(appState.token, r.owner, r.name);
-    showMessage('Unstarred ' + fullName, 'info');
-  } else {
-    await starRepo(appState.token, r.owner, r.name);
-    showMessage('Starred ' + fullName, 'success');
+  const [owner, name] = fullName.split('/');
+  try {
+    const already = await isStarred(appState.token, owner, name);
+    const applyCount = (count) => {
+      r.stargazers_count = count;
+      for (const arr of [appState.repos, appState.searchResults,
+                         appState.trending, appState.forks, appState.actionsRepos]) {
+        if (!Array.isArray(arr)) continue;
+        for (let i = 0; i < arr.length; i++) {
+          if (arr[i] && arr[i].full_name === fullName) arr[i].stargazers_count = count;
+        }
+      }
+      if (appState.repoDetails && appState.repoDetails.full_name === fullName) {
+        appState.repoDetails.stargazers_count = count;
+      }
+      if (Array.isArray(appState.starred)) {
+        for (const s of appState.starred) {
+          if (s && s.full_name === fullName) s.stargazers_count = count;
+        }
+      }
+    };
+    if (already) {
+      await unstarRepo(appState.token, owner, name);
+      applyCount(Math.max(0, (r.stargazers_count || 0) - 1));
+      showMessage('Unstarred ' + fullName, 'success');
+    } else {
+      await starRepo(appState.token, owner, name);
+      applyCount((r.stargazers_count || 0) + 1);
+      showMessage('Starred ' + fullName, 'success');
+    }
+    // upsertEntity keeps appState.starred + the entity cache in sync
+    // (removes the repo from the starred view when unstarring there).
+    upsertEntity(r, {
+      isStarred: !already,
+      starredAt: already ? null : new Date().toISOString(),
+      isOwner: false,
+    });
+    render();
+  } catch (e) {
+    showMessage((e && e.message) || 'Star toggle failed', 'error');
+    render();
   }
-  upsertEntity(r, { isStarred: !isStarredLocal(fullName) });
-  render();
+}
+
+export async function toggleStarCurrent() {
+  // Works in both the own-repos view and the starred view (V).
+  const r = appState.reposView === 'starred'
+    ? appState.starred[appState.starredSelected]
+    : currentRepo();
+  await toggleStarRepo(r);
 }
 
 function clearAllFilters() {
@@ -706,7 +832,7 @@ export const keys = {
   'x': () => { if (appState.reposView === 'own') toggleStale(); },
   'D': () => { if (appState.reposView === 'own') toggleDensity(); },
   'P': () => { if (appState.reposView === 'own') togglePinCurrent(); },
-  's': () => { if (appState.reposView === 'own') toggleStarCurrent(); },
+  's': () => { toggleStarCurrent(); },
   'V': toggleReposView,
 };
 

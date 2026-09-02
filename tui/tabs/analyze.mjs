@@ -14,8 +14,6 @@ import { shortNum, truncate, openUrl, sectionHeader, formatBytes } from '../util
 import { color } from '../theme.mjs';
 import { loadForks, loadMoreForks, renderForks, toggleForkSort } from './forks.mjs';
 import * as files from './files.mjs';
-import { loadLabels, renderLabelsPane } from './analyze-labels.mjs';
-import { loadMilestones, renderMilestonesPane } from './analyze-milestones.mjs';
 import { loadChecks, renderChecksPane } from './analyze-checks.mjs';
 import { loadTraffic, renderTrafficPane } from './analyze-traffic.mjs';
 import { loadReleaseAssets, downloadAsset, renderPackagesPane } from './analyze-packages.mjs';
@@ -38,13 +36,12 @@ import {
 import { openDetail as _openDetail } from './detail.mjs';
 import { startCompare, renderComparePane } from './analyze-compare.mjs';
 import { calculateRepoHealth } from '../recommended-features.mjs';
+import { isStarredLocal, toggleStarRepo, trueIssueCount } from './repos.mjs';
 import { renderSecurityAggregate, securityAggregateUp, securityAggregateDown, securityAggregateEnter } from '../security-aggregate.mjs';
 import { renderOrganizations, organizationUp, organizationDown, organizationEnter } from '../organizations.mjs';
 export { _openDetail as openDetail, submitSearch, submitUserSearch, submitCodeSearch, openUserRepos };
 export { loadSecurity, cycleSecurityFilter, cycleSecurityStateFilter, securityUp, securityDown, securityEnter, securityDismiss } from './analyze-security.mjs';
 export { loadTraffic } from './analyze-traffic.mjs';
-export { loadMilestones } from './analyze-milestones.mjs';
-export { loadLabels } from './analyze-labels.mjs';
 export { loadChecks } from './analyze-checks.mjs';
 export { loadReleaseAssets, downloadAsset } from './analyze-packages.mjs';
 export { viewReadme } from './analyze-readme.mjs';
@@ -178,13 +175,30 @@ function renderRepoDetails(screen, y, maxH) {
   const repo = appState.repoDetails;
   if (!repo) return;
   appState._overviewAssetBounds = null;
+  appState._exploreStarBounds = null;
 
   // Repo name.
   screen.writeStr(2, y, repo.full_name, color('title') || { fg: 'white', bold: true });
-  if (appState.repoHealth?.score != null) {
-    const health = 'Health ' + appState.repoHealth.score + (appState.repoHealth.complete ? '/100' : '/100*');
-    screen.writeStr(Math.max(2, W - health.length - 2), y, health,
-      appState.repoHealth.score >= 70 ? { fg: 'green' } : appState.repoHealth.score >= 40 ? { fg: 'yellow' } : { fg: 'red' });
+  const healthText = appState.repoHealth?.score != null
+    ? 'Health ' + appState.repoHealth.score + (appState.repoHealth.complete ? '/100' : '/100*')
+    : null;
+  const healthStyle = appState.repoHealth?.score >= 70 ? { fg: 'green' }
+    : appState.repoHealth?.score >= 40 ? { fg: 'yellow' } : { fg: 'red' };
+  // Star / unstar button on the Overview pane title row — mirrors the [s]
+  // key and matches the Repos-tab button. Click bounds stored for mouse.mjs.
+  if (appState.detailsPane === 'overview' && appState.token) {
+    const starred = isStarredLocal(repo.full_name);
+    const starLabel = starred ? '[s] ★ Unstar' : '[s] ★ Star';
+    const starX = W - starLabel.length - 2;
+    screen.writeStr(starX, y, starLabel, { fg: 'yellow', bold: true });
+    appState._exploreStarBounds = { y, x1: starX, x2: starX + starLabel.length };
+    // Health score stays right-aligned, just left of the button.
+    if (healthText) {
+      const hx = Math.max(2, starX - healthText.length - 3);
+      screen.writeStr(hx, y, healthText, healthStyle);
+    }
+  } else if (healthText) {
+    screen.writeStr(Math.max(2, W - healthText.length - 2), y, healthText, healthStyle);
   }
 
   // Pane tabs as chips.
@@ -196,8 +210,6 @@ function renderRepoDetails(screen, y, maxH) {
     ['files',    'Files',                                       'F'],
     ['packages', 'Packages',                                    'A'],
     ['traffic',  'Traffic',                                     'T'],
-    ['milestones', 'Milestones',                                'M'],
-    ['labels',   'Labels',                                      'L'],
     ['checks',   'Checks',                                      'K'],  ['security',  'Security',                                    'S'],
     ['compare',   'Compare',                                     'D'],
   ];
@@ -217,8 +229,6 @@ function renderRepoDetails(screen, y, maxH) {
   if (appState.detailsPane === 'files')  { files.renderFilesPane(screen, y + 3, maxH - 3); return; }
   if (appState.detailsPane === 'packages') { renderPackagesPane(screen, y + 3, maxH - 3); return; }
   if (appState.detailsPane === 'traffic') { renderTrafficPane(screen, y + 3, maxH - 3); return; }
-  if (appState.detailsPane === 'milestones') { renderMilestonesPane(screen, y + 3, maxH - 3); return; }
-  if (appState.detailsPane === 'labels') { renderLabelsPane(screen, y + 3, maxH - 3); return; }
   if (appState.detailsPane === 'checks') { renderChecksPane(screen, y + 3, maxH - 3); return; }
   if (appState.detailsPane === 'security') { renderSecurityPane(screen, y + 3, maxH - 3); return; }
   if (appState.detailsPane === 'compare') { renderComparePane(screen, y + 3, maxH - 3); return; }
@@ -230,7 +240,8 @@ function renderRepoDetails(screen, y, maxH) {
     ['Language:',    repo.language || 'N/A'],
     ['Stars:',       shortNum(repo.stargazers_count || 0)],
     ['Forks:',       shortNum(repo.forks_count || 0)],
-    ['Open Issues:', String(appState.repoIssues.length || repo.open_issues_count || 0)],
+    // open_issues_count includes open PRs — prefer the enrichment pass.
+    ['Open Issues:', String(appState.repoIssues.length || (trueIssueCount(repo) ?? repo.open_issues_count) || 0)],
     ['Open PRs:',    String(appState.repoPullRequests.length || 0)],
     ['Watchers:',    shortNum(repo.watchers_count || 0)],
     ['Size:',        Math.round((repo.size || 0) / 1024) + ' MB'],
@@ -430,6 +441,14 @@ export function jumpTop() {
     render();
   }
 }
+// Star / unstar the repo currently open in the details Overview pane.
+// Backs both the [s] key (Overview pane only — other panes keep their own
+// 's' bindings) and the clickable star button in the title row.
+export function toggleStarDetails() {
+  if (appState.analyzeView !== 'details' || !appState.repoDetails) return;
+  toggleStarRepo(appState.repoDetails);
+}
+
 export function startSearchInputFor(type) {
   if (type === 'users') {
     appState.searchType = 'users';
@@ -504,6 +523,9 @@ export const keys = {
     if (appState.analyzeView === 'forks') toggleForkSort('stars');
     else if (isFilesPane()) files.keys.s();
     else if (isSecurityPane()) cycleSecurityFilter();
+    // On the details Overview pane the issue-state filter is a no-op, so
+    // 's' stars / unstars the open repo (mirrors the Repos tab button).
+    else if (appState.analyzeView === 'details' && appState.detailsPane === 'overview') toggleStarDetails();
     else cycleIssueStateFilter();
   },
   'S': () => {
@@ -554,32 +576,6 @@ export const keys = {
         appState.detailsPane = 'traffic';
         appState.detailsScroll = 0;
         loadTraffic();
-      }
-      render();
-    }
-  },
-  'M': () => {
-    if (appState.analyzeView === 'details') {
-      if (appState.detailsPane === 'milestones') {
-        appState.detailsPane = 'overview';
-        clearTextSelection();
-      } else {
-        appState.detailsPane = 'milestones';
-        appState.detailsScroll = 0;
-        loadMilestones();
-      }
-      render();
-    }
-  },
-  'L': () => {
-    if (appState.analyzeView === 'details') {
-      if (appState.detailsPane === 'labels') {
-        appState.detailsPane = 'overview';
-        clearTextSelection();
-      } else {
-        appState.detailsPane = 'labels';
-        appState.detailsScroll = 0;
-        loadLabels();
       }
       render();
     }
@@ -817,13 +813,11 @@ export function space() {
   else if (appState.analyzeView === 'forks') loadMoreForks();
   else if (appState.analyzeView === 'details') {
     if (appState.detailsPane === 'issues' || appState.detailsPane === 'prs') loadMoreIssues();
-    else if (appState.detailsPane === 'labels') import('./analyze-labels.mjs').then(m => m.loadMoreLabels());
-    else if (appState.detailsPane === 'milestones') import('./analyze-milestones.mjs').then(m => m.loadMoreMilestones());
   }
 }
 
 // ── Collapsible sections ──
-const ANALYZE_SECTIONS = ['overview', 'issues', 'prs', 'readme', 'files', 'packages', 'traffic', 'milestones', 'labels', 'checks', 'security', 'compare'];
+const ANALYZE_SECTIONS = ['overview', 'issues', 'prs', 'readme', 'files', 'packages', 'traffic', 'checks', 'security', 'compare'];
 
 export function getSections() {
   return ANALYZE_SECTIONS.map(s => 'analyze:' + s);

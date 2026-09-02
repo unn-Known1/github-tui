@@ -95,6 +95,7 @@ export function resetAccountState() {
   appState.starredPage = 1;
   appState.starredHasMore = false;
   appState.entityCache = {};
+  appState.repoTrueIssues = {};
   appState.notifications = [];
   appState.inboxPage = 1;
   appState.inboxHasMore = false;
@@ -116,6 +117,9 @@ export function resetAccountState() {
   appState.actionsFailures = [];
   appState.actionsFailureLoading = false;
   appState.actionsFilter = '';
+  appState.actionsScanDone = false;
+  appState.actionsNoWorkflowRepos = null;
+  appState.actionsScanning = false;
   appState.myWorkQueue = [];
   appState.securityAggregate = [];
   appState.securityAggregateErrors = [];
@@ -176,6 +180,7 @@ export function resetAccountState() {
   appState.detailComments = [];
   appState.detailReviews = [];
   appState.detailFiles = [];
+  appState.detailError = null;
   appState.detailDiffContent = '';
   appState.detailReviewDraft = null;
   appState.detailDiffFile = null;
@@ -353,6 +358,10 @@ export const appState = {
   // appState.repos) continue to work; mutations to starred membership
   // should call upsertEntity() so the cache and visible lists agree.
   entityCache: {},
+  // GitHub's open_issues_count includes open PRs. repoTrueIssues maps
+  // full_name → { count, ts } with PR-excluded issue counts, enriched
+  // lazily via /pulls so the Issues column shows real issues only.
+  repoTrueIssues: {},
 
   // ── File explorer (analyze details → Files pane) ──
   filesPath: '',
@@ -561,6 +570,9 @@ export const appState = {
   actionsDispatch: null,
   actionsFailures: [],
   actionsFailureLoading: false,
+  actionsScanDone: false,       // workflow-presence scan has run for this account
+  actionsNoWorkflowRepos: null, // Set<full_name> confirmed to have NO workflows
+  actionsScanning: false,       // scan in progress (status line in repo list)
 
   // ── Inbox ──
   notifications: [],
@@ -635,6 +647,8 @@ export const appState = {
   detailTab: 'body',     // 'body' | 'comments' | 'files'
   detailFileCursor: 0,
   detailLoading: false,
+  detailError: null,       // non-null when the issue/PR fetch failed (popup stays open)
+
   detailReactionPicker: false,
   detailReactionCursor: 0,
   detailDiffView: false,   // true when viewing a file diff
@@ -771,6 +785,17 @@ export function syncStarredEntities(repos) {
       upsertEntity(repo, { isStarred: true, starredAt: repo.starred_at || repo.created_at || undefined, isOwner: false });
     }
   }
+}
+
+// Filter a repo list down to the ones the Actions scan did NOT confirm as
+// workflow-less. Repos never checked (background pagination, failed probe,
+// first render before the scan) stay visible so nothing is hidden on a
+// stale or partial scan. Returns the input unchanged when no scan ran yet.
+export function filterReposByWorkflowState(repos) {
+  if (!Array.isArray(repos)) return [];
+  const noWorkflow = appState.actionsNoWorkflowRepos;
+  if (!noWorkflow || noWorkflow.size === 0) return repos;
+  return repos.filter(r => r && !noWorkflow.has(r.full_name));
 }
 
 // derived starred list — returns entities flagged isStarred, sorted

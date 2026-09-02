@@ -2,9 +2,7 @@
 
 All notable changes to this project will be documented in this file.
 
-## [0.7.0] - Unreleased
-
-> This release is implemented locally but has not been published yet.
+## [0.7.0] - 2026-08-21
 
 ### Added — CI cockpit and work queues
 - Added workflow log viewing with bounded redirected-log downloads, scrolling, truncation feedback, and retryable errors.

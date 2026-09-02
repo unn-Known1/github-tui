@@ -55,10 +55,17 @@ function currentRepoForAction() {
     if (v === 'forks' && appState.forks[appState.selectedFork])
       return appState.forks[appState.selectedFork];
   }
-  if (tabState.current === 1 && appState.repos.length > 0) {
-    let list = repos.applyAllFilters(repos.sortRepos(appState.repos, appState.repoSort));
-    list = repos.floatPinsToTop(list);
-    return list[appState.repoSelected] || null;
+  if (tabState.current === 1) {
+    // Starred view (V) keeps its own selection — use it, not the own-repos
+    // selection, so global actions like s / * star the highlighted repo.
+    if (appState.reposView === 'starred') {
+      return appState.starred[appState.starredSelected] || null;
+    }
+    if (appState.repos.length > 0) {
+      let list = repos.applyAllFilters(repos.sortRepos(appState.repos, appState.repoSort));
+      list = repos.floatPinsToTop(list);
+      return list[appState.repoSelected] || null;
+    }
   }
   return null;
 }
@@ -282,9 +289,13 @@ export function handleKey(key) {
     }
     if (appState.showBookmarks) { bookmarks.closeBookmarks(); return; }
     if (appState.showHelp) { appState.showHelp = false; render(); return; }
-    if (appState.showDetail) { import('./tabs/detail.mjs').then(m => m.closeDetail()).catch(() => {}); return; }
+    // Confirm / input overlays sit ON TOP of the detail popup (actions like
+    // c/r/x/M open them while showDetail stays true), so Esc must dismiss
+    // those first. handleBack closes the reaction picker / diff view before
+    // the whole popup, mirroring the 1e branch below.
     if (appState.confirmAction) { dismissConfirm(); return; }
     if (appState.inputMode === 'input') { import('./input.mjs').then(m => m.cancelInput()).catch(() => {}); return; }
+    if (appState.showDetail) { detail.handleBack(); return; }
     // Clear text selection if one is active.
     if (appState.textSelectionMode !== 'none') {
       appState.textSelectionMode = 'none';
@@ -355,21 +366,10 @@ export function handleKey(key) {
     return;
   }
 
-  // 1c. Detail popup captures keys when open.
-  if (appState.showDetail) {
-    if (key === '\x1b' || key === 'h' || key === '\x7f') { detail.handleBack(); return; }
-    if (key === '\r' || key === '\n') { detail.enter(); return; }
-    if (key === '\x1b[A' || key === 'k') { detail.up(); return; }
-    if (key === '\x1b[B' || key === 'j') { detail.down(); return; }
-    const mod = detail;
-    if (mod.keys && typeof mod.keys[key] === 'function') {
-      mod.keys[key]();
-      return;
-    }
-    return;
-  }
-
-  // 2. Confirmation dialog — 'y'/'Y'/Enter executes, 'n'/'N'/Esc cancels.
+  // 1c. Confirmation dialog — 'y'/'Y'/Enter executes, 'n'/'N'/Esc cancels.
+  // Handled BEFORE the detail popup: detail actions (c/r/x/M/C/...) open
+  // confirms while showDetail stays true, so the popup would otherwise
+  // swallow the confirming keystrokes (Enter cycled tabs, y copied URL).
   if (appState.confirmAction) {
     if (key === 'y' || key === 'Y' || key === '\r' || key === '\n') {
       const action = appState.confirmAction;
@@ -382,8 +382,27 @@ export function handleKey(key) {
     return;
   }
 
-  // 3. Input modal.
+  // 1d. Input modal — also wins over the detail popup so comment / review /
+  // label / fields / dispatch prompts can actually receive keystrokes.
   if (handleInputKey(key)) return;
+
+  // 1e. Detail popup captures keys when open.
+  if (appState.showDetail) {
+    if (key === '\x1b' || key === 'h' || key === '\x7f') { detail.handleBack(); return; }
+    if (key === '\r' || key === '\n') { detail.enter(); return; }
+    if (key === '\x1b[A' || key === 'k') { detail.up(); return; }
+    if (key === '\x1b[B' || key === 'j') { detail.down(); return; }
+    const mod = detail;
+    if (mod.keys && typeof mod.keys[key] === 'function') {
+      // Route errors to showMessage so async detail actions (checkout,
+      // reviews, merges) surface failures instead of silent rejections.
+      Promise.resolve()
+        .then(() => mod.keys[key]())
+        .catch((e) => showMessage((e && e.message) || 'Action failed', 'error'));
+      return;
+    }
+    return;
+  }
 
   // 4. Tab-switch + globals.
   // Skip number keys 1-6 when in Analyze security pane (they switch sub-panes).
@@ -530,10 +549,31 @@ export function handleKey(key) {
           showMessage('gh clone failed: ' + (e && e.message || 'unknown'), 'error'));
         return;
       }
+      // Inbox binds 'G' to toggle grouping (advertised in its footer hint);
+      // without this the global jump-to-bottom swallowed it, so the key
+      // looked dead there. Other tabs keep generic jump-to-bottom.
+      if (tabState.current === 4) {
+        Promise.resolve()
+          .then(() => inbox.keys.G())
+          .catch((e) => showMessage((e && e.message) || 'Action failed', 'error'));
+        return;
+      }
       handleBottom();
       return;
     }
-    case 'z': handleCollapseToggle(); return;
+    case 'z': {
+      // Inbox binds 'z' to snooze (advertised in its footer hint); the
+      // global collapse-toggle used to swallow it. Other tabs keep the
+      // generic collapse toggle.
+      if (tabState.current === 4) {
+        Promise.resolve()
+          .then(() => inbox.keys.z())
+          .catch((e) => showMessage((e && e.message) || 'Action failed', 'error'));
+        return;
+      }
+      handleCollapseToggle();
+      return;
+    }
     case 'Z': {
       // in the files pane, Z triggers a zipball download; everywhere
       // else it collapses all collapsible sections. Explicit dispatch.

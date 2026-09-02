@@ -1,7 +1,7 @@
 // Inbox tab — GitHub notifications.
 // v0.5+ polish: cleaner section header, by-repo panel as a real box, filter chip.
 
-import { appState, render, startAsync, isStale, showMessage, confirm, beginLoading, finishLoading } from '../state.mjs';
+import { appState, render, setTab, startAsync, isStale, showMessage, confirm, beginLoading, finishLoading } from '../state.mjs';
 import {
   getNotifications, markNotificationRead,
   markAllNotificationsRead, unsubscribeNotification,
@@ -10,6 +10,7 @@ import { relTime, notifTypeColor, notificationToHtmlUrl, openUrl, truncate } fro
 import { color } from '../theme.mjs';
 import { emptyState, loadingIndicator, scrollIndicators } from '../render.mjs';
 import { openDetail } from './detail.mjs';
+import { loadRepoDetails } from './analyze.mjs';
 import { startInput, registerInputHandler } from '../input.mjs';
 import { showError } from '../error-recovery.mjs';
 import { groupNotifications } from '../recommended-features.mjs';
@@ -141,6 +142,12 @@ function selected() {
   return getSelectedNotification();
 }
 
+function countSnoozed() {
+  const snoozed = appState.inboxSnoozed || {};
+  const now = Date.now();
+  return Object.keys(snoozed).filter(id => (snoozed[id] || 0) > now).length;
+}
+
 export async function markCurrentRead() {
   const n = selected();
   if (!n) return;
@@ -232,11 +239,30 @@ export async function openCurrent() {
       return;
     }
   }
+  // Non-Issue/PR notifications (Release, Discussion, CheckSuite, Commit,
+  // SecurityAlert, ...) have no inline TUI view, so open the actual thread
+  // in the browser — that IS the notification. Only if no browser is
+  // available (e.g. headless/WSL without xdg-open) fall back to the repo's
+  // Explore view, with an explanatory toast so Enter is never a silent no-op.
   const htmlUrl = notificationToHtmlUrl(url) || (n.repository && n.repository.html_url);
-  if (!htmlUrl) { showMessage('No URL available for this notification', 'warning'); return; }
-  const r = await openUrl(htmlUrl);
-  if (r.ok) showMessage('Opened ' + htmlUrl, 'success');
-  else showMessage(r.error || 'Open failed', 'error');
+  if (htmlUrl) {
+    const title = (n.subject && n.subject.title) || '';
+    const r = await openUrl(htmlUrl);
+    if (r.ok) {
+      showMessage('Opened "' + truncate(title, 40) + '" in browser', 'success');
+      return;
+    }
+    showMessage('Browser unavailable (' + (r.error || 'open failed') + ') — showing repo in Explore', 'warning', 6000);
+  } else {
+    showMessage('No URL available for this notification', 'warning');
+  }
+  const repoFull = n.repository && n.repository.full_name;
+  if (repoFull) {
+    const [owner, name] = repoFull.split('/');
+    setTab(2);
+    appState.analyzeView = 'details';
+    loadRepoDetails(owner, name);
+  }
 }
 
 function sectionHeader(screen, x, y, text, hint) {
@@ -264,8 +290,14 @@ export function renderInbox(screen, y, h) {
   screen.writeStr(18, y, filterChip, { bg: 'cyan', fg: 'darkGray', bold: true });
 
   if (allList.length > 0) {
+    const snoozedCount = countSnoozed();
+    const passiveFilters = [];
+    if (appState.localRepo && appState.localRepoFilter) passiveFilters.push('repo: ' + appState.localRepo.owner + '/' + appState.localRepo.repo);
+    if ((appState.inboxTextFilter || '').trim()) passiveFilters.push('search: "' + appState.inboxTextFilter.trim() + '"');
+    const filteredNote = passiveFilters.length ? ' · ' + passiveFilters.join(' · ') : '';
     const counts = (unreadCount > 0 ? unreadCount + ' unread / ' : '0 unread / ') +
-      allList.length + (appState.inboxHasMore ? '+ loaded' : ' total');
+      allList.length + (appState.inboxHasMore ? '+ loaded' : ' total') +
+      (snoozedCount > 0 ? ' · ' + snoozedCount + ' snoozed' : '') + filteredNote;
     screen.writeStr(Math.max(2, W - counts.length - 2), y, counts,
       unreadCount > 0 ? { fg: 'yellow', bold: true } : { dim: true });
   }
@@ -295,11 +327,25 @@ export function renderInbox(screen, y, h) {
     return;
   }
   if (list.length === 0) {
+    // Diagnose WHY the list is empty — several silent filters can hide every
+    // row while the header still counts them, which read as "no notifications".
+    const reasons = [];
+    const q = (appState.inboxTextFilter || '').trim();
+    if (appState.localRepo && appState.localRepoFilter) {
+      reasons.push('local-repo filter: ' + appState.localRepo.owner + '/' + appState.localRepo.repo +
+        ' (off: [l] on Dashboard)');
+    }
+    if (q) reasons.push('text search: "' + q + '" ([/]+Enter clears)');
+    const snoozedCount = countSnoozed();
+    if (snoozedCount > 0) reasons.push(snoozedCount + ' snoozed (~1h)');
+    if (appState.inboxHideProcessed) reasons.push('[H] hide processed on');
+    if (appState.inboxFilter !== 'all') reasons.push('filter: ' + appState.inboxFilter);
     emptyState(screen, y + 2, h - 2, {
       icon: '○',
       title: 'No matches',
-      message: 'No notifications match filter [' + appState.inboxFilter + ']',
-      hint: '[f] Cycle filter',
+      message: 'No notifications match' +
+        (reasons.length ? ' — ' + reasons.join('; ') : ' the current filter'),
+      hint: '[f] Filter   [/] Search   [r] Refresh',
     });
     return;
   }
@@ -338,6 +384,17 @@ export function renderInbox(screen, y, h) {
   screen.hline(headerY + 1, '─', { dim: true });
 
   const maxRows = Math.max(1, h - 7);
+  // Self-heal stale selection/scroll: a shorter list can arrive while this
+  // tab is inactive (dashboard auto-refresh replaces appState.notifications
+  // without resetting inboxScroll). Without this a leftover scroll would
+  // blank the list while the header still shows the unread counts.
+  appState.selectedNotification = Math.max(0, Math.min(appState.selectedNotification, list.length - 1));
+  const maxScroll = Math.max(0, list.length - maxRows);
+  appState.inboxScroll = Math.max(0, Math.min(appState.inboxScroll, maxScroll));
+  if (appState.selectedNotification < appState.inboxScroll) appState.inboxScroll = appState.selectedNotification;
+  if (appState.selectedNotification >= appState.inboxScroll + maxRows) {
+    appState.inboxScroll = Math.min(maxScroll, appState.selectedNotification - maxRows + 1);
+  }
   // Publish the exact painted list geometry so keyboard, mouse, and wheel
   // interactions use the same origin. `headerY + 2` is the first row, not the
   // tab content origin (which also contains the title and filter chip).
@@ -442,7 +499,9 @@ registerInputHandler('inbox-filter', (value) => {
 });
 
 export const keys = {
-  '/': () => startInput('Search notifications: ', 'inbox-filter'),
+  // Reopening '/' prefills the active query so a stale search is visible in
+  // the prompt and easy to edit/clear (Enter with an empty buffer resets it).
+  '/': () => startInput('Search notifications: ', 'inbox-filter', false, appState.inboxTextFilter || ''),
   'm': markCurrentRead,
   'M': markAllRead,
   'u': unsubscribeCurrent,

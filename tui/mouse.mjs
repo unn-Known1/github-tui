@@ -275,13 +275,14 @@ export function handleMouseEvent(event) {
       }
     }
 
-    // Dashboard trending list.
+    // Dashboard trending list (same filtered rows as the click handler).
     if (t === 0 && inTrendingSection(sx, sy)) {
       const th = appState._sectionHeaders['dashboard:trending'];
       if (th && th.y > 0 && sy > th.y) {
         const listIdx = sy - th.y - 1;
+        const filtered = dashboard.getFilteredTrending();
         const absIdx = listIdx + appState.trendingScroll;
-        if (absIdx >= 0 && absIdx < appState.trending.length && absIdx !== appState.trendingSelected) {
+        if (absIdx >= 0 && absIdx < filtered.length && absIdx !== appState.trendingSelected) {
           appState.trendingSelected = absIdx;
           render();
         }
@@ -567,11 +568,18 @@ function handleClick(col, row) {
   // Collapsible section headers — check exact arrow position.
   if (handleCollapsibleClick(sx, sy)) return;
 
-  // Log click for double-click detection on dashboard trending.
-  if (tabState.current === 0 && appState._lastClickTime) {
+  // Log click for double-click detection (dashboard trending/stat cards
+  // AND the Repos tab, where a double click on a repo row = Enter).
+  // The second press is matched with a small tolerance (not exact-cell
+  // equality): trackpad/scaled-mouse double-clicks routinely land 1–2
+  // cells off, and 2-row comfortable-density items are clicked on either
+  // line — exact matching made those silently degrade to a re-select.
+  if ((tabState.current === 0 || tabState.current === 1) && appState._lastClickTime) {
     const now = Date.now();
-    if (now - appState._lastClickTime < 400 && appState._lastClickX === sx && appState._lastClickY === sy) {
-      // Double click — open trending repo or stat card
+    if (now - appState._lastClickTime < 400 &&
+        Math.abs(appState._lastClickX - sx) <= 2 &&
+        Math.abs(appState._lastClickY - sy) <= 2) {
+      // Double click — open trending repo / stat card (Dash) or repo row (Repos)
       if (handleDblClick(sx, sy)) { appState._lastClickTime = 0; return; }
     }
     appState._lastClickTime = now;
@@ -588,6 +596,10 @@ function handleClick(col, row) {
 }
 
 function handleDblClick(sx, sy) {
+  // Repos tab — double-click a repo row opens it, exactly like Enter.
+  if (tabState.current === 1) {
+    return reposDblClickOpen(sx, sy);
+  }
   const screen = getScreen();
   if (!screen) return false;
   const W = screen.width, H = screen.height;
@@ -701,8 +713,6 @@ const PANES = [
   { id: 'files',      label: 'Files',      key: 'F' },
   { id: 'packages',   label: 'Packages',   key: 'A' },
   { id: 'traffic',    label: 'Traffic',    key: 'T' },
-  { id: 'milestones', label: 'Milestones', key: 'M' },
-  { id: 'labels',     label: 'Labels',     key: 'L' },
   { id: 'checks',     label: 'Checks',     key: 'K' },
   { id: 'security',   label: 'Security',   key: 'S' },
 ];
@@ -736,10 +746,6 @@ function loadPane(paneId) {
     analyze.loadReleaseAssets();
   } else if (paneId === 'traffic') {
     analyze.loadTraffic();
-  } else if (paneId === 'milestones') {
-    analyze.loadMilestones();
-  } else if (paneId === 'labels') {
-    analyze.loadLabels();
   } else if (paneId === 'checks') {
     analyze.loadChecks();
   } else if (paneId === 'security') {
@@ -884,10 +890,12 @@ function dispatchDashboardClick(sx, sy) {
       const absIdx = listIdx + appState.trendingScroll;
       if (absIdx >= 0 && absIdx < filtered.length) {
         appState.trendingSelected = absIdx;
-        focusDashboardZone('trending');
+        // ALWAYS redraw on single click: focusDashboardZone bails (returns
+        // false) when its canFocus() guard fails, and the old code left the
+        // selection updated but never rendered — no visible highlight.
+        if (!focusDashboardZone('trending')) render();
         return;
       }
-
     }
   }
 
@@ -920,54 +928,92 @@ function dispatchDashboardClick(sx, sy) {
 // `appState.starred`, so the cache actually reflects what's currently
 // starred instead of running once at module load with an empty list.
 
-function dispatchReposClick(sx, sy) {
-  if (repos.tryDismissChipAt(sx, sy)) { render(); return; }
-
+// Resolve which repo row (if any) a content-area click landed on, mirroring
+// the render loop geometry (pinned-section headers, row density, scroll).
+// Shared by single-click selection and double-click-to-open. Returns
+// { list, index } or null.
+function reposItemAt(sx, sy) {
   if (appState.reposView === 'starred') {
     const list = appState.starred;
-    const scroll = appState.starredScroll;
-    const rowOff = HEADER_HEIGHT + 5;
-    const itemIdx = sy - rowOff + scroll;
-    if (itemIdx >= 0 && itemIdx < list.length) {
-      appState.starredScroll = Math.max(0, itemIdx - 5);
-      appState.starredSelected = itemIdx;
-      render();
-    }
-    return;
+    const itemIdx = sy - (HEADER_HEIGHT + 5) + appState.starredScroll;
+    if (itemIdx >= 0 && itemIdx < list.length) return { list, index: itemIdx };
+    return null;
   }
 
-  // Own repos: need to account for PINNED headers and comfortable density.
-  const reposList = repos.floatPinsToTop(repos.applyAllFilters(repos.sortRepos(appState.repos, appState.repoSort)));
-  const scroll = appState.repoScroll;
+  // Own repos: account for PINNED headers and comfortable density.
+  const list = repos.floatPinsToTop(repos.applyAllFilters(repos.sortRepos(appState.repos, appState.repoSort)));
   const compact = appState.repoDensity === 'compact';
   const rowH = compact ? 1 : 2;
   const rowOff = HEADER_HEIGHT + 8;
 
-  // Determine which items have a "★ PINNED" header before them.
-  const isPinnedArr = new Array(reposList.length).fill(false);
-  const isSectionStart = new Array(reposList.length).fill(false);
-  for (let i = 0; i < reposList.length; i++) {
-    isPinnedArr[i] = repos.isPinnedLocal(reposList[i].full_name);
+  const isPinnedArr = new Array(list.length).fill(false);
+  const isSectionStart = new Array(list.length).fill(false);
+  for (let i = 0; i < list.length; i++) {
+    isPinnedArr[i] = repos.isPinnedLocal(list[i].full_name);
     if (isPinnedArr[i] && (i === 0 || !isPinnedArr[i - 1])) isSectionStart[i] = true;
   }
 
-  // Simulate the render loop to find which item was clicked.
   let curY = rowOff;
-  for (let i = scroll; i < reposList.length; i++) {
+  for (let i = appState.repoScroll; i < list.length; i++) {
     if (isSectionStart[i]) curY++;
-    if (sy >= curY && sy < curY + rowH) {
-      appState.repoScroll = Math.max(0, i - 5);
-      appState.repoSelected = i;
-      render();
-      return;
-    }
+    if (sy >= curY && sy < curY + rowH) return { list, index: i };
     curY += rowH;
   }
+  return null;
+}
+
+function dispatchReposClick(sx, sy) {
+  if (repos.tryDismissChipAt(sx, sy)) { render(); return; }
+
+  // Clickable star / unstar button ([s] ★ Star) for the highlighted repo.
+  // Mirrors the `s` key — shows the same toast feedback via toggleStarCurrent.
+  const starB = appState._reposStarBounds;
+  if (starB && sy === starB.y && sx >= starB.x1 && sx < starB.x2) {
+    Promise.resolve()
+      .then(() => repos.toggleStarCurrent())
+      .catch((e) => showMessage((e && e.message) || 'Star failed', 'error'));
+    render();
+    return;
+  }
+
+  const hit = reposItemAt(sx, sy);
+  if (!hit) return;
+  if (appState.reposView === 'starred') {
+    appState.starredScroll = Math.max(0, hit.index - 5);
+    appState.starredSelected = hit.index;
+  } else {
+    appState.repoScroll = Math.max(0, hit.index - 5);
+    appState.repoSelected = hit.index;
+  }
+  render();
+}
+
+// Repos tab double-click: open the clicked repo exactly like Enter.
+function reposDblClickOpen(sx, sy) {
+  const hit = reposItemAt(sx, sy);
+  if (!hit) return false;
+  if (appState.reposView === 'starred') {
+    appState.starredSelected = hit.index;
+  } else {
+    appState.repoSelected = hit.index;
+  }
+  repos.enter();
+  return true;
 }
 
 // ── Analyze tab ───────────────────────────────────────────────
 
 function dispatchAnalyzeClick(sx, sy) {
+  // Clickable star / unstar button ([s] ★ Star) on the details Overview
+  // title row — mirrors the `s` key and the Repos-tab button.
+  const starB = appState._exploreStarBounds;
+  if (starB && sy === starB.y && sx >= starB.x1 && sx < starB.x2) {
+    Promise.resolve()
+      .then(() => analyze.toggleStarDetails())
+      .catch((e) => showMessage((e && e.message) || 'Star failed', 'error'));
+    return;
+  }
+
   // ── Search view: input box + two-column landing (trending / saved / recent) ──
   if (appState.analyzeView === 'search') {
     const screen = getScreen();

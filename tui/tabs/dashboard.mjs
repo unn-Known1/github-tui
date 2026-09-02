@@ -942,10 +942,22 @@ export function renderDashboard(screen, y, h) {
         screen.writeStr(rightX, ry++, '(none)', { dim: true });
       }
     } else {
-      const maxTrending = Math.max(3, Math.floor((y + h - bodyY) * 0.30));
+      // Trending is the LAST section in the right column, so it fills the
+      // remaining viewport height instead of a fixed budget (the old ~30%
+      // cap hid most of the list on tall terminals). Keep one row for the
+      // page indicator when paging applies.
+      const pageInfoRow = (appState.trendingHasMore || appState.trendingPage > 1) ? 1 : 0;
+      const maxTrending = Math.max(1, y + h - 1 - ry - pageInfoRow);
+      // Keep selection + scroll inside the rows drawn this frame so
+      // keyboard/hover/clicks never leave the highlight off-screen.
       const scroll = appState.trendingScroll;
-      const end = Math.min(scroll + maxTrending, trendingList.length);
-      for (let i = scroll; i < end; i++) {
+      if (appState.trendingSelected >= scroll + maxTrending) {
+        appState.trendingScroll = Math.max(0, appState.trendingSelected - maxTrending + 1);
+      } else if (appState.trendingSelected < appState.trendingScroll) {
+        appState.trendingScroll = appState.trendingSelected;
+      }
+      const end = Math.min(appState.trendingScroll + maxTrending, trendingList.length);
+      for (let i = appState.trendingScroll; i < end; i++) {
         if (ry >= y + h - 1) break;
         const r = trendingList[i];
         const sel = i === appState.trendingSelected;
@@ -959,7 +971,7 @@ export function renderDashboard(screen, y, h) {
         screen.writeStr(rightX + rightW - stars.length, ry, stars, sel ? { bg: 'blue', fg: 'magenta' } : { fg: 'magenta' });
         ry++;
       }
-      if (appState.trendingHasMore || appState.trendingPage > 1) {
+      if (pageInfoRow > 0 && ry < y + h - 1) {
         const pageInfo = 'Page ' + appState.trendingPage + '   [PgUp/PgDn]';
         screen.writeStr(rightX, ry, pageInfo, { dim: true });
         ry++;
@@ -1064,13 +1076,10 @@ export function trendingDown() {
   const trendingList = getFilteredTrending();
   if (trendingList.length === 0) return;
   if (appState.trendingSelected < trendingList.length - 1) {
+    // Scroll is kept aligned at draw time (renderDashboard clamps
+    // trendingScroll to the rows actually visible this frame), so no
+    // window-size arithmetic is needed here.
     appState.trendingSelected++;
-    const screen = getScreen();
-    const H = screen ? screen.height : 24;
-    const maxTrending = Math.max(3, Math.floor((H - 17) * 0.30));
-    if (appState.trendingSelected >= appState.trendingScroll + maxTrending) {
-      appState.trendingScroll++;
-    }
     render();
   } else if (appState.trendingHasMore) {
     loadMoreTrending();

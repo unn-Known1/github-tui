@@ -27,13 +27,13 @@ export function registerInputHandler(context, fn) {
   handlers[context] = fn;
 }
 
-export function startInput(prompt, context, mask = false) {
+export function startInput(prompt, context, mask = false, initialValue = '') {
   appState.inputMode = 'input';
-  appState.inputBuffer = '';
+  appState.inputBuffer = String(initialValue == null ? '' : initialValue);
   appState.inputPrompt = prompt;
   appState.inputContext = context;
   appState.inputMask = mask;
-  appState.inputCursor = 0;
+  appState.inputCursor = appState.inputBuffer.length;
   // Reset paste state so a half-finished paste from a previous modal
   // can't leak into the new one.
   _pasting = false;

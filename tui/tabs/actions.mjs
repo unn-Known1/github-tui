@@ -2,7 +2,10 @@
 // v0.7 milestone: runs list, status indicators, re-run, cancel.
 // v0.6 enhancement: expandable run detail with jobs and steps.
 
-import { appState, render, startAsync, isStale, showMessage, confirm } from '../state.mjs';
+import {
+  appState, render, startAsync, isStale, showMessage, confirm,
+  beginLoading, finishLoading, filterReposByWorkflowState,
+} from '../state.mjs';
 import {
   getWorkflowRuns, getWorkflowJobs, getWorkflowJobLogs, getWorkflows,
   dispatchWorkflow, rerunWorkflow, cancelWorkflowRun,
@@ -53,6 +56,8 @@ function stepStatusIcon(step) {
   return { ch: '?', style: { dim: true } };
 }
 
+const WORKFLOW_SCAN_CONCURRENCY = 5; // bounded probes per repo, like fork compares
+
 export async function loadActionsRepos() {
   if (!appState.token) return;
   // Copy whatever's in appState.repos — never early-return on empty, since
@@ -60,10 +65,69 @@ export async function loadActionsRepos() {
   // empty-state copy. Showing a redundant `Load repos on Dashboard…`
   // toast *on top of* the empty-state would stack two messages and tell
   // the user the same thing twice.
-  appState.actionsRepos = appState.repos || [];
+  appState.actionsRepos = filterReposByWorkflowState(appState.repos || []);
   appState.actionsRepoSelected = 0;
   appState.actionsRepoScroll = 0;
   render();
+  // First visit: probe each repo's /actions/workflows endpoint so the list
+  // shows only repos that actually have a GitHub workflow. One-shot per
+  // account — rescan with [R] (repos view).
+  if (!appState.actionsScanDone && appState.repos.length > 0) {
+    const gen = startAsync('actions-scan');
+    appState.actionsScanning = true;
+    beginLoading(gen);
+    render();
+    await scanReposForWorkflows(gen);
+    appState.actionsScanning = false;
+    if (isStale(gen)) { finishLoading(gen); return; }
+    finishLoading(gen);
+    appState.actionsRepos = filterReposByWorkflowState(appState.repos || []);
+    const total = appState.repos.length;
+    const shown = appState.actionsRepos.length;
+    showMessage(shown > 0
+      ? 'Showing ' + shown + ' of ' + total + ' repos with workflows'
+      : 'No GitHub workflows found in any of your ' + total + ' repos',
+      shown > 0 ? 'success' : 'info', 5000);
+    render();
+  }
+}
+
+// Probe every account repo for workflows with a bounded worker pool.
+// Repos whose probe fails (rate limit / network) are left out of
+// actionsNoWorkflowRepos so they stay visible — we never hide a repo we
+// couldn't inspect.
+async function scanReposForWorkflows(gen) {
+  const repos = Array.isArray(appState.repos) ? appState.repos : [];
+  const noWorkflow = new Set();
+  const queue = repos.slice();
+  const worker = async () => {
+    while (queue.length > 0 && !isStale(gen)) {
+      const r = queue.shift();
+      if (!r || !r.full_name) continue;
+      const [owner, name] = r.full_name.split('/');
+      if (!owner || !name) continue;
+      try {
+        const result = await getWorkflows(appState.token, owner, name, gen.signal);
+        const workflows = Array.isArray(result) ? result : (result?.workflows || []);
+        if (workflows.length === 0) noWorkflow.add(r.full_name);
+      } catch { /* keep repo visible — could not determine */ }
+    }
+  };
+  const count = Math.min(WORKFLOW_SCAN_CONCURRENCY, Math.max(1, queue.length));
+  await Promise.all(Array.from({ length: count }, worker));
+  if (!isStale(gen)) {
+    appState.actionsNoWorkflowRepos = noWorkflow;
+    appState.actionsScanDone = true;
+  }
+}
+
+// Force a fresh probe of every repo (e.g. after adding a workflow).
+export async function rescanWorkflowRepos() {
+  if (!appState.token) { showMessage('Login first (Settings → Login)', 'warning'); return; }
+  if ((appState.repos || []).length === 0) { showMessage('No repos to scan — visit the Repos tab first', 'warning'); return; }
+  appState.actionsScanDone = false;
+  appState.actionsNoWorkflowRepos = null;
+  await loadActionsRepos();
 }
 
 export async function openWorkflowLog(jobId) {
@@ -427,14 +491,21 @@ function getFilteredRepos() {
 
 function renderRepoList(screen, y, h, W) {
   const filterHint = appState.actionsFilter ? ' | filter: "' + appState.actionsFilter + '"' : '';
-  screen.writeStr(2, y, 'Select a repo to view workflow runs:' + filterHint, { dim: true });
+  screen.writeStr(2, y, appState.actionsScanning
+    ? 'Scanning ' + (appState.repos?.length || 0) + ' repos for GitHub workflows…' + filterHint
+    : 'Select a repo to view workflow runs:' + filterHint, { dim: true });
   y += 2;
   const repos = getFilteredRepos();
   if (repos.length === 0) {
+    const scannedAndFiltered = appState.actionsScanDone
+      && appState.actionsNoWorkflowRepos && appState.actionsNoWorkflowRepos.size > 0;
     emptyState(screen, y - 2, Math.max(8, h), {
       icon: '○',
-      title: 'No repos loaded',
-      message: 'First visit the Dashboard or Repos tab to load your repos',
+      title: scannedAndFiltered ? 'No repos with workflows' : 'No repos loaded',
+      message: scannedAndFiltered
+        ? 'None of your ' + (appState.repos?.length || 0) + ' repos have GitHub Actions workflows'
+        : 'First visit the Dashboard or Repos tab to load your repos',
+      keyHint: scannedAndFiltered ? '[R] Rescan for workflows' : '',
     });
     return;
   }
@@ -645,7 +716,10 @@ export const keys = {
   'o': () => {
     if (appState.actionsView === 'runs') openSelectedRun();
   },
-  'R': () => { if (appState.actionsView === 'runs') rerunSelected(); },
+  'R': () => {
+    if (appState.actionsView === 'runs') rerunSelected();
+    else if (appState.actionsView === 'repos') rescanWorkflowRepos();
+  },
   'x': () => { if (appState.actionsView === 'runs') cancelSelected(); },
 };
 
