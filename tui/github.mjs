@@ -835,17 +835,24 @@ export const getCodeScanningAlerts = (token, owner, repo, state, perPage, signal
     (perPage ? (state ? '&' : '?') + 'per_page=' + perPage : ''), { token, signal });
 
 // ─── Security Advisories ──────────────────────────────────────────
-export const getSecurityAdvisories = (token, owner, repo, signal) =>
-  request('/repos/' + owner + '/' + repo + '/security-advisories', { token, signal });
+// Global GitHub Advisory Database feed — readable by ANY authenticated
+// user, no repo write access needed. The repo-scoped endpoint
+// (/repos/{o}/{r}/security-advisories) requires write access and 403s
+// on read-only repos.
+export const getGlobalSecurityAdvisories = (token, signal) =>
+  request('/advisories?type=reviewed&per_page=30', { token, signal });
 
 // ─── Branch Protection ────────────────────────────────────────────
 export const getBranchProtection = (token, owner, repo, branch, signal) =>
   request('/repos/' + owner + '/' + repo + '/branches/' + encodeURIComponent(branch) + '/protection', { token, signal });
 
-// ─── Dependency Graph ─────────────────────────────────────────────
-export const getDependencyGraphManifests = (token, owner, repo, signal) =>
-  request('/repos/' + owner + '/' + repo + '/dependency-graph/manifests', {
-    token, signal, accept: 'application/vnd.github.hawthorn-preview+json',
+// ─── Dependency Graph (SBOM) ──────────────────────────────────────
+// Export SBOM for a repo — read-accessible (public repos need no
+// permissions). The old /dependency-graph/manifests preview endpoint was
+// retired and 404s unconditionally.
+export const getDependencyGraphSBOM = (token, owner, repo, signal) =>
+  request('/repos/' + owner + '/' + repo + '/dependency-graph/sbom', {
+    token, signal, accept: 'application/vnd.github+json',
   });
 
 // ─── User search ──────────────────────────────────────────────────

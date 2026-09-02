@@ -5,7 +5,7 @@ import { appState, render, startAsync, isStale, showMessage, confirm, beginLoadi
 import {
   getRepoDependabotAlerts, dismissDependabotAlert,
   getSecretScanningAlerts, getCodeScanningAlerts,
-  getSecurityAdvisories, getBranchProtection, getDependencyGraphManifests,
+  getGlobalSecurityAdvisories, getBranchProtection, getDependencyGraphSBOM,
 } from '../github.mjs';
 import { truncate, sectionHeader, relTime, openUrl } from '../utils.mjs';
 import { color } from '../theme.mjs';
@@ -59,7 +59,9 @@ export async function loadSecurity() {
       if (isStale(gen, 'analyze-security')) { finishLoading(gen); return; }
       appState.codeScanningAlerts = Array.isArray(alerts) ? alerts : [];
     } else if (sub === 'advisories') {
-      const advisories = await getSecurityAdvisories(appState.token, owner, name, gen.signal);
+      // Global Advisory Database feed — no repo write access required,
+      // so read-only repos get data instead of a 403.
+      const advisories = await getGlobalSecurityAdvisories(appState.token, gen.signal);
       if (isStale(gen, 'analyze-security')) { finishLoading(gen); return; }
       appState.securityAdvisories = Array.isArray(advisories) ? advisories : [];
     } else if (sub === 'branch') {
@@ -74,14 +76,19 @@ export async function loadSecurity() {
         appState.securityError = 'Branch protection unavailable: ' + (e.message || 'token may lack repo administration scope');
       }
     } else if (sub === 'deps') {
+      // SBOM export — read-accessible (works on any public repo). The old
+      // /dependency-graph/manifests preview endpoint was retired and 404s
+      // unconditionally.
       try {
-        const manifests = await getDependencyGraphManifests(appState.token, owner, name, gen.signal);
+        const sbom = await getDependencyGraphSBOM(appState.token, owner, name, gen.signal);
         if (isStale(gen, 'analyze-security')) { finishLoading(gen); return; }
-        appState.dependencyManifests = (manifests && manifests.manifests) ? manifests.manifests : [];
+        const pkgs = sbom && sbom.sbom && sbom.sbom.data && Array.isArray(sbom.sbom.data.packages)
+          ? sbom.sbom.data.packages : [];
+        appState.dependencyPackages = pkgs;
       } catch (e) {
         if (isStale(gen, 'analyze-security')) { finishLoading(gen); return; }
-        appState.dependencyManifests = [];
-        appState.securityError = 'Dependency graph unavailable: ' + (e.message || 'enable dependency graph or check token scopes');
+        appState.dependencyPackages = [];
+        appState.securityError = 'Dependency SBOM unavailable: ' + (e.message || 'enable dependency graph or check token scopes');
       }
     }
   } catch (e) {
@@ -312,12 +319,14 @@ function renderCodeScanPane(screen, y, maxH, W) {
 function renderAdvisoriesPane(screen, y, maxH, W) {
   if (appState.loading) { loadingIndicator(screen, 2, y, 'loading security advisories'); return; }
   const advisories = appState.securityAdvisories;
+  screen.writeStr(2, y++, 'GitHub Advisory Database — global feed', { dim: true });
+  y++;
   if (advisories.length === 0) {
-    screen.writeStr(2, y++, 'No published security advisories for this repo', { dim: true });
+    screen.writeStr(2, y++, 'No published advisories', { dim: true });
     return;
   }
   const start = appState.securityAlertScroll;
-  const rows = Math.max(1, maxH - 1);
+  const rows = Math.max(1, maxH - 3);
   for (let i = 0; i < rows && start + i < advisories.length; i++) {
     const adv = advisories[start + i];
     const row = y + i;
@@ -326,9 +335,9 @@ function renderAdvisoriesPane(screen, y, maxH, W) {
       for (let x = 0; x < W; x++) screen.styleBuf[row][x] = color('selection');
     }
     const sev = adv.severity || '?';
-    const ghsa = adv.ghe_id || adv.github_advisory_id || '?';
+    const ghsa = adv.ghsa_id || adv.ghe_id || adv.github_advisory_id || '?';
     const summary = truncate(adv.summary || '?', Math.min(35, W - 30));
-    const state = adv.state || '?';
+    const state = adv.withdrawn_at ? 'withdrawn' : 'published';
     screen.writeStr(2, row, sel ? '▶' : ' ', sel ? color('selection') : null);
     screen.writeStr(4, row, sevIcon(sev));
     screen.writeStr(7, row, truncate(ghsa, 20), sel ? color('selection') : { fg: 'cyan' });
@@ -408,10 +417,10 @@ function renderBranchProtectionPane(screen, y, maxH, W) {
 }
 
 function renderDepsPane(screen, y, maxH, W) {
-  if (appState.loading) { loadingIndicator(screen, 2, y, 'loading dependency manifests'); return; }
-  const manifests = appState.dependencyManifests;
-  if (manifests.length === 0) {
-    screen.writeStr(2, y++, 'No dependency manifests found', { dim: true });
+  if (appState.loading) { loadingIndicator(screen, 2, y, 'loading dependency SBOM'); return; }
+  const packages = appState.dependencyPackages;
+  if (packages.length === 0) {
+    screen.writeStr(2, y++, 'No dependency SBOM available', { dim: true });
     screen.writeStr(2, y++, 'Enable dependency graph in repo settings', { dim: true });
     return;
   }
@@ -420,36 +429,27 @@ function renderDepsPane(screen, y, maxH, W) {
   const rows = Math.max(1, maxH - 2);
 
   // Summary
-  let totalDeps = 0;
-  let totalVuln = 0;
-  for (const m of manifests) {
-    totalDeps += m.total_dependency_count || 0;
-    totalVuln += m.vulnerabilities_count || 0;
-  }
-  const summary = totalDeps + ' dependencies across ' + manifests.length + ' manifest(s)' +
-    (totalVuln > 0 ? '   🔴 ' + totalVuln + ' with vulnerabilities' : '   ✅ all clean');
-  screen.writeStr(2, y, summary, totalVuln > 0 ? { fg: 'yellow' } : { fg: 'green' });
+  screen.writeStr(2, y, packages.length + ' packages in SBOM', { fg: 'green' });
   y += 2;
 
-  for (let i = 0; i < rows && start + i < manifests.length; i++) {
-    const m = manifests[start + i];
+  for (let i = 0; i < rows && start + i < packages.length; i++) {
+    const pkg = packages[start + i];
     const row = y + i;
     const sel = start + i === appState.securityAlertCursor;
     if (sel) {
       for (let x = 0; x < W; x++) screen.styleBuf[row][x] = color('selection');
     }
-    const filename = truncate(m.filename || '?', Math.min(25, W - 40));
-    const deps = m.total_dependency_count || 0;
-    const vulns = m.vulnerabilities_count || 0;
-    const vulnStr = vulns > 0 ? ' 🔴 ' + vulns + ' vuln' : ' ✅';
+    const name = truncate(pkg.name || '?', Math.min(25, W - 42));
+    const version = truncate(pkg.versionInfo || '', 16);
+    const license = truncate(pkg.licenseConcluded || '', 18);
     screen.writeStr(2, row, sel ? '▶' : ' ', sel ? color('selection') : null);
-    screen.writeStr(4, row, filename, sel ? color('selection') : color('repoName'));
-    screen.writeStr(30, row, deps + ' deps', sel ? color('selection') : color('dim'));
-    if (30 + 8 + vulnStr.length < W) {
-      screen.writeStr(38, row, vulnStr, vulns > 0 ? (sel ? color('selection') : { fg: 'red' }) : (sel ? color('selection') : { fg: 'green' }));
+    screen.writeStr(4, row, name, sel ? color('selection') : color('repoName'));
+    screen.writeStr(31, row, version, sel ? color('selection') : color('dim'));
+    if (W > 60 && license) {
+      screen.writeStr(50, row, license, sel ? color('selection') : color('dim'));
     }
   }
-  scrollIndicators(screen, y, y + rows - 1, appState.securityAlertScroll, manifests.length);
+  scrollIndicators(screen, y, y + rows - 1, appState.securityAlertScroll, packages.length);
 }
 
 // ─── Security key handlers ───────────────────────────────────────
@@ -469,7 +469,7 @@ export function securityDown(screen) {
   else if (sub === 'secret') len = appState.secretScanningAlerts.length;
   else if (sub === 'codescan') len = appState.codeScanningAlerts.length;
   else if (sub === 'advisories') len = appState.securityAdvisories.length;
-  else if (sub === 'deps') len = appState.dependencyManifests.length;
+  else if (sub === 'deps') len = appState.dependencyPackages.length;
   if (len === 0) return;
   const maxVisible = Math.max(1, (screen ? screen.height : 24) - 16);
   appState.securityAlertCursor = Math.min(len - 1, appState.securityAlertCursor + 1);

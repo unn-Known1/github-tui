@@ -96,7 +96,7 @@ export async function loadRepoDetails(owner, name) {
   appState.codeScanningAlerts = [];
   appState.securityAdvisories = [];
   appState.branchProtection = null;
-  appState.dependencyManifests = [];
+  appState.dependencyPackages = [];
   render();
   try {
     const details = await getRepositoryDetails(appState.token, owner, name, gen.signal);
@@ -388,7 +388,7 @@ export function handleBack() {
     appState.codeScanningAlerts = [];
     appState.securityAdvisories = [];
     appState.branchProtection = null;
-    appState.dependencyManifests = [];
+    appState.dependencyPackages = [];
     appState.analyzeView = 'results';
     render();
   } else if (v === 'results') {

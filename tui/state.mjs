@@ -147,7 +147,7 @@ export function resetAccountState() {
   appState.codeScanningAlerts = [];
   appState.securityAdvisories = [];
   appState.branchProtection = null;
-  appState.dependencyManifests = [];
+  appState.dependencyPackages = [];
   appState.forks = [];
   appState.organizations = [];
   appState.organizationRepos = [];
@@ -450,7 +450,7 @@ export const appState = {
   codeScanningAlerts: [],
   securityAdvisories: [],
   branchProtection: null,
-  dependencyManifests: [],
+  dependencyPackages: [],
   _readmeText: null,
 
   // ── Text selection (README / file viewer) ──
