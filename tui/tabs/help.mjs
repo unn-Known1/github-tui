@@ -33,11 +33,15 @@ const CATEGORIES = [
   { id: 'dashboard',  name: 'DASHBOARD',         shortcuts: [
     { key: 'j / k',     desc: 'Navigate trending repos' },
     { key: 'n',         desc: 'Create a new issue on your first repo' },
-    { key: 'Tab',       desc: 'Focus the row of stat cards' },
+    { key: 'Tab',       desc: 'Cycle dashboard widgets' },
     { key: '← / → / H L', desc: 'Move between stat cards' },
-    { key: 'Enter',     desc: 'Open the focused stat card (e.g. Stale → Repos)' },
+    { key: 'Enter',     desc: 'Open focused widget' },
     { key: 'Esc',       desc: 'Unfocus stat cards (back to scrolling)' },
-    { key: 'PgUp / PgDn', desc: 'Navigate trending pages' },
+    { key: 'PgUp / PgDn', desc: 'Scroll dashboard' },
+    { key: 't',         desc: 'Cycle trending period (1/7/30d)' },
+    { key: '/',         desc: 'Filter trending' },
+    { key: 'l',         desc: 'Toggle local-repo filter' },
+    { key: 'z / Z / X', desc: 'Collapse toggle / collapse all / expand all' },
   ]},
   { id: 'repos',      name: 'REPOS',             shortcuts: [
     { key: '/',         desc: 'Substring filter' },

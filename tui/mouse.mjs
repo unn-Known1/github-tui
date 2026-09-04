@@ -289,6 +289,30 @@ export function handleMouseEvent(event) {
       }
     }
 
+    // Dashboard topRepos (left column) + stale (right column) hover — highlight
+    // only, no focus change (mirrors trending hover above). Guarded for empty.
+    if (t === 0 && appState._sectionHeaders) {
+      const topH = appState._sectionHeaders['dashboard:topRepos'];
+      if (topH && topH.y > 0 && sy > topH.y) {
+        const row = sy - topH.y - 1;
+        const allRepos = dashboard.getDashboardRepos() || [];
+        const topLen = Math.min(5, Array.isArray(allRepos) ? allRepos.length : 0);
+        if (row >= 0 && row < topLen && row !== appState.dashboardTopSelected) {
+          appState.dashboardTopSelected = row;
+          render();
+        }
+      }
+      const staleH = appState._sectionHeaders['dashboard:stale'];
+      if (staleH && staleH.y > 0 && sy > staleH.y) {
+        const row = sy - staleH.y - 1;
+        const staleList = Array.isArray(appState.dashboardStaleRepos) ? appState.dashboardStaleRepos : [];
+        if (row >= 0 && row < staleList.length && row !== appState.dashboardStaleSelected) {
+          appState.dashboardStaleSelected = row;
+          render();
+        }
+      }
+    }
+
     // Repos tab list.
     if (t === 1) {
       const rowOff = appState.reposView === 'starred' ? TAB_CONTENT_Y[1] + 3 : TAB_CONTENT_Y[1] + 6;
@@ -683,6 +707,57 @@ function handleDblClick(sx, sy) {
       }
     }
   }
+
+  // Double-click stale row → open repo in Analyze (single-click now only
+  // selects + focuses, matching attention/issues/prs).
+  if (sx >= rightX && sy >= bodyY) {
+    const staleHeader = appState._sectionHeaders['dashboard:stale'];
+    if (staleHeader && sy > staleHeader.y) {
+      const row = sy - staleHeader.y - 1;
+      const staleList = Array.isArray(appState.dashboardStaleRepos) ? appState.dashboardStaleRepos : [];
+      if (row >= 0 && row < staleList.length) {
+        const name = staleList[row];
+        const allRepos = dashboard.getDashboardRepos() || [];
+        const repo = (Array.isArray(allRepos) ? allRepos : []).find(r => r.name === name);
+        if (repo && repo.full_name) {
+          appState.dashboardStaleSelected = row;
+          focusDashboardZone('stale');
+          const [owner, repoName] = repo.full_name.split('/');
+          if (owner && repoName) {
+            setTab(2);
+            analyze.loadRepoDetails(owner, repoName);
+            return true;
+          }
+        }
+      }
+    }
+  }
+
+  // Double-click top-repo row → open repo in Analyze.
+  if (sx < splitX && sy >= bodyY) {
+    const topHeader = appState._sectionHeaders['dashboard:topRepos'];
+    if (topHeader && topHeader.y > 0 && sy > topHeader.y) {
+      const listIdx = sy - topHeader.y - 1;
+      if (listIdx >= 0 && listIdx < 5) {
+        const allRepos = dashboard.getDashboardRepos() || [];
+        const reposList = [...(Array.isArray(allRepos) ? allRepos : [])]
+          .sort((a, b) => (b.stargazers_count || 0) - (a.stargazers_count || 0));
+        if (listIdx < reposList.length) {
+          const r = reposList[listIdx];
+          if (r && r.full_name) {
+            appState.dashboardTopSelected = listIdx;
+            focusDashboardZone('topRepos');
+            const [owner, name] = r.full_name.split('/');
+            if (owner && name) {
+              setTab(2);
+              analyze.loadRepoDetails(owner, name);
+              return true;
+            }
+          }
+        }
+      }
+    }
+  }
   return false;
 }
 
@@ -871,12 +946,13 @@ function dispatchDashboardClick(sx, sy) {
     const staleHeader = appState._sectionHeaders['dashboard:stale'];
     if (staleHeader && sy > staleHeader.y) {
       const row = sy - staleHeader.y - 1;
-      const name = appState.dashboardStaleRepos[row];
-      const repo = dashboard.getDashboardRepos().find(r => r.name === name);
-      if (repo) {
-        const [owner, repoName] = repo.full_name.split('/');
-        setTab(2);
-        analyze.loadRepoDetails(owner, repoName);
+      const staleList = Array.isArray(appState.dashboardStaleRepos) ? appState.dashboardStaleRepos : [];
+      if (row >= 0 && row < staleList.length) {
+        appState.dashboardStaleSelected = row;
+        if (!focusDashboardZone('stale')) {
+          appState.dashboardFocusZone = 'stale';
+          render();
+        }
         return;
       }
     }
@@ -905,17 +981,17 @@ function dispatchDashboardClick(sx, sy) {
     if (th && th.y > 0 && sy > th.y) {
       const listIdx = sy - th.y - 1;
       if (listIdx >= 0 && listIdx < 5) {
-        const reposList = [...dashboard.getDashboardRepos()]
+        const allRepos = dashboard.getDashboardRepos() || [];
+        const reposList = [...(Array.isArray(allRepos) ? allRepos : [])]
           .sort((a, b) => (b.stargazers_count || 0) - (a.stargazers_count || 0));
         if (listIdx < reposList.length) {
-          const r = reposList[listIdx];
-          if (r && r.full_name) {
-            const [owner, name] = r.full_name.split('/');
-            setTab(2);
-            analyze.loadRepoDetails(owner, name);
+          appState.dashboardTopSelected = listIdx;
+          if (!focusDashboardZone('topRepos')) {
+            appState.dashboardFocusZone = 'topRepos';
+            render();
           }
+          return;
         }
-        return;
       }
     }
   }

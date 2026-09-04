@@ -1,8 +1,9 @@
 import { describe, it, afterEach } from 'node:test';
 import assert from 'node:assert/strict';
-import { appState } from '../tui/state.mjs';
+import { appState, DASHBOARD_WIDGET_TTL_MS, shouldRefreshWidget, isDashboardHidden, resetAccountState } from '../tui/state.mjs';
 import {
   buildHeatmap,
+  buildStarHistory,
   getDashboardRepos,
   getDashboardEvents,
   getDashboardIssues,
@@ -25,6 +26,10 @@ const keysToSave = [
   'dashboardPRSelected', 'dashboardPRScroll', 'dashboardFocusZone',
   'dashboardCardsFocus', 'customSections', 'dashboardCustomSectionSelected',
   'dashboardCustomItemSelected',
+  'actionsFailures', 'dashboardWidgetFetched', 'dashboardHidden',
+  'dashboardQuickActions', 'dashboardTopRepos', 'dashboardLangHistogram',
+  'dashboardTotals', 'dashboardTopSelected', 'dashboardTopScroll',
+  'dashboardStaleSelected', 'dashboardStaleScroll',
 ];
 for (const key of keysToSave) saved[key] = appState[key];
 
@@ -151,5 +156,112 @@ describe('Dashboard focus and viewport behavior', () => {
     screen.popViewport();
     assert.equal(screen.charBuf[3][1], 'v');
     assert.equal(screen.charBuf[3].includes('h'), false);
+  });
+});
+
+describe('Dashboard state infra — D13 per-widget TTL (state.mjs)', () => {
+  it('shouldRefreshWidget returns true when never fetched, false when fresh, true when stale', () => {
+    const now = Date.now();
+    appState.dashboardWidgetFetched = {};
+    assert.equal(shouldRefreshWidget('events', now), true);
+    appState.dashboardWidgetFetched = { events: now };
+    assert.equal(shouldRefreshWidget('events', now), false);
+    appState.dashboardWidgetFetched = { events: now - DASHBOARD_WIDGET_TTL_MS.events - 1 };
+    assert.equal(shouldRefreshWidget('events', now), true);
+  });
+
+  it('exposes per-widget TTL budgets with slower refresh for expensive widgets', () => {
+    assert.equal(DASHBOARD_WIDGET_TTL_MS.events, 5 * 60 * 1000);
+    assert.equal(DASHBOARD_WIDGET_TTL_MS.trending, 30 * 60 * 1000);
+    assert.equal(DASHBOARD_WIDGET_TTL_MS.starred, 60 * 60 * 1000);
+    // Unknown widgets fall back to the 5-minute default.
+    const now = Date.now();
+    appState.dashboardWidgetFetched = { whatever: now - 6 * 60 * 1000 };
+    assert.equal(shouldRefreshWidget('whatever', now), true);
+    appState.dashboardWidgetFetched = { whatever: now };
+    assert.equal(shouldRefreshWidget('whatever', now), false);
+  });
+});
+
+describe('Dashboard state infra — D14 caches, D8 zones, D17 prefs defaults (state.mjs)', () => {
+  it('defaults memoized derived caches, new focus-zone cursors, and prefs', () => {
+    assert.deepEqual(appState.dashboardTopRepos, []);
+    assert.deepEqual(appState.dashboardLangHistogram, []);
+    assert.deepEqual(appState.dashboardTotals, { stars: 0, forks: 0, languages: 0 });
+    assert.equal(appState.dashboardTopSelected, 0);
+    assert.equal(appState.dashboardTopScroll, 0);
+    assert.equal(appState.dashboardStaleSelected, 0);
+    assert.equal(appState.dashboardStaleScroll, 0);
+    assert.deepEqual(appState.dashboardHidden, []);
+    assert.equal(appState.dashboardQuickActions, true);
+  });
+
+  it('isDashboardHidden defaults to false and reflects dashboardHidden', () => {
+    appState.dashboardHidden = [];
+    assert.equal(isDashboardHidden('trending'), false);
+    appState.dashboardHidden = ['trending'];
+    assert.equal(isDashboardHidden('trending'), true);
+    assert.equal(isDashboardHidden('events'), false);
+  });
+
+  it('resetAccountState clears derived caches and zone cursors', () => {
+    const savedToken = appState.token;
+    const savedUser = appState.user;
+    try {
+      appState.dashboardTopRepos = [{ full_name: 'me/alpha' }];
+      appState.dashboardLangHistogram = [['JavaScript', 2]];
+      appState.dashboardTotals = { stars: 9, forks: 1, languages: 2 };
+      appState.dashboardTopSelected = 3;
+      appState.dashboardTopScroll = 2;
+      appState.dashboardStaleSelected = 1;
+      appState.dashboardStaleScroll = 1;
+      resetAccountState();
+      assert.deepEqual(appState.dashboardTopRepos, []);
+      assert.deepEqual(appState.dashboardLangHistogram, []);
+      assert.deepEqual(appState.dashboardTotals, { stars: 0, forks: 0, languages: 0 });
+      assert.equal(appState.dashboardTopSelected, 0);
+      assert.equal(appState.dashboardTopScroll, 0);
+      assert.equal(appState.dashboardStaleSelected, 0);
+      assert.equal(appState.dashboardStaleScroll, 0);
+    } finally {
+      appState.token = savedToken;
+      appState.user = savedUser;
+    }
+  });
+});
+
+describe('Dashboard star history basics (D1 regression cover)', () => {
+  // NOTE: sparkline() and sparkCharsAccessible() are module-private in
+  // dashboard.mjs (not exported), so cover the exported buildStarHistory()
+  // semantics instead: outgoing starred repos bucketed per day.
+  it('returns [] for empty input', () => {
+    assert.deepEqual(buildStarHistory([]), []);
+  });
+
+  it('buckets a repo starred today into the trailing slot', () => {
+    const history = buildStarHistory([{ starred_at: new Date().toISOString() }]);
+    assert.equal(history.length, 30);
+    assert.equal(history[29], 1);
+    assert.equal(history.slice(0, 29).reduce((a, b) => a + b, 0), 0);
+  });
+
+  it('ignores entries older than 30 days and entries without dates', () => {
+    const old = new Date(Date.now() - 60 * 86400000).toISOString();
+    const history = buildStarHistory([{ starred_at: old }, { full_name: 'x/y' }]);
+    assert.equal(history.length, 30);
+    assert.equal(history.reduce((a, b) => a + b, 0), 0);
+  });
+});
+
+describe('Dashboard attention CI source (D5 regression cover)', () => {
+  it('getNeedsAttention prefers actionsFailures over actionsRuns', () => {
+    appState.actionsFailures = [{ conclusion: 'failure', repo: 'o/r' }];
+    appState.actionsRuns = [];
+    appState.repos = [];
+    appState.notifications = [];
+    appState.localRepo = null;
+    appState.localRepoFilter = false;
+    const items = getNeedsAttention();
+    assert.ok(items.some((i) => i.id === 'ci'), 'expected a CI item from actionsFailures');
   });
 });

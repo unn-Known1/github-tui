@@ -600,10 +600,8 @@ function statusLine() {
   const sep = '   ';
   switch (tabState.current) {
     case 0: {
-      const focusHint = appState.dashboardCardsFocus
-        ? '   [Tab] Widgets   [←→] Cards   [Enter] Open'
-        : '   [Tab] Focus widgets';
-      return ' [1-6] Tabs' + sep + '[r] Refresh' + sep + '[PgUp/PgDn] Scroll' + sep + '[n] New issue' + sep + '[Ctrl-P] Quick actions' + sep + '[?] Help' + focusHint;
+      const cardsHint = appState.dashboardCardsFocus ? sep + '[←→] Cards' : '';
+      return ' [Tab] Widgets' + sep + '[Enter] Open' + sep + '[t] Trend' + sep + '[/] Filter' + sep + '[l] Local' + sep + '[r] Refresh' + sep + '[?] Help' + cardsHint;
     }
     case 1: {
       if (appState.reposView === 'starred') {
@@ -722,7 +720,7 @@ function doRender() {
 
   // Loading skeleton
   if (appState.loading && !appState.showHelp && !appState.showPalette
-      && !appState.showOnboarding && !appState.showWelcome) {
+      && !appState.showOnboarding && !appState.showWelcome && tabState.current !== 0) {
     skeletonBars(screen, contentY, contentH, 6, 0.35);
   }
 

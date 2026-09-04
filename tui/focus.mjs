@@ -33,9 +33,10 @@ const FOCUS_ZONES = {
   0: [ // Dashboard
     // Tab order mirrors top-to-bottom reading of the dashboard:
     //   cards (top full-width row)
-    // → activity (1st on the right column)
+    // → attention → activity (1st on the right column)
     // → issues, prs (middle of right column)
-    // → trending (anchored to the bottom of right column).
+    // → topRepos, stale (left/right body sections)
+    // → custom → trending (anchored to the bottom of right column).
     // Previously trending was 2nd in the list, which made the second Tab
     // hop from "top of UI → bottom-right corner → top-of-right corner",
     // a confusing jump.
@@ -44,6 +45,8 @@ const FOCUS_ZONES = {
     { id: 'activity', label: 'Recent Activity', canFocus: () => hasDashboardItems(appState.events) },
     { id: 'issues', label: 'Recent Issues', canFocus: () => hasDashboardItems(appState.dashboardRecentIssues) },
     { id: 'prs', label: 'Recent PRs', canFocus: () => hasDashboardItems(appState.dashboardRecentPRs) },
+    { id: 'topRepos', label: 'Top Repos', canFocus: () => (appState.repos||[]).length > 0 },
+    { id: 'stale', label: 'Stale Repos', canFocus: () => (appState.dashboardStaleCount||0) > 0 },
     { id: 'custom', label: 'Custom Sections', canFocus: () => appState.customSections?.some(s => s.items?.length > 0) },
     { id: 'trending', label: 'Trending', canFocus: () => hasDashboardItems(appState.trending) },
   ],
@@ -162,6 +165,8 @@ export function getFocusedSelection() {
     if (zone.id === 'activity') return { type: 'list', index: appState.dashboardActivitySelected, scroll: appState.dashboardActivityScroll };
     if (zone.id === 'issues') return { type: 'list', index: appState.dashboardIssueSelected, scroll: appState.dashboardIssueScroll };
     if (zone.id === 'prs') return { type: 'list', index: appState.dashboardPRSelected, scroll: appState.dashboardPRScroll };
+    if (zone.id === 'topRepos') return { type: 'list', index: appState.dashboardTopSelected || 0, scroll: appState.dashboardTopScroll || 0 };
+    if (zone.id === 'stale') return { type: 'list', index: appState.dashboardStaleSelected || 0, scroll: appState.dashboardStaleScroll || 0 };
     if (zone.id === 'custom') return { type: 'custom', section: appState.dashboardCustomSectionSelected, index: appState.dashboardCustomItemSelected };
   }
   if (t === 1) {

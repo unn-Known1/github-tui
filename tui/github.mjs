@@ -504,7 +504,7 @@ export const getTrendingRepos = async (token, days, perPage, signal) => {
   const d = days || 7;
   const pp = perPage || 5;
   const since = new Date(Date.now() - d * 86400000).toISOString().split('T')[0];
-  const q = encodeURIComponent('created:>' + since);
+  const q = encodeURIComponent('created:>' + since + ' stars:>5');
   const r = await request('/search/repositories?q=' + q +
     '&sort=stars&order=desc&per_page=' + pp, { token, signal });
   return r.items || [];

@@ -13,7 +13,7 @@ A fast, zero-dependency terminal user interface for GitHub — six tabs, a comma
 
 ## ✨ Highlights
 
-- 🏠 **Real Dashboard** — greeting + 5 stat cards (★ stars, ⑂ forks, ◆ languages, ⏱ account age, ⚠ stale repos), profile mini with recent followers, **contribution heatmap**, **star history sparkline**, top repos, language bar chart, live activity feed, **recent issues/PRs**, stale repos alert, trending-this-week, unread-notifications badge, **collapsible sections**.
+- 🏠 **Real Dashboard** — greeting + 5 stat cards (★ stars, ⑂ forks, ◆ languages, ⏱ account age, ⚠ stale repos), profile mini with recent followers, **recent public activity heatmap** (public events only), **starred-activity sparkline** (repos you starred), top repos, language bar chart, live activity feed, **recent issues/PRs**, stale repos alert, trending-this-week, unread-notifications badge, **collapsible sections**.
 - 📁 **Repos browser, supercharged** — row selection (`▶`), `Enter` drills into Analyze details, sortable columns, **type filter cycle** (`t`: all/sources/forks/archived/private/public/templates), **language facet** (`L`), **stale-only** toggle (`x`), **density toggle** (`D` switches between compact and comfortable), **pinned favorites** (`P` — stick to top, persisted on disk), inline visibility badges (🔒 private, 🔱 fork, 📦 archived, 🗄 template, 📌 pinned, ★ bookmarked), `g`/`G` jump-to-top/bottom.
 - 🗂️ **File explorer** — `F` on Explore details opens a real in-terminal repo browser. Walk the tree, view files with line numbers + syntax highlighting for the supported top languages, browse per-file commit history and local blame, switch branches, **save individual files** (`s`), **save whole folders** recursively (`S`), **download zipballs** (`Z`) streamed straight to disk, **`git clone`** into your CWD (`C`), **`gh repo clone`** for private repos (`G`), copy raw URLs (`y`) or file contents (`Y`) to clipboard.
 - 🔍 **Explore any public repo** — search, 2-column detail view (metadata + languages bar + top contributors + latest releases), pane tabs `[O] Overview / [i] Issues / [P] PRs / [R] README / [F] Files / [T] Traffic / [K] Checks / [S] Security`, branch/ref comparison, file history, local blame, and parallel ahead/behind compares on forks.
@@ -295,9 +295,10 @@ Every tab module exports `render(screen, y, h)`, an optional `keys` map for tab-
 ### 1 · Dashboard
 - Time-of-day greeting (`Good morning/afternoon/evening, <you>`) with 🔔 unread badge.
 - 5 stat cards: ★ Total Stars, ⑂ Total Forks, ◆ Distinct Languages, ⏱ Account Age, ⚠ Stale Repos. `Tab` to focus, `←/→` to move, `Enter` to drill in (e.g. Stale → Repos with stale filter).
-- **Left:** profile mini (`@login`, email, followers/following counts, recent followers list), **contribution heatmap** (15-week grid from PushEvents), **star history sparkline** (last 30 days), top 5 repos by stars, language bar chart across all your repos.
+- **Left:** profile mini (`@login`, email, followers/following counts, recent followers list), **recent public activity heatmap** (15-week grid from PushEvents; public events only, private contributions need GraphQL), **starred-activity sparkline** (repos you starred, last 30 days), top 5 repos by stars, language bar chart across all your repos.
 - **Right:** Recent Activity feed (last ~10 events with colored icons per type + relative timestamps), **Recent Issues** (across your repos), **Recent Pull Requests** (across your repos), **Stale Repos Alert** (60+ days no push), 🔥 Trending This Week (top 5 public repos created in last 7 days, sorted by stars).
 - **Collapsible sections** — all sections can be collapsed/expanded with `z`/`Z`/`X`.
+- **Freshness + keys + layout:** per-widget freshness badges, `t` period / `/` filter / `l` local-repo keys, Top Repos + Stale keyboard zones (`Tab`/`Enter`), responsive single-column on <80 cols, SECURITY/MY WORK sections when data exists, `dashboard.json` prefs (hidden widgets + quick-actions toggle).
 
 ### 2 · Repos
 - Header shows aggregate **★/⑂/⚡** totals across all your repos plus archived count.
@@ -394,7 +395,7 @@ Every tab module exports `render(screen, y, h)`, an optional `keys` map for tab-
 
 **Shipped in v0.3.1:** Repos tab row selection + Enter drill-in, type/language/stale filters, density toggle, pins, visibility badges, relative-time column, jump-to-top/bottom. **File explorer** with tree browsing, file viewer (line numbers + syntax coloring), branch picker, save file / save folder / download zipball / git clone / gh clone — all CWD-safe.
 
-**Shipped in v0.4:** Dashboard enhancements — contribution heatmap (15-week grid), star history sparkline (30-day trend), recent issues/PRs activity, stale repos alert (60+ days), quick actions bar.
+**Shipped in v0.4:** Dashboard enhancements — contribution heatmap (15-week grid), star history sparkline (30-day trend), recent issues/PRs activity, stale repos alert (60+ days), quick-actions hint bar under stat cards ([r]/[t]/[/]/[l]/[Tab]).
 
 **Shipped in v0.5:** Issue/PR detail popup with rendered body, labels, comments, and file diffs. Comment from TUI, emoji reactions, close/reopen, merge PRs with confirmation. PR diff viewer with unified diff and syntax coloring. Inbox notifications open detail popup for issues/PRs.
 

@@ -202,6 +202,13 @@ export function resetAccountState() {
   appState.dashboardLastFetched = null;
   appState.dashboardStaleCount = 0;
   appState.dashboardStaleRepos = [];
+  appState.dashboardTopRepos = [];
+  appState.dashboardLangHistogram = [];
+  appState.dashboardTotals = { stars: 0, forks: 0, languages: 0 };
+  appState.dashboardTopSelected = 0;
+  appState.dashboardTopScroll = 0;
+  appState.dashboardStaleSelected = 0;
+  appState.dashboardStaleScroll = 0;
   appState._moreReposAvailable = false;
 }
 
@@ -506,6 +513,15 @@ export const appState = {
   dashboardPRScroll: 0,
   dashboardCustomSectionSelected: 0,
   dashboardCustomItemSelected: 0,
+  dashboardTopRepos: [],       // memoized top-5 by stars (recomputed in recomputeDashboardDerived)
+  dashboardLangHistogram: [],  // memoized [[lang, count]] sorted desc
+  dashboardTotals: { stars: 0, forks: 0, languages: 0 }, // memoized account totals
+  dashboardTopSelected: 0,
+  dashboardTopScroll: 0,
+  dashboardStaleSelected: 0,
+  dashboardStaleScroll: 0,
+  dashboardHidden: [], // hidden widget ids (D17 prefs)
+  dashboardQuickActions: true,
 
   // ── Recommended feature state ──
   compareData: null,
@@ -1018,6 +1034,35 @@ export function getWidgetAge(widget, now = Date.now()) {
 export function isWidgetLoading(widget) {
   return appState.dashboardLoadingWidgets[widget] === true;
 }
+
+// ── D13 per-widget TTL (stale-while-revalidate budgets) ──
+export const DASHBOARD_WIDGET_TTL_MS = { events: 5*60*1000, issues: 5*60*1000, prs: 5*60*1000, notifications: 5*60*1000, trending: 30*60*1000, followers: 60*60*1000, starred: 60*60*1000 };
+export function shouldRefreshWidget(widget, now = Date.now()) {
+  const fetched = appState.dashboardWidgetFetched[widget];
+  if (!fetched) return true;
+  const ttl = DASHBOARD_WIDGET_TTL_MS[widget] || 5*60*1000;
+  return (now - fetched) > ttl;
+}
+
+// ── D17 dashboard prefs persistence (hidden widgets + quick-actions toggle) ──
+const DASHBOARD_PREFS_PATH = join(homedir(), '.github-tui', 'dashboard.json');
+export function loadDashboardPrefs() {
+  try {
+    if (existsSync(DASHBOARD_PREFS_PATH)) {
+      const p = JSON.parse(readFileSync(DASHBOARD_PREFS_PATH, 'utf8'));
+      if (Array.isArray(p.hidden)) appState.dashboardHidden = p.hidden.filter(x => typeof x === 'string');
+      if (typeof p.quickActions === 'boolean') appState.dashboardQuickActions = p.quickActions;
+    }
+  } catch {}
+}
+export function saveDashboardPrefs() {
+  try {
+    const dir = join(homedir(), '.github-tui');
+    if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
+    writeFileSync(DASHBOARD_PREFS_PATH, JSON.stringify({ hidden: appState.dashboardHidden, quickActions: appState.dashboardQuickActions }, null, 2));
+  } catch {}
+}
+export function isDashboardHidden(id) { return Array.isArray(appState.dashboardHidden) && appState.dashboardHidden.indexOf(id) !== -1; }
 
 // ── Session persistence — save/restore navigation state across restarts ──
 

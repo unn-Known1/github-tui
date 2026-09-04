@@ -1,7 +1,7 @@
 // Dashboard tab — the home screen.
 // v0.5+ design: cleaner section cards, focus-aware stat cards, breadcrumb-aware.
 
-import { appState, render, startAsync, isStale, showMessage, setTab, confirm, setWidgetLoading, isWidgetLoading, syncStarredEntities, getWidgetAge, beginLoading, finishLoading } from '../state.mjs';
+import { appState, render, startAsync, isStale, showMessage, setTab, confirm, setWidgetLoading, isWidgetLoading, syncStarredEntities, getWidgetAge, beginLoading, finishLoading, shouldRefreshWidget, isDashboardHidden } from '../state.mjs';
 import { STALE_DAYS } from '../repos-logic.mjs';
 import { startInput, registerInputHandler } from '../input.mjs';
 import {
@@ -11,7 +11,7 @@ import {
 } from '../github.mjs';
 import { relTime, eventGlyph, greeting, shortNum, truncate, openUrl } from '../utils.mjs';
 import { color } from '../theme.mjs';
-import { emptyState, collapsibleHeader, loadingIndicator, getScreen, getStatCardLayout } from '../render.mjs';
+import { emptyState, collapsibleHeader, loadingIndicator, getScreen, getStatCardLayout, scrollIndicators } from '../render.mjs';
 import { loadRepoDetails } from './analyze.mjs';
 import { showError } from '../error-recovery.mjs';
 
@@ -32,7 +32,15 @@ export async function refreshDashboard() {
 
 export async function loadDashboardWidgets(force = false) {
   if (!appState.token || !appState.user) return;
-  if (appState.dashboardLoaded && !force) return;
+  // D13 TTL wiring: when the dashboard snapshot already exists and the
+  // caller did not force, skip the refresh entirely while every widget is
+  // still within its per-widget TTL budget (fixes auto-refresh spam).
+  // Otherwise fall through and refetch everything — full per-widget skip
+  // (reusing fresh values inside Promise.allSettled) is a future step.
+  if (!force && appState.dashboardLoaded) {
+    const widgets = ['events', 'trending', 'starred', 'issues', 'prs', 'followers', 'notifications'];
+    if (widgets.every(w => !shouldRefreshWidget(w))) return;
+  }
   const gen = startAsync('dashboard-widgets');
   beginLoading(gen);
   const username = appState.user.login;
@@ -51,7 +59,7 @@ export async function loadDashboardWidgets(force = false) {
     const days = appState.trendingPeriod || 7;
     const results = await Promise.allSettled([
       getUserEvents(appState.token, username, 100, gen.signal),
-      getTrendingRepos(appState.token, days, 100, gen.signal),
+      getTrendingRepos(appState.token, days, 30, gen.signal),
       getStarredRepos(appState.token, 1, 100, gen.signal),
       getUserIssues(appState.token, 1, 10, gen.signal),
       getUserPullRequests(appState.token, 1, 10, gen.signal),
@@ -80,7 +88,7 @@ export async function loadDashboardWidgets(force = false) {
       }
     }
     appState.dashboardWidgetErrorCount = failCount;
-    if (failCount === 0) appState.dashboardLastFetched = Date.now();
+    appState.dashboardLastFetched = Date.now();
     if (isStale(gen, 'dashboard-widgets')) {
       setWidgetLoading('events', false, gen);
       setWidgetLoading('trending', false, gen);
@@ -94,46 +102,71 @@ export async function loadDashboardWidgets(force = false) {
     }
     // Preserve the last known good value when one widget fails. A transient
     // network error must not turn a populated widget into a false empty state.
-    if (results[0].status === 'fulfilled') appState.events = Array.isArray(events) ? events : [];
-    setWidgetLoading('events', false, gen);
+    if (results[0].status === 'fulfilled') {
+      appState.events = Array.isArray(events) ? events : [];
+      setWidgetLoading('events', false, gen);
+    } else {
+      appState.dashboardLoadingWidgets['events'] = false;
+      appState.dashboardLoadingOwners['events'] = null;
+    }
     if (results[1].status === 'fulfilled') {
       appState.trending = Array.isArray(trending) ? trending : [];
       appState.trendingPage = 1;
       appState.trendingScroll = 0;
       appState.trendingSelected = 0;
-      appState.trendingHasMore = appState.trending.length >= 100;
+      appState.trendingHasMore = appState.trending.length >= 30;
+      setWidgetLoading('trending', false, gen);
+    } else {
+      appState.dashboardLoadingWidgets['trending'] = false;
+      appState.dashboardLoadingOwners['trending'] = null;
     }
-    setWidgetLoading('trending', false, gen);
     if (results[2].status === 'fulfilled') {
       appState.starred = Array.isArray(starred) ? starred.map(s => ({
         ...(s.repo || s),
         starred_at: s.starred_at || s.repo?.starred_at || null,
       })) : [];
       syncStarredEntities(appState.starred);
+      setWidgetLoading('starred', false, gen);
+    } else {
+      appState.dashboardLoadingWidgets['starred'] = false;
+      appState.dashboardLoadingOwners['starred'] = null;
     }
-    setWidgetLoading('starred', false, gen);
     if (results[3].status === 'fulfilled') {
       // `/issues` includes PR-shaped records; keep only actual issues here.
       appState.dashboardRecentIssues = Array.isArray(issues)
         ? issues.filter(item => !item.pull_request)
         : [];
+      setWidgetLoading('issues', false, gen);
+    } else {
+      appState.dashboardLoadingWidgets['issues'] = false;
+      appState.dashboardLoadingOwners['issues'] = null;
     }
-    setWidgetLoading('issues', false, gen);
     if (results[4].status === 'fulfilled') {
       const prItems = Array.isArray(prs) ? prs : (prs && prs.items);
       appState.dashboardRecentPRs = Array.isArray(prItems) ? prItems : [];
+      setWidgetLoading('prs', false, gen);
+    } else {
+      appState.dashboardLoadingWidgets['prs'] = false;
+      appState.dashboardLoadingOwners['prs'] = null;
     }
-    setWidgetLoading('prs', false, gen);
-    if (results[5].status === 'fulfilled') appState.userFollowers = Array.isArray(followers) ? followers : [];
-    setWidgetLoading('followers', false, gen);
+    if (results[5].status === 'fulfilled') {
+      appState.userFollowers = Array.isArray(followers) ? followers : [];
+      setWidgetLoading('followers', false, gen);
+    } else {
+      appState.dashboardLoadingWidgets['followers'] = false;
+      appState.dashboardLoadingOwners['followers'] = null;
+    }
     if (results[6].status === 'fulfilled') {
       appState.notifications = Array.isArray(notifications) ? notifications : [];
       appState.inboxPage = 1;
       appState.inboxHasMore = appState.notifications.length >= 50;
       appState.inboxScroll = Math.min(appState.inboxScroll, Math.max(0, appState.notifications.length - 1));
       appState.selectedNotification = Math.min(appState.selectedNotification, Math.max(0, appState.notifications.length - 1));
+      setWidgetLoading('notifications', false, gen);
+    } else {
+      appState.dashboardLoadingWidgets['notifications'] = false;
+      appState.dashboardLoadingOwners['notifications'] = null;
     }
-    setWidgetLoading('notifications', false, gen);
     recomputeDashboardDerived();
     appState.dashboardLoaded = true;
 
@@ -178,6 +211,9 @@ async function loadDashboardStarredPages(gen) {
       syncStarredEntities(mapped);
       recomputeDashboardDerived();
       page++;
+      // Cap background starred pagination at ~600 repos (pages 1-6) so
+      // very large star collections cannot page forever in the background.
+      if (page > 6) break;
       if (more.length < 100) break;
     }
   } catch (error) {
@@ -275,14 +311,28 @@ export function getDashboardStarred() {
   return (appState.starred || []).filter(matchesLocalRepo);
 }
 
+// Top-5 repos by stars, same ordering as the TOP REPOS section render.
+// Prefers the memoized D14 cache, falling back to a live sort when the
+// cache is empty (e.g. recompute hasn't run yet).
+function getTopReposSorted() {
+  if (Array.isArray(appState.dashboardTopRepos) && appState.dashboardTopRepos.length > 0) {
+    return appState.dashboardTopRepos;
+  }
+  return [...getDashboardRepos()]
+    .sort((a, b) => (b.stargazers_count || 0) - (a.stargazers_count || 0))
+    .slice(0, 5);
+}
+
 export function getNeedsAttention(repos = getDashboardRepos(), staleCount = null) {
   const items = [];
   const notes = Array.isArray(appState.notifications) ? appState.notifications : [];
-  const mentions = notes.filter(n => n.unread && n.reason === 'mention').length;
-  const reviews = notes.filter(n => n.unread && n.reason === 'review_requested').length;
-  const unread = notes.filter(n => n.unread).length;
-  const failedRuns = (appState.actionsRuns || []).filter(run =>
-    matchesLocalRepo(run) &&
+  const mentions = notes.filter(n => n.unread && n.reason === 'mention' && matchesLocalRepo(n)).length;
+  const reviews = notes.filter(n => n.unread && n.reason === 'review_requested' && matchesLocalRepo(n)).length;
+  const unread = notes.filter(n => n.unread && matchesLocalRepo(n)).length;
+  const local = localRepoName();
+  const failureSource = (appState.actionsFailures && appState.actionsFailures.length > 0) ? appState.actionsFailures : (appState.actionsRuns || []);
+  const failedRuns = failureSource.filter(run =>
+    (!local || matchesLocalRepo(run) || run.repo === local) &&
     (run.conclusion === 'failure' || run.status === 'failure')
   ).length;
   const stale = staleCount == null ? findStaleRepos(repos).count : staleCount;
@@ -303,6 +353,23 @@ export function recomputeDashboardDerived() {
   appState.dashboardStaleRepos = staleResult.repos;
   appState.dashboardStarHistory = buildStarHistory(getDashboardStarred());
   appState.dashboardAttentionItems = getNeedsAttention(repos, staleResult.count);
+  // D14 memo wiring: cache the derived top-repos / language / totals views
+  // so renderDashboard() doesn't re-sort on every frame.
+  appState.dashboardTopRepos = [...repos]
+    .sort((a, b) => (b.stargazers_count || 0) - (a.stargazers_count || 0))
+    .slice(0, 5);
+  const langCount = {};
+  for (const r of repos) {
+    if (r.language) langCount[r.language] = (langCount[r.language] || 0) + 1;
+  }
+  appState.dashboardLangHistogram = Object.entries(langCount)
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, 7);
+  appState.dashboardTotals = {
+    stars: repos.reduce((a, r) => a + (r.stargazers_count || 0), 0),
+    forks: repos.reduce((a, r) => a + (r.forks_count || 0), 0),
+    languages: Object.keys(langCount).length,
+  };
   render();
 }
 
@@ -338,7 +405,7 @@ export function buildStarHistory(starred) {
 
 function sparkline(data, width) {
   if (!data || data.length === 0) return '';
-  const chars = [' ', '▂', '▃', '▄', '▅', '▆', '▇', '█'];
+  const chars = appState.accessible ? [' ', '.', ':', 'o', 'O', '#', '#', '@'] : [' ', '▂', '▃', '▄', '▅', '▆', '▇', '█'];
   const max = Math.max(...data, 1);
   const sampled = [];
   const step = data.length / width;
@@ -366,7 +433,7 @@ function sparkCharsAccessible(level) {
 function sectionHeader(screen, x, y, text, hint, section) {
   if (section) {
     const widget = text.includes('TRENDING') ? 'trending' :
-      text.includes('STARS') ? 'starred' :
+      (text.includes('STARS') || text.includes('STARRED')) ? 'starred' :
       text.includes('ACTIVITY') || text.includes('CONTRIBUTIONS') ? 'events' :
       text.includes('ISSUES') ? 'issues' :
       text.includes('PRs') ? 'prs' : null;
@@ -385,11 +452,11 @@ function ensureDashboardCollapseDefaults() {
   const defaults = ['stars', 'topRepos', 'contributions', 'languages', 'issues', 'prs', 'stale', 'trending'];
   for (const section of defaults) {
     const key = 'dashboard:' + section;
-    if (!(key in appState.collapsed)) appState.collapsed[key] = true;
+    if (!(key in appState.collapsed)) appState.collapsed[key] = false;
   }
   for (let i = 0; i < (appState.customSections || []).length; i++) {
     const key = 'dashboard:custom-' + i;
-    if (!(key in appState.collapsed)) appState.collapsed[key] = true;
+    if (!(key in appState.collapsed)) appState.collapsed[key] = false;
   }
 }
 
@@ -451,6 +518,7 @@ export function renderDashboard(screen, y, h) {
   clampList(getFilteredTrending(), 'trendingSelected', 'trendingScroll');
   clampList(dashboardIssues, 'dashboardIssueSelected', 'dashboardIssueScroll');
   clampList(dashboardPRs, 'dashboardPRSelected', 'dashboardPRScroll');
+  clampList(appState.dashboardStaleRepos, 'dashboardStaleSelected', 'dashboardStaleScroll');
 
   if (!user) {
     emptyState(screen, y, h, {
@@ -467,10 +535,15 @@ export function renderDashboard(screen, y, h) {
   const heading = greeting() + ', ' + (user.name || user.login);
   screen.writeStr(2, y, heading, color('title') || { fg: 'white', bold: true });
 
-  // Local repo context badge.
+  // Local repo context badge (D12a: '· repo: owner/repo' prefix, matching inbox).
   if (appState.localRepo && appState.localRepoFilter) {
-    const ctxBadge = '/' + appState.localRepo.owner + '/' + appState.localRepo.repo;
+    const ctxBadge = '· repo: ' + appState.localRepo.owner + '/' + appState.localRepo.repo;
     screen.writeStr(2 + heading.length + 2, y, ctxBadge, { fg: 'cyan', dim: true });
+  } else if (appState.localRepo && !appState.localRepoFilter) {
+    // D11 local hint: advertise the scope key when a local repo is detected
+    // but the filter is off.
+    const scopeHint = '[l] scope to ' + appState.localRepo.owner + '/' + appState.localRepo.repo;
+    screen.writeStr(2 + heading.length + 2, y, scopeHint, { dim: true });
   }
 
   const unread = appState.notifications.filter(n => n.unread).length;
@@ -554,18 +627,37 @@ export function renderDashboard(screen, y, h) {
   });
 
   // ── Body: 2 columns ────────────────────────────────────────
-  const bodyY = cardY + cardRows * (cardH + 1) + 1;
+  let bodyY = cardY + cardRows * (cardH + 1) + 1;
+  // D17 quick-actions bar: a single dim hint line directly under the stat
+  // cards. It is a hint bar, not buttons — the TUI is keyboard-driven.
+  if (appState.dashboardQuickActions !== false) {
+    if (bodyY < y + h) {
+      const qaHint = '[r] Refresh   [t] Trend period   [/] Filter   [l] Local   [Tab] Widgets   [?] Help';
+      screen.writeStr(2, bodyY, truncate(qaHint, Math.max(0, W - 4)), { dim: true });
+    }
+    bodyY++;
+  }
   if (bodyY >= y + h) return;
   // Keep cards/header fixed while allowing the larger body to scroll inside
   // the content viewport. Screen handles clipping for body writes.
   const bodyViewportBottom = y + h;
   const bodyScroll = Math.max(0, Math.min(appState.dashboardScroll || 0, appState.dashboardMaxScroll || 0));
   screen.pushViewport(bodyY, bodyViewportBottom, bodyScroll);
-  const splitX = Math.floor(W / 2);
-  const leftX = 2;
-  const rightX = splitX + 2;
-  const leftW = splitX - leftX - 2;
-  const rightW = W - rightX - 2;
+  // D9 responsive stacking: below 80 cols the two columns would crush each
+  // other, so collapse to a single stacked column (left then right).
+  const isNarrow = W < 80;
+  let splitX = Math.floor(W / 2);
+  let leftX = 2;
+  let rightX = splitX + 2;
+  let leftW = splitX - leftX - 2;
+  let rightW = W - rightX - 2;
+  if (isNarrow) {
+    splitX = W; // no divider; both columns span the full width
+    leftX = 2;
+    rightX = 2;
+    leftW = W - 4;
+    rightW = W - 4;
+  }
 
   // LEFT COLUMN ─────────────────────────────────────────────
   let ly = bodyY;
@@ -599,8 +691,8 @@ export function renderDashboard(screen, y, h) {
     }
   }
 
-  if (ly < y + h - 4 && appState.dashboardStarHistory.length > 0) {
-    const starsVisible = sectionHeader(screen, leftX, ly, 'STARS · LAST 30 DAYS', null, 'dashboard:stars');
+  if (ly < y + h - 4 && appState.dashboardStarHistory.length > 0 && !isDashboardHidden('stars')) {
+    const starsVisible = sectionHeader(screen, leftX, ly, 'STARRED · LAST 30 DAYS', null, 'dashboard:stars');
     ly++;
     if (starsVisible) {
       const sparkW = Math.min(leftW - 2, 30);
@@ -612,27 +704,35 @@ export function renderDashboard(screen, y, h) {
       const todayLabel = 'today';
       screen.writeStr(leftX + sparkW - todayLabel.length, ly, todayLabel, { dim: true });
       ly++;
-      screen.writeStr(leftX, ly, totalStarsRecent + ' new stars in 30 days', { dim: true });
+      screen.writeStr(leftX, ly, totalStarsRecent + ' repos you starred in 30 days', { dim: true });
       ly += 2;
     }
   }
 
-  if (ly < y + h - 2) {
-    const topReposVisible = sectionHeader(screen, leftX, ly, 'TOP REPOS', null, 'dashboard:topRepos');
+  if (ly < y + h - 2 && !isDashboardHidden('topRepos')) {
+    const topReposFocused = appState.dashboardFocusZone === 'topRepos';
+    const topReposHint = topReposFocused ? '[Enter] open' : null;
+    const topReposVisible = sectionHeader(screen, leftX, ly, 'TOP REPOS', topReposHint, 'dashboard:topRepos');
     ly++;
     if (topReposVisible) {
-      const top = [...dashboardRepos]
-        .sort((a, b) => (b.stargazers_count || 0) - (a.stargazers_count || 0))
-        .slice(0, 5);
+      // D14: prefer the memoized cache, falling back to a live sort.
+      const top = getTopReposSorted();
+      clampList(top, 'dashboardTopSelected', 'dashboardTopScroll');
       if (top.length === 0) {
         screen.writeStr(leftX, ly++, 'No repos — add repos to your GitHub account', { dim: true });
       } else {
-        for (const r of top) {
+        for (let ti = 0; ti < top.length; ti++) {
           if (ly >= y + h - 1) break;
+          const r = top[ti];
+          const selected = topReposFocused && ti === appState.dashboardTopSelected;
+          if (selected) {
+            for (let x = leftX; x < leftX + leftW; x++) screen.setStyle(x, ly, { bg: 'blue', fg: 'white', bold: true });
+          }
           const stars = '★ ' + shortNum(r.stargazers_count || 0);
-          const nameMax = leftW - stars.length - 2;
-          screen.writeStr(leftX, ly, truncate(r.name, nameMax), color('repoName') || { fg: 'white' });
-          screen.writeStr(leftX + leftW - stars.length, ly, stars, { fg: 'yellow' });
+          const nameMax = leftW - stars.length - 4;
+          screen.writeStr(leftX, ly, selected ? '▶ ' : '  ', selected ? { bg: 'blue', fg: 'white' } : null);
+          screen.writeStr(leftX + 2, ly, truncate(r.name, nameMax), selected ? { bg: 'blue', fg: 'white' } : color('repoName') || { fg: 'white' });
+          screen.writeStr(leftX + leftW - stars.length, ly, stars, selected ? { bg: 'blue', fg: 'yellow' } : { fg: 'yellow' });
           ly++;
         }
       }
@@ -641,13 +741,19 @@ export function renderDashboard(screen, y, h) {
   }
 
   // Heatmap + Languages side by side in left column below top repos.
+  // D9: on narrow terminals the heatmap spans the full width and languages
+  // stack below it instead of beside it.
   const halfW = splitX - leftX - 2;
-  const heatRightX = leftX + Math.floor(halfW * 0.58);
-  const langLeftX = heatRightX + 2;
+  let heatRightX = leftX + Math.floor(halfW * 0.58);
+  let langLeftX = heatRightX + 2;
+  if (isNarrow) {
+    heatRightX = leftX + halfW;
+    langLeftX = leftX;
+  }
   const heatTopY = ly;
 
   // ── Heatmap (left sub-column) ──
-  if (ly < y + h - 4) {
+  if (ly < y + h - 4 && !isDashboardHidden('contributions')) {
     const hm = appState.dashboardContributions;
     if (hm) {
       const dayLabels = ['S', 'M', 'T', 'W', 'T', 'F', 'S'];
@@ -659,14 +765,14 @@ export function renderDashboard(screen, y, h) {
       const totalEvents = hm.grid.flat().reduce((a, b) => a + b, 0);
 
       const activityLabel = commitCount === 0
-        ? (totalEvents === 0 ? 'CONTRIBUTIONS' : 'CONTRIBUTIONS · ' + totalEvents)
-        : 'CONTRIBUTIONS · ' + commitCount + ' commits';
+        ? (totalEvents === 0 ? 'RECENT ACTIVITY' : 'RECENT ACTIVITY · ' + totalEvents)
+        : 'RECENT ACTIVITY · ' + commitCount + ' commits';
       const activityVisible = sectionHeader(screen, leftX, ly, activityLabel, null, 'dashboard:contributions');
       ly++;
 
       if (activityVisible) {
       if (totalEvents === 0) {
-        screen.writeStr(leftX, ly++, 'No recent activity — push code or open issues to get started', { dim: true });
+        screen.writeStr(leftX, ly++, 'No recent public activity — private contributions are not visible via REST', { dim: true });
       } else {
 
   const heatStyle = (level) => {
@@ -709,36 +815,53 @@ export function renderDashboard(screen, y, h) {
   }
 
   // ── Languages (right sub-column, aligned with heatmap top) ──
-  if (dashboardRepos.length > 0 && heatTopY < y + h - 2) {
-    const langVisible = sectionHeader(screen, langLeftX, heatTopY, 'LANGUAGES', null, 'dashboard:languages');
+  // D9: on narrow terminals languages stack below the heatmap full-width.
+  if (dashboardRepos.length > 0 && (isNarrow ? ly : heatTopY) < y + h - 2 && !isDashboardHidden('languages')) {
+    const langX = isNarrow ? leftX : langLeftX;
+    const langY = isNarrow ? ly : heatTopY;
+    const langVisible = sectionHeader(screen, langX, langY, 'LANGUAGES', null, 'dashboard:languages');
     if (langVisible) {
-      const langCount = {};
-      for (const r of dashboardRepos) {
-        if (r.language) langCount[r.language] = (langCount[r.language] || 0) + 1;
+      // D14: prefer the memoized histogram, falling back to a live count.
+      let langSorted, langTotal;
+      if (Array.isArray(appState.dashboardLangHistogram) && appState.dashboardLangHistogram.length > 0) {
+        langSorted = appState.dashboardLangHistogram;
+        langTotal = langSorted.reduce((a, e) => a + e[1], 0);
+      } else {
+        const langCount = {};
+        for (const r of dashboardRepos) {
+          if (r.language) langCount[r.language] = (langCount[r.language] || 0) + 1;
+        }
+        langTotal = Object.values(langCount).reduce((a, b) => a + b, 0);
+        langSorted = Object.entries(langCount).sort((a, b) => b[1] - a[1]).slice(0, 7);
       }
-      const total = Object.values(langCount).reduce((a, b) => a + b, 0);
-      const sorted = Object.entries(langCount).sort((a, b) => b[1] - a[1]).slice(0, 7);
+      const total = langTotal;
+      const sorted = langSorted;
       const barW = Math.max(3, halfW - Math.floor(halfW * 0.58) - 14);
-      let lly = heatTopY + 1;
+      let lly = langY + 1;
       if (sorted.length === 0) {
-        screen.writeStr(langLeftX, lly, 'No language data — repos may not have languages detected', { dim: true });
+        screen.writeStr(langX, lly, 'No language data — repos may not have languages detected', { dim: true });
+        lly++;
       } else {
         for (const [lang, count] of sorted) {
           if (lly >= y + h - 1) break;
-          const pct = count / total;
+          const pct = total > 0 ? count / total : 0;
           const filled = Math.max(1, Math.round(pct * barW));
           const bar = '█'.repeat(filled) + '░'.repeat(Math.max(0, barW - filled));
-          screen.writeStr(langLeftX, lly, truncate(lang, 8).padEnd(9));
-          screen.writeStr(langLeftX + 9, lly, bar, { fg: 'cyan' });
-          screen.writeStr(langLeftX + 10 + barW, lly, String(count), { dim: true });
+          screen.writeStr(langX, lly, truncate(lang, 8).padEnd(9));
+          screen.writeStr(langX + 9, lly, bar, { fg: 'cyan' });
+          screen.writeStr(langX + 10 + barW, lly, String(count), { dim: true });
           lly++;
         }
       }
+      if (isNarrow) ly = lly + 1;
+    } else if (isNarrow) {
+      ly = langY + 1;
     }
   }
 
   // RIGHT COLUMN ────────────────────────────────────────────
-  let ry = bodyY;
+  // D9: on narrow terminals the right column stacks below the left column.
+  let ry = isNarrow ? ly + 1 : bodyY;
 
   if (attentionItems.length > 0) {
     const attentionFocused = appState.dashboardFocusZone === 'attention';
@@ -784,6 +907,7 @@ export function renderDashboard(screen, y, h) {
       // Honour keyboard scroll: viewport starts at dashboardActivityScroll.
       const activityStart = Math.min(appState.dashboardActivityScroll, dashboardEvents.length);
       const activityEnd = Math.min(activityStart + maxEvents, dashboardEvents.length);
+      const activityStartY = ry;
       for (let i = activityStart; i < activityEnd; i++) {
         if (ry >= y + h - 1) break;
         const ev = dashboardEvents[i];
@@ -803,18 +927,19 @@ export function renderDashboard(screen, y, h) {
         screen.writeStr(rightX + rightW - when.length, ry, when, sel ? { bg: 'blue', fg: 'white' } : { dim: true });
         ry++;
       }
+      scrollIndicators(screen, activityStartY, ry - 1, appState.dashboardActivityScroll, dashboardEvents.length);
     }
     ry++;
   }
 
-  if (ry < y + h - 3 && (dashboardIssues.length > 0 || (appState.dashboardLoaded && !isWidgetLoading('issues')))) {
+  if (ry < y + h - 3 && (dashboardIssues.length > 0 || (appState.dashboardLoaded && !isWidgetLoading('issues'))) && !isDashboardHidden('issues')) {
     const issueFocused = appState.dashboardFocusZone === 'issues';
     const issueHint = issueFocused ? '[Enter] open' : null;
     const issuesVisible = sectionHeader(screen, rightX, ry, 'RECENT ISSUES', issueHint, 'dashboard:issues');
     ry++;
     if (issuesVisible) {
       if (dashboardIssues.length === 0) {
-        screen.writeStr(rightX, ry++, 'No recent issues', { dim: true });
+        screen.writeStr(rightX, ry++, 'No recent issues — [r] refresh', { dim: true });
         ry++;
       }
       const maxIssues = Math.min(4, Math.max(1, Math.floor((y + h - bodyY) * 0.20)));
@@ -840,14 +965,14 @@ export function renderDashboard(screen, y, h) {
     }
   }
 
-  if (ry < y + h - 3 && (dashboardPRs.length > 0 || (appState.dashboardLoaded && !isWidgetLoading('prs')))) {
+  if (ry < y + h - 3 && (dashboardPRs.length > 0 || (appState.dashboardLoaded && !isWidgetLoading('prs'))) && !isDashboardHidden('prs')) {
     const prFocused = appState.dashboardFocusZone === 'prs';
     const prHint = prFocused ? '[Enter] open' : null;
     const prsVisible = sectionHeader(screen, rightX, ry, 'RECENT PRs', prHint, 'dashboard:prs');
     ry++;
     if (prsVisible) {
       if (dashboardPRs.length === 0) {
-        screen.writeStr(rightX, ry++, 'No recent pull requests', { dim: true });
+        screen.writeStr(rightX, ry++, 'No recent PRs — [r] refresh', { dim: true });
         ry++;
       }
       const maxPRs = Math.min(4, Math.max(1, Math.floor((y + h - bodyY) * 0.20)));
@@ -874,17 +999,70 @@ export function renderDashboard(screen, y, h) {
     }
   }
 
-  if (ry < y + h - 3 && appState.dashboardStaleCount > 0) {
-    const staleVisible = sectionHeader(screen, rightX, ry, 'STALE REPOS', null, 'dashboard:stale');
+  if (ry < y + h - 3 && appState.dashboardStaleCount > 0 && !isDashboardHidden('stale')) {
+    const staleFocused = appState.dashboardFocusZone === 'stale';
+    const staleHint = staleFocused ? '[Enter] open' : null;
+    const staleVisible = sectionHeader(screen, rightX, ry, 'STALE REPOS', staleHint, 'dashboard:stale');
     ry++;
     if (staleVisible) {
-      for (const name of appState.dashboardStaleRepos) {
+      for (let sti = 0; sti < appState.dashboardStaleRepos.length; sti++) {
         if (ry >= y + h - 1) break;
-        screen.writeStr(rightX, ry++, truncate(name, rightW), { fg: 'yellow' });
+        const name = appState.dashboardStaleRepos[sti];
+        const selected = staleFocused && sti === appState.dashboardStaleSelected;
+        if (selected) {
+          for (let x = rightX; x < rightX + rightW; x++) screen.setStyle(x, ry, { bg: 'blue', fg: 'white', bold: true });
+        }
+        screen.writeStr(rightX, ry, selected ? '▶ ' : '  ', selected ? { bg: 'blue', fg: 'white' } : null);
+        screen.writeStr(rightX + 2, ry, truncate(name, rightW - 2), selected ? { bg: 'blue', fg: 'white' } : { fg: 'yellow' });
+        ry++;
       }
       if (appState.dashboardStaleCount > appState.dashboardStaleRepos.length) {
         screen.writeStr(rightX, ry++, '... and ' +
           (appState.dashboardStaleCount - appState.dashboardStaleRepos.length) + ' more', { dim: true });
+      }
+      ry++;
+    }
+  }
+
+  // D16 opt-in SECURITY section: non-focusable display rows (no focus zone —
+  // focus.mjs is owned elsewhere). Surfaced only when data exists and the
+  // widget isn't hidden via dashboard prefs.
+  if (ry < y + h - 3 && (appState.securityAggregate || []).length > 0 && !isDashboardHidden('security')) {
+    const secAlerts = appState.securityAggregate;
+    const secVisible = sectionHeader(screen, rightX, ry, 'SECURITY · ' + secAlerts.length, null, 'dashboard:security');
+    ry++;
+    if (secVisible) {
+      const maxSec = Math.min(3, secAlerts.length);
+      for (let si2 = 0; si2 < maxSec; si2++) {
+        if (ry >= y + h - 1) break;
+        const alert = secAlerts[si2] || {};
+        const sev = String(alert.severity || (alert.rule && alert.rule.security_severity_level) || '?').toUpperCase();
+        const secRepo = alert.repository || '?';
+        const secTitle = alert.title
+          || (alert.security_advisory && alert.security_advisory.summary)
+          || (alert.dependency && alert.dependency.package && alert.dependency.package.name)
+          || alert.secret_type
+          || (alert.rule && (alert.rule.description || alert.rule.name))
+          || alert.source
+          || 'alert';
+        screen.writeStr(rightX, ry++, truncate(sev + ' ' + secRepo + ' — ' + secTitle, rightW), { fg: 'cyan' });
+      }
+      ry++;
+    }
+  }
+
+  // D16 opt-in MY WORK section: same non-focusable display treatment.
+  if (ry < y + h - 3 && (appState.myWorkQueue || []).length > 0 && !isDashboardHidden('mywork')) {
+    const workItems = appState.myWorkQueue;
+    const workVisible = sectionHeader(screen, rightX, ry, 'MY WORK · ' + workItems.length, null, 'dashboard:mywork');
+    ry++;
+    if (workVisible) {
+      const maxWork = Math.min(3, workItems.length);
+      for (let wi = 0; wi < maxWork; wi++) {
+        if (ry >= y + h - 1) break;
+        const item = workItems[wi] || {};
+        screen.writeStr(rightX, ry++, truncate(
+          String(item.kind || '?').toUpperCase() + ' ' + (item.repo || '?') + ' — ' + (item.title || ''), rightW), { dim: true });
       }
       ry++;
     }
@@ -926,7 +1104,7 @@ export function renderDashboard(screen, y, h) {
     }
   }
 
-  if (ry < y + h - 2) {
+  if (ry < y + h - 2 && !isDashboardHidden('trending')) {
     const trendingList = getFilteredTrending();
     const periodLabel = appState.trendingPeriod === 1 ? 'TRENDING TODAY' : appState.trendingPeriod === 7 ? 'TRENDING THIS WEEK' : 'TRENDING THIS MONTH';
     const trendingVisible = sectionHeader(screen, rightX, ry, periodLabel, '[t] toggle', 'dashboard:trending');
@@ -938,8 +1116,10 @@ export function renderDashboard(screen, y, h) {
       if (!appState.dashboardLoaded) {
         loadingIndicator(screen, rightX, ry, 'loading trending');
         ry++;
+      } else if (localRepoName()) {
+        screen.writeStr(rightX, ry++, 'No trending for this repo — [l] to clear local filter', { dim: true });
       } else {
-        screen.writeStr(rightX, ry++, '(none)', { dim: true });
+        screen.writeStr(rightX, ry++, '(none) — [t] period · [/] filter · [r] refresh', { dim: true });
       }
     } else {
       // Trending is the LAST section in the right column, so it fills the
@@ -957,6 +1137,7 @@ export function renderDashboard(screen, y, h) {
         appState.trendingScroll = appState.trendingSelected;
       }
       const end = Math.min(appState.trendingScroll + maxTrending, trendingList.length);
+      const trendingStartY = ry;
       for (let i = appState.trendingScroll; i < end; i++) {
         if (ry >= y + h - 1) break;
         const r = trendingList[i];
@@ -976,15 +1157,18 @@ export function renderDashboard(screen, y, h) {
         screen.writeStr(rightX, ry, pageInfo, { dim: true });
         ry++;
       }
+      scrollIndicators(screen, trendingStartY, ry - 1, appState.trendingScroll, trendingList.length);
     }
   }
 
-  // Column divider line.
+  // Column divider line (skipped in narrow stacked mode — D9).
   const colBot = Math.max(ly, ry);
   const bodyH = Math.max(0, colBot - bodyY);
   appState.dashboardMaxScroll = Math.max(0, bodyH - (bodyViewportBottom - bodyY));
-  for (let dy = 0; dy < bodyH; dy++) {
-    screen.setCell(splitX, bodyY + dy, '│', { dim: true });
+  if (!isNarrow) {
+    for (let dy = 0; dy < bodyH; dy++) {
+      screen.setCell(splitX, bodyY + dy, '│', { dim: true });
+    }
   }
   screen.popViewport();
 }
@@ -998,13 +1182,14 @@ export function renderDashboard(screen, y, h) {
 function _trendingQuery() {
   const days = appState.trendingPeriod || 7;
   const since = new Date(Date.now() - days * 86400000).toISOString().split('T')[0];
-  return 'created:>' + since;
+  // Match github.mjs getTrendingRepos (stars floor keeps noise out).
+  return 'created:>' + since + ' stars:>5';
 }
 
 async function _fetchTrendingPage(page, gen) {
   try {
     const list = await searchRepositories(
-      appState.token, _trendingQuery(), page, 10, gen.signal
+      appState.token, _trendingQuery(), page, 30, gen.signal
     );
     if (isStale(gen, 'dashboard-trending')) return { stale: true };
     return { stale: false, list };
@@ -1037,7 +1222,7 @@ async function _setTrendingPage(page, replace) {
       appState.trending = [...appState.trending, ...list];
     }
     appState.trendingPage = page;
-    appState.trendingHasMore = list.length >= 10;
+    appState.trendingHasMore = list.length >= 30;
   } else {
     appState.trendingHasMore = false;
   }
@@ -1184,13 +1369,13 @@ function reloadTrending(previousPeriod = appState.trendingPeriod) {
   const gen = startAsync('dashboard-trending');
   beginLoading(gen);
   render();
-  getTrendingRepos(appState.token, days, 100, gen.signal).then(more => {
+  getTrendingRepos(appState.token, days, 30, gen.signal).then(more => {
     if (isStale(gen, 'dashboard-trending')) return;
     appState.trending = Array.isArray(more) ? more : [];
     appState.trendingPage = 1;
     appState.trendingScroll = 0;
     appState.trendingSelected = 0;
-    appState.trendingHasMore = appState.trending.length >= 100;
+    appState.trendingHasMore = appState.trending.length >= 30;
     if (!isStale(gen, 'dashboard-trending')) {
       finishLoading(gen);
       render();
@@ -1318,6 +1503,22 @@ export function dashboardUp() {
     render();
     return;
   }
+  if (zone === 'topRepos') {
+    const top = getTopReposSorted();
+    if (top.length === 0) return;
+    appState.dashboardTopSelected = Math.max(0, appState.dashboardTopSelected - 1);
+    appState.dashboardTopScroll = 0;
+    render();
+    return;
+  }
+  if (zone === 'stale') {
+    const stale = appState.dashboardStaleRepos || [];
+    if (stale.length === 0) return;
+    appState.dashboardStaleSelected = Math.max(0, appState.dashboardStaleSelected - 1);
+    appState.dashboardStaleScroll = 0;
+    render();
+    return;
+  }
 }
 
 export function dashboardDown() {
@@ -1395,6 +1596,22 @@ export function dashboardDown() {
     if (appState.dashboardPRSelected >= appState.dashboardPRScroll + maxVisible) {
       appState.dashboardPRScroll++;
     }
+    render();
+    return;
+  }
+  if (zone === 'topRepos') {
+    const top = getTopReposSorted();
+    if (top.length === 0) return;
+    appState.dashboardTopSelected = Math.min(top.length - 1, appState.dashboardTopSelected + 1);
+    appState.dashboardTopScroll = 0;
+    render();
+    return;
+  }
+  if (zone === 'stale') {
+    const stale = appState.dashboardStaleRepos || [];
+    if (stale.length === 0) return;
+    appState.dashboardStaleSelected = Math.min(stale.length - 1, appState.dashboardStaleSelected + 1);
+    appState.dashboardStaleScroll = 0;
     render();
     return;
   }
@@ -1521,6 +1738,38 @@ export function openDashboardItem() {
     }
     return;
   }
+  if (zone === 'topRepos') {
+    const top = getTopReposSorted();
+    if (top.length === 0) return;
+    const idx = Math.min(appState.dashboardTopSelected, top.length - 1);
+    const selected = top[idx] || top[0];
+    const full = selected.full_name
+      || (selected.owner && selected.owner.login ? selected.owner.login + '/' + selected.name : null);
+    if (full && full.includes('/')) {
+      const [owner, repo] = full.split('/');
+      setTab(2);
+      loadRepoDetails(owner, repo);
+    } else {
+      showMessage('No repository for this top repo', 'warning');
+    }
+    return;
+  }
+  if (zone === 'stale') {
+    const stale = appState.dashboardStaleRepos || [];
+    if (stale.length === 0) return;
+    const idx = Math.min(appState.dashboardStaleSelected, stale.length - 1);
+    const staleName = stale[idx];
+    const match = getDashboardRepos().find(r => r.name === staleName);
+    const full = match && match.full_name;
+    if (full && full.includes('/')) {
+      const [owner, repo] = full.split('/');
+      setTab(2);
+      loadRepoDetails(owner, repo);
+    } else {
+      showMessage('No repository for this stale entry', 'warning');
+    }
+    return;
+  }
 }
 
 // Card focus navigation (Tab on dashboard).
@@ -1561,6 +1810,8 @@ export function getCurrentSection() {
   if (zone === 'activity') return 'dashboard:recentActivity';
   if (zone === 'issues') return 'dashboard:issues';
   if (zone === 'prs') return 'dashboard:prs';
+  if (zone === 'topRepos') return 'dashboard:topRepos';
+  if (zone === 'stale') return 'dashboard:stale';
   if (zone === 'custom') return 'dashboard:custom-' + appState.dashboardCustomSectionSelected;
   return 'dashboard:profile';
 }

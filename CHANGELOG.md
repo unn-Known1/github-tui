@@ -2,6 +2,23 @@
 
 All notable changes to this project will be documented in this file.
 
+## [Unreleased]
+
+### Fixed
+- Starred-activity sparkline relabel (repos you starred, not stars earned) + `--accessible` charset fix; heatmap relabeled to recent public activity (public events only; private contributions need GraphQL).
+- Freshness honesty: per-widget badges stamp only on success; global `Updated` always stamps with failure count.
+- Needs Attention CI now counts the failures queue with local-filtered counts applied consistently.
+- Trending: stars floor + unified paging; budget-aware row allocation with scroll indicators.
+- Discoverability: footer/help surface `t`/`/`/`l`/`z`/`Tab`/`Enter`; local-repo chip + trending empty guidance (`[l]` to clear local filter).
+- Loading/empty states: skeleton suppression on dashboard + standardized empty-state CTAs.
+
+### Changed
+- Sections expanded by default; Top Repos + Stale are keyboard zones (`Tab`/`Enter`) with mouse click/hover parity.
+- Responsive single-column layout below 80 cols.
+- Performance: per-widget TTL + starred page cap; memoized derived caches (top repos, languages, totals, stale).
+- Personalization: SECURITY/MY WORK sections when data exists; `dashboard.json` hidden-widget prefs + quick-actions hint bar under stat cards (`[r]`/`[t]`/`[/]`/`[l]`/`[Tab]`).
+- Verification: dashboard tests expanded (17 pass); full suite 278 / 278 pass.
+
 ## [0.7.1] - 2026-09-02
 
 ### Added
