@@ -2,7 +2,7 @@
 
 All notable changes to this project will be documented in this file.
 
-## [Unreleased]
+## [0.7.2] - 2026-09-04
 
 ### Fixed
 - Starred-activity sparkline relabel (repos you starred, not stars earned) + `--accessible` charset fix; heatmap relabeled to recent public activity (public events only; private contributions need GraphQL).
@@ -17,7 +17,7 @@ All notable changes to this project will be documented in this file.
 - Responsive single-column layout below 80 cols.
 - Performance: per-widget TTL + starred page cap; memoized derived caches (top repos, languages, totals, stale).
 - Personalization: SECURITY/MY WORK sections when data exists; `dashboard.json` hidden-widget prefs + quick-actions hint bar under stat cards (`[r]`/`[t]`/`[/]`/`[l]`/`[Tab]`).
-- Verification: dashboard tests expanded (17 pass); full suite 278 / 278 pass.
+- Verification: dashboard tests expanded (17 pass); full suite 329 / 329 pass.
 
 ### Explore
 - Fixed: details footer no longer advertises the removed `[M]iles`/`[L]abels` panes; now shows `[D]iff` for the Compare pane.

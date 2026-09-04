@@ -2,7 +2,7 @@
 
 A fast, zero-dependency terminal user interface for GitHub — six tabs, a command palette, an in-terminal file explorer that can clone or save anything to your CWD, an inbox triage workflow, themes, persistent bookmarks & pins, OSC-52 clipboard, ETag-aware caching, mouse support, collapsible sections, and comprehensive repo analytics. All driven by your keyboard (and mouse).
 
-![status](https://img.shields.io/badge/status-active-success) ![node](https://img.shields.io/badge/node-%E2%89%A518-blue) ![deps](https://img.shields.io/badge/deps-0-green) [![Socket Badge](https://badge.socket.dev/npm/package/github-tui/0.7.1)](https://badge.socket.dev/npm/package/github-tui/0.7.1) ![license](https://img.shields.io/badge/license-MIT-blue)
+![status](https://img.shields.io/badge/status-active-success) ![node](https://img.shields.io/badge/node-%E2%89%A518-blue) ![deps](https://img.shields.io/badge/deps-0-green) [![Socket Badge](https://badge.socket.dev/npm/package/github-tui/0.7.2)](https://badge.socket.dev/npm/package/github-tui/0.7.2) ![license](https://img.shields.io/badge/license-MIT-blue)
 
 ![GitHub TUI Screenshot](https://raw.githubusercontent.com/unn-Known1/github-tui/main/Screenshot.png)
 
@@ -245,7 +245,7 @@ The app is split into focused zero-dependency modules. Adding a new tab is: crea
 ├── app.mjs                          # Entrypoint — lifecycle, CLI, and terminal wiring
 ├── README.md
 ├── VISION.md                        # Roadmap + persona-driven brainstorm
-├── tests/                           # 269 tests (Node built-in test runner, zero deps)
+├── tests/                           # 329 tests (Node built-in test runner, zero deps)
 │   ├── utils.test.mjs
 │   ├── repos-logic.test.mjs
 │   ├── theme.test.mjs
@@ -344,7 +344,7 @@ Every tab module exports `render(screen, y, h)`, an optional `keys` map for tab-
 - **Actions:** Refresh Dashboard, Refresh User Data (`r` refreshes both), Auto-Refresh (interval persists across restarts), **Change Theme**, Clear Token File, Token display.
 - **Integrations:** Enterprise host, profiles list/switch, organizations, config export/import.
 - **Data management:** Clear Local Data (bookmarks/pins/searches/filters/sections/cache) with per-store counts in the System panel.
-- **System panel:** app version (`0.7.1`), config dir, token file path, Node version, platform/arch, terminal size, **API remaining / limit / reset-in minutes**, **token scopes**, active keychain backend.
+- **System panel:** app version (`0.7.2`), config dir, token file path, Node version, platform/arch, terminal size, **API remaining / limit / reset-in minutes**, **token scopes**, active keychain backend.
 
 ### 6 · Inbox
 - Per-row: ▶ selection, ● yellow unread dot, color-coded subject type (PR/cyan, Issue/yellow, Release/green, Discussion/magenta, Commit/blue, CheckSuite/red), repo·title, reason, relative time.
@@ -420,6 +420,13 @@ Every tab module exports `render(screen, y, h)`, an optional `keys` map for tab-
 - **Detail popup** — key routing and overlay layering fixed; inline load errors with retry.
 - **Removed** the Milestones/Labels detail panes and their modules.
 - **269 / 269 tests pass** with import and syntax checks clean.
+
+**Shipped in v0.7.2:**
+- **Dashboard** — honest freshness (per-widget badges stamp only on success), starred-activity sparkline relabel + `--accessible` fix, CI attention from the failures queue, expanded-by-default sections, Top Repos + Stale keyboard zones, single-column layout under 80 cols, per-widget TTL + memoized derived caches, SECURITY/MY WORK sections, `dashboard.json` prefs + quick-actions hint bar.
+- **Explore** — footer/help no longer advertise removed panes, compact pane chips on narrow terminals, per-pane Issues/PRs filters with auto-refetch, honest fork ahead/behind (`?` on failure) + compare cache, scrollable landing, append-model paging, code-result drill-in to the Files pane, `stars:`/`forks:`/`issues:`/`lang:` search qualifiers.
+- **Settings + Inbox** — danger-row mouse routing fixed, disabled-row guards, INTEGRATIONS menu rows (Enterprise/profiles/export/import), store counts + Clear Local Data, persisted auto-refresh; Inbox viewport math unified, mark-group-read, durable snooze + `Z` unsnooze, visible-scoped mark-all, reason labels, memoized filter pipeline.
+- **Repos + Actions** — `repos.load-more` palette action, append-model paging, isolated starred async scope, ordered background prefetch, `activeRepo()` snapshot so filter-then-act can't hit the wrong repo, rerun confirm, preserved expansion across refreshes, bounded progressive workflow scan, honest failure-queue coverage.
+- **329 / 329 tests pass** with import and syntax checks clean.
 
 **Shipped in v0.6.7:**
 - **Audit hardening** — fixed lifecycle cleanup, upgrade-note gating, account-safe logout/reset, token-partitioned ETag caching, secure streamed downloads, stale-request cancellation, filtered Inbox actions, Settings navigation, starred pagination, and Unicode input cursor handling.

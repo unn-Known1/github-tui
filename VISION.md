@@ -2,7 +2,7 @@
 
 > *The fastest way to live in GitHub without a browser tab — discovery, triage, review, and CI in one terminal.*
 
-**Current version:** v0.7.1
+**Current version:** v0.7.2
 
 ---
 
@@ -20,7 +20,7 @@
 
 ---
 
-## 📊 What's Built (v0.1 → v0.7.1)
+## 📊 What's Built (v0.1 → v0.7.2)
 
 | Feature | Status |
 |---|---|
@@ -48,6 +48,7 @@
 | **Modular architecture** — focused modules with one file per tab and feature helpers | ✅ |
 | **Zero dependencies** — just `node app.mjs` | ✅ |
 | **269 tests** — Node built-in test runner, zero deps | ✅ |
+| **329 tests** — Node built-in test runner, zero deps (v0.7.2) | ✅ |
 | **Graceful shutdown** — atomic handlers, raw mode restore, crash logging | ✅ |
 | **Cross-platform rendering** — ASCII box fallback, FORCE_COLOR/NO_COLOR | ✅ |
 | **Input cursor movement** — arrow keys, Home/End, Ctrl-A/E/U/W | ✅ |
@@ -238,7 +239,7 @@
 | Plugin system | 🎯 v2.0 |
 | Release automation | 🟡 partial in unreleased v0.7; full assistant remains 🎯 v2.0 |
 | Offline + disk cache | ✅ v0.6 |
-| Test suite (269 tests) | ✅ shipped |
+| Test suite (329 tests) | ✅ shipped |
 | Graceful shutdown + crash logging | ✅ shipped |
 
 ---
