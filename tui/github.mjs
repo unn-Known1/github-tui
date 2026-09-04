@@ -459,8 +459,8 @@ export function request(path, opts) {
             return resolve(request(path, { ...o, _retried304: true }));
           }
         }
-        if (res.statusCode === 403 && rr === '0') {
-          const resetDate = new Date(parseInt(rs, 10) * 1000);
+        if (res.statusCode === 403 && rrParsed === 0) {
+          const resetDate = new Date((rsParsed || 0) * 1000);
           return reject(new GitHubApiError(
             'Rate limited. Try again at ' + resetDate.toLocaleTimeString(),
             403, path
