@@ -943,9 +943,13 @@ function handleBack() {
     // `Esc` / `h` / `Backspace` on Dashboard MUST NOT trigger a
     // quit confirmation — one stray `Enter` would silently exit the app.
     // It's a muscle-memory trap. Quit is bound to `q` and `Ctrl-C` directly.
-    // On Dashboard these keys instead (a) unfocus the stat cards if they're
-    // focused, or (b) surface a one-shot hint telling the user where quit
-    // actually lives.
+    // On Dashboard these keys instead (a) clear the heatmap day filter,
+    // (b) unfocus the stat cards if they're focused, or (c) surface a
+    // one-shot hint telling the user where quit actually lives.
+    if (appState.dashboardContribDayFilter) {
+      dashboard.clearContribDayFilter();
+      return;
+    }
     if (appState.dashboardCardsFocus) {
       dashboard.unfocusCards();
       resetFocus(0);
@@ -973,6 +977,11 @@ function handleBack() {
 }
 
 // Palette action registry.
+
+// Settings → Appearance → Change Theme cursor index (see settings.mjs
+// APPEARANCE section: 'Change Theme' is item 6). Named so the palette
+// 'settings.theme' action doesn't hardcode a magic number.
+const SETTINGS_APPEARANCE_CURSOR = 6;
 
 export function registerCoreActions() {
   const reg = palette.register;
@@ -1032,7 +1041,26 @@ export function registerCoreActions() {
   reg({ id: 'analyze.search-code', label: 'Search code...',
         hint: 'C', run: () => { setTab(2); analyze.keys.C(); } });
   reg({ id: 'analyze.readme', label: 'View README of current repo',
-        hint: 'R', run: () => { if (appState.repoDetails) analyze.keys.R(); } });
+        hint: 'R', run: () => { setTab(2); if (appState.repoDetails) analyze.keys.R(); } });
+
+  // Files pane actions (files.mjs is lazily imported — keys.mjs has no
+  // static import to avoid a cycle; setTab(2) mirrors the analyze neighbors).
+  reg({ id: 'files.save', label: 'Files: save current file to CWD',
+        hint: 's', run: () => { setTab(2); return import('./tabs/files.mjs').then(m => m.keys.s()); } });
+  reg({ id: 'files.save-folder', label: 'Files: save whole folder recursively to CWD',
+        hint: 'S', run: () => { setTab(2); return import('./tabs/files.mjs').then(m => m.keys.S()); } });
+  reg({ id: 'files.zipball', label: 'Files: download repo zipball to CWD',
+        hint: 'Z', run: () => { setTab(2); return import('./tabs/files.mjs').then(m => m.keys.Z()); } });
+  reg({ id: 'files.clone', label: 'Files: git clone repo into CWD',
+        hint: 'C', run: () => { setTab(2); return import('./tabs/files.mjs').then(m => m.keys.C()); } });
+  reg({ id: 'files.gh-clone', label: 'Files: gh repo clone (private repos)',
+        hint: 'G', run: () => { setTab(2); return import('./tabs/files.mjs').then(m => m.keys.G()); } });
+  reg({ id: 'files.branch', label: 'Files: branch / tag picker',
+        hint: 'B', run: () => { setTab(2); return import('./tabs/files.mjs').then(m => m.keys.B()); } });
+  reg({ id: 'files.copy-contents', label: 'Files: copy entire file contents',
+        hint: 'Y', run: () => { setTab(2); return import('./tabs/files.mjs').then(m => m.keys.Y()); } });
+  reg({ id: 'files.history', label: 'Files: per-file commit history',
+        hint: 'H', run: () => { setTab(2); return import('./tabs/files.mjs').then(m => m.keys.H()); } });
 
   reg({ id: 'undo.undo', label: 'Undo last action', hint: 'u',
         run: () => undo() });
@@ -1044,9 +1072,21 @@ export function registerCoreActions() {
   reg({ id: 'inbox.mark.all',    label: 'Inbox: mark all as read',            hint: 'M', run: inbox.markAllRead });
   reg({ id: 'inbox.unsubscribe', label: 'Inbox: unsubscribe from thread',     hint: 'u', run: inbox.unsubscribeCurrent });
   reg({ id: 'inbox.cycle',       label: 'Inbox: cycle filter',                run: inbox.cycleFilter });
+  reg({ id: 'inbox.hide-processed', label: 'Inbox: hide / show processed threads', hint: 'H',
+        run: () => { setTab(4); inbox.keys.H(); } });
+  reg({ id: 'inbox.group', label: 'Inbox: toggle grouping by thread', hint: 'G',
+        run: () => { setTab(4); inbox.keys.G(); } });
+  reg({ id: 'inbox.snooze', label: 'Inbox: snooze thread for 1 hour', hint: 'z',
+        run: () => { setTab(4); inbox.keys.z(); } });
+  reg({ id: 'inbox.unsnooze', label: 'Inbox: unsnooze current thread', hint: 'Z',
+        run: () => { setTab(4); inbox.keys.Z(); } });
+  reg({ id: 'inbox.save-filter', label: 'Inbox: save current filter...', hint: 'v',
+        run: () => { setTab(4); inbox.keys.v(); } });
+  reg({ id: 'inbox.apply-filter', label: 'Inbox: apply a saved filter...', hint: 'V',
+        run: () => { setTab(4); inbox.keys.V(); } });
 
   reg({ id: 'settings.theme',  label: 'Change theme...',
-        run: () => { setTab(5); appState.settingsCursor = 6; render(); settings.enter(); } });
+        run: () => { setTab(5); appState.settingsCursor = SETTINGS_APPEARANCE_CURSOR; render(); settings.enter(); } });
   reg({ id: 'settings.logout', label: 'Log out', run: () => confirm('Log out of GitHub?', settings.handleLogout, 'Log Out') });
   reg({ id: 'dashboard.refresh', label: 'Refresh dashboard data',
         run: () => dashboard.refreshDashboard() });
@@ -1102,6 +1142,12 @@ export function registerCoreActions() {
         run: () => { setTab(3); actions.startWorkflowDispatch(); } });
   reg({ id: 'actions.failures', label: 'Actions: scan workflow failures', hint: 'F',
         run: () => { setTab(3); actions.keys.F(); } });
+  reg({ id: 'actions.open-run', label: 'Actions: open selected run in browser', hint: 'o',
+        run: () => { setTab(3); actions.keys.o(); } });
+  reg({ id: 'actions.back', label: 'Actions: back to repo list', hint: 't',
+        run: () => { setTab(3); actions.keys.t(); } });
+  reg({ id: 'actions.cancel', label: 'Actions: cancel selected running workflow', hint: 'x',
+        run: () => { setTab(3); actions.keys.x(); } });
   reg({ id: 'security.aggregate', label: 'Security: scan repository alerts',
         run: () => import('./security-aggregate.mjs').then(m => m.loadSecurityAggregate()) });
   reg({ id: 'work.queue', label: 'Open My Work focus queue',

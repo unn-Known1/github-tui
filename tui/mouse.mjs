@@ -690,7 +690,7 @@ function handleDblClick(sx, sy) {
     const bodyRows = Math.max(1, H - 17);
     const lists = [
       { key: 'attention', zone: 'attention', items: dashboard.getNeedsAttention(), scroll: appState.dashboardAttentionScroll, max: 4, selected: 'dashboardAttentionSelected' },
-      { key: 'recentActivity', zone: 'activity', items: dashboard.getDashboardEvents(), scroll: appState.dashboardActivityScroll, max: Math.min(7, Math.max(1, Math.floor(bodyRows * 0.30))), selected: 'dashboardActivitySelected' },
+      { key: 'recentActivity', zone: 'activity', items: dashboard.getFilteredActivityEvents(), scroll: appState.dashboardActivityScroll, max: Math.min(7, Math.max(1, Math.floor(bodyRows * 0.30))), selected: 'dashboardActivitySelected' },
       { key: 'issues', zone: 'issues', items: dashboard.getDashboardIssues(), scroll: appState.dashboardIssueScroll, max: Math.min(4, Math.max(1, Math.floor(bodyRows * 0.20))), selected: 'dashboardIssueSelected' },
       { key: 'prs', zone: 'prs', items: dashboard.getDashboardPRs(), scroll: appState.dashboardPRScroll, max: Math.min(4, Math.max(1, Math.floor(bodyRows * 0.20))), selected: 'dashboardPRSelected' },
     ];
@@ -728,6 +728,25 @@ function handleDblClick(sx, sy) {
             analyze.loadRepoDetails(owner, repoName);
             return true;
           }
+        }
+      }
+    }
+  }
+
+  // Double-click contributions heatmap cell → toggle day filter on the
+  // activity feed (same as keyboard Enter on the contributions zone).
+  {
+    const geom = appState._contribGeom;
+    if (geom && sy >= geom.gridY && sy < geom.gridY + 7) {
+      const row = sy - geom.gridY;
+      const col = Math.floor((sx - (geom.leftX + 3)) / Math.max(1, geom.cellW));
+      if (row >= 0 && row < 7 && col >= 0 && col < geom.weeks) {
+        const dayIdx = col * 7 + row;
+        if (dayIdx >= 0 && dayIdx < 105) {
+          appState.dashboardContribSelected = dayIdx;
+          if (!focusDashboardZone('contributions')) appState.dashboardFocusZone = 'contributions';
+          dashboard.toggleContribDayFilter();
+          return true;
         }
       }
     }
@@ -913,7 +932,7 @@ function dispatchDashboardClick(sx, sy) {
     const maxPRs = maxIssues;
     const lists = [
       { key: 'attention', zone: 'attention', length: dashboard.getNeedsAttention().length, scroll: appState.dashboardAttentionScroll, max: 4, selected: 'dashboardAttentionSelected' },
-      { key: 'recentActivity', zone: 'activity', length: dashboard.getDashboardEvents().length, scroll: appState.dashboardActivityScroll, max: maxEvents, selected: 'dashboardActivitySelected' },
+      { key: 'recentActivity', zone: 'activity', length: dashboard.getFilteredActivityEvents().length, scroll: appState.dashboardActivityScroll, max: maxEvents, selected: 'dashboardActivitySelected' },
       { key: 'issues', zone: 'issues', length: dashboard.getDashboardIssues().length, scroll: appState.dashboardIssueScroll, max: maxIssues, selected: 'dashboardIssueSelected' },
       { key: 'prs', zone: 'prs', length: dashboard.getDashboardPRs().length, scroll: appState.dashboardPRScroll, max: maxPRs, selected: 'dashboardPRSelected' },
     ];
@@ -971,6 +990,31 @@ function dispatchDashboardClick(sx, sy) {
         // selection updated but never rendered — no visible highlight.
         if (!focusDashboardZone('trending')) render();
         return;
+      }
+    }
+  }
+
+  // Left column — contributions heatmap click → day select + focus.
+  // Uses the geometry published by renderDashboard (_contribGeom) so the
+  // mapping stays correct while the body is scrolled or stacked narrow.
+  if (sx < splitX || W < 80) {
+    const geom = appState._contribGeom;
+    const contribHeader = appState._sectionHeaders['dashboard:contributions'];
+    if (geom && contribHeader && sy >= geom.gridY && sy < geom.gridY + 7) {
+      const row = sy - geom.gridY;
+      const col = Math.floor((sx - (geom.leftX + 3)) / Math.max(1, geom.cellW));
+      if (row >= 0 && row < 7 && col >= 0 && col < geom.weeks) {
+        const dayIdx = col * 7 + row;
+        if (dayIdx >= 0 && dayIdx < 105) {
+          appState.dashboardContribSelected = dayIdx;
+          if (!focusDashboardZone('contributions')) {
+            appState.dashboardFocusZone = 'contributions';
+            render();
+          } else {
+            render();
+          }
+          return;
+        }
       }
     }
   }

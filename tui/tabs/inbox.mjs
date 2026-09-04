@@ -366,17 +366,6 @@ export async function openCurrent() {
   }
 }
 
-function sectionHeader(screen, x, y, text, hint) {
-  // Local copy retained because inbox's chip row immediately follows and
-  // relies on the return-not-used style. Kept character-for-character
-  // identical to utils.sectionHeader so behavior matches.
-  screen.writeStr(x, y, text, { fg: 'cyan', bold: true });
-  if (hint) {
-    const hx = screen.width - hint.length - 2;
-    if (hx > x + text.length + 4) screen.writeStr(hx, y, hint, { dim: true });
-  }
-}
-
 export function renderInbox(screen, y, h) {
   const W = screen.width;
   const list = getFilteredNotifications();
@@ -543,11 +532,15 @@ export function renderInbox(screen, y, h) {
 
   const infoY = headerY + 2 + Math.min(maxRows, list.length) + 1;
   if (infoY < y + h) {
-    screen.writeStr(2, infoY,
+    // U19: info line is ~120 chars untruncated — truncate to the pane width
+    // so it can't overwrite edge cells on narrow terminals. truncate() is a
+    // width-aware no-op when wide, so all segments survive at full width.
+    const infoLine =
       '[/] Search   [r] Refresh   [m] Mark read   [M] Mark all   [f] Filter   [u] Unsubscribe   [Enter] Open' +
       (appState.inboxHasMore ? '   [Space] More' : '') +
       '   [H] Hide processed: ' + (appState.inboxHideProcessed ? 'on' : 'off') +
-      '   [G] Group: ' + (appState.inboxGrouped ? 'on' : 'off') + '   [z] Snooze 1h', { dim: true });
+      '   [G] Group: ' + (appState.inboxGrouped ? 'on' : 'off') + '   [z] Snooze 1h';
+    screen.writeStr(2, infoY, truncate(infoLine, W - 4), { dim: true });
   }
 }
 

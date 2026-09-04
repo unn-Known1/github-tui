@@ -226,25 +226,46 @@ async function loadDashboardStarredPages(gen) {
 }
 
 // ─── Heatmap builder ──────────────────────────────────────────────────
+// UTC-normalised so the grid agrees with buildStarHistory (which already
+// uses UTC midnight) regardless of the viewer's local timezone. Returns
+// totals + streak metadata so the header can be honest about what the
+// REST public-events feed actually contains (max ~100 events, no private
+// contributions — GraphQL contributionCalendar would be needed for those).
+export const CONTRIB_WEEKS = 15;
+export const CONTRIB_DAYS = CONTRIB_WEEKS * 7; // 105
+export function contribDayKey(ms) {
+  const d = new Date(ms);
+  const y = d.getUTCFullYear();
+  const m = String(d.getUTCMonth() + 1).padStart(2, '0');
+  const day = String(d.getUTCDate()).padStart(2, '0');
+  return y + '-' + m + '-' + day;
+}
 export function buildHeatmap(events, repos = appState.repos) {
   const dayMs = 86400000;
-  const weeks = 15;
+  const weeks = CONTRIB_WEEKS;
   const grid = Array.from({ length: 7 }, () => new Array(weeks).fill(0));
 
-  const today = new Date();
-  today.setHours(0, 0, 0, 0);
-  const todayDay = today.getDay();
+  // UTC midnight today + its weekday (0=Sun) keep row 0 aligned with the
+  // Sunday label for every timezone.
+  const now = new Date();
+  const todayMs = Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate());
+  const todayDay = new Date(todayMs).getUTCDay();
   // Start on Sunday of the first displayed week and include the current
   // partial week. This keeps row 0 aligned with the Sunday label.
-  const gridStartMs = today.getTime() - ((weeks - 1) * 7 + todayDay) * dayMs;
+  const gridStartMs = todayMs - ((weeks - 1) * 7 + todayDay) * dayMs;
+
+  function dayIndexForMs(ms) {
+    const diffDays = Math.floor((ms - gridStartMs) / dayMs);
+    if (diffDays < 0 || diffDays >= weeks * 7) return -1;
+    return diffDays;
+  }
 
   function addDay(isoDate) {
     if (!isoDate) return;
     const d = new Date(isoDate);
-    d.setHours(0, 0, 0, 0);
-    const diffMs = d.getTime() - gridStartMs;
-    if (diffMs < 0) return;
-    const diffDays = Math.floor(diffMs / dayMs);
+    if (Number.isNaN(d.getTime())) return;
+    const ms = Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate());
+    const diffDays = Math.floor((ms - gridStartMs) / dayMs);
     if (diffDays < 0 || diffDays >= weeks * 7) return;
     const col = Math.floor(diffDays / 7);
     const row = diffDays % 7;
@@ -253,18 +274,63 @@ export function buildHeatmap(events, repos = appState.repos) {
     }
   }
 
+  // Push/Issue/PR/Review/Release are the core contribution signals.
+  // Create + Fork are also contributions on github.com (new branches/tags,
+  // forked repos) so they count here. Watch (stars) is intentionally
+  // excluded — outgoing stars already have their own sparkline widget.
   const activityTypes = new Set([
     'PushEvent', 'IssuesEvent', 'PullRequestEvent',
     'PullRequestReviewEvent', 'ReleaseEvent',
+    'CreateEvent', 'ForkEvent',
   ]);
-  for (const ev of events) {
-    if (!activityTypes.has(ev.type) || !ev.created_at) continue;
+  let commitCount = 0;
+  for (const ev of (events || [])) {
+    if (!ev || !activityTypes.has(ev.type) || !ev.created_at) continue;
     addDay(ev.created_at);
+    if (ev.type === 'PushEvent' && ev.payload) {
+      commitCount += (ev.payload.size || ev.payload.distinct_size) || 0;
+    }
   }
 
   let max = 0;
-  for (const row of grid) for (const v of row) if (v > max) max = v;
-  return { weeks, grid, max };
+  let total = 0;
+  const perDay = new Array(weeks * 7).fill(0);
+  // Flatten in day-index order (col-major: idx = col*7 + rowOffset where
+  // rowOffset aligns with gridStart Sunday). Recompute directly so streak
+  // math can't drift from the render path.
+  for (let idx = 0; idx < weeks * 7; idx++) {
+    const col = Math.floor(idx / 7);
+    const row = idx % 7;
+    perDay[idx] = grid[row] ? (grid[row][col] || 0) : 0;
+  }
+  for (const v of perDay) {
+    if (v > max) max = v;
+    total += v;
+  }
+  let best = 0;
+  for (const v of perDay) if (v > best) best = v;
+  // Current streak: consecutive active days ending today (or yesterday when
+  // today is still empty — mirrors github.com behaviour).
+  let streak = 0;
+  let end = weeks * 7 - 1;
+  if (perDay[end] === 0 && weeks * 7 >= 2) end = weeks * 7 - 2;
+  for (let i = end; i >= 0; i--) {
+    if (perDay[i] > 0) streak++;
+    else break;
+  }
+  // Month label per week column (UTC short name when the month flips).
+  const monthNames = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+  const monthLabels = new Array(weeks).fill('');
+  let prevMonth = -1;
+  for (let col = 0; col < weeks; col++) {
+    const ms = gridStartMs + col * 7 * dayMs;
+    const m = new Date(ms).getUTCMonth();
+    if (m !== prevMonth) {
+      monthLabels[col] = monthNames[m];
+      prevMonth = m;
+    }
+  }
+  return { weeks, grid, max, total, commitCount, streak, best, perDay, gridStartMs, todayMs, monthLabels };
 }
 
 function localRepoName() {
@@ -311,6 +377,84 @@ export function getDashboardStarred() {
   return (appState.starred || []).filter(matchesLocalRepo);
 }
 
+// ─── Contributions day selection + activity-feed filter ──────────────
+// The heatmap is a 15×7 UTC grid starting on a Sunday. `dashboardContribSelected`
+// is a day index 0..104 (defaults to TODAY, which is (weeks-1)*7 + weekday,
+// not 104 — the trailing cells after today are future days in the current
+// partial week). `dashboardContribDayFilter` is a 'YYYY-MM-DD' UTC key (or
+// null) that scopes the right-column activity feed to a single heatmap day.
+export function getTodayContribIndex() {
+  const now = new Date();
+  const todayMs = Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate());
+  const todayDay = new Date(todayMs).getUTCDay();
+  return (CONTRIB_WEEKS - 1) * 7 + todayDay;
+}
+export function clampContribSelected() {
+  const maxIdx = CONTRIB_DAYS - 1;
+  if (!Number.isFinite(appState.dashboardContribSelected)) appState.dashboardContribSelected = getTodayContribIndex();
+  appState.dashboardContribSelected = Math.max(0, Math.min(maxIdx, appState.dashboardContribSelected | 0));
+  return appState.dashboardContribSelected;
+}
+export function getContribSelectedDayKey() {
+  const hm = appState.dashboardContributions;
+  if (!hm || !Number.isFinite(hm.gridStartMs)) return null;
+  const idx = clampContribSelected();
+  return contribDayKey(hm.gridStartMs + idx * 86400000);
+}
+export function getContribSelectedDayCount() {
+  const hm = appState.dashboardContributions;
+  if (!hm || !Array.isArray(hm.perDay)) return 0;
+  const idx = clampContribSelected();
+  return hm.perDay[idx] || 0;
+}
+function eventDayKey(ev) {
+  if (!ev || !ev.created_at) return null;
+  const d = new Date(ev.created_at);
+  if (Number.isNaN(d.getTime())) return null;
+  return contribDayKey(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate()));
+}
+export function getActivityDayFilter() {
+  return appState.dashboardContribDayFilter || null;
+}
+// Activity feed rows honour the heatmap day filter when one is set.
+// The heatmap itself always uses the unfiltered event list.
+export function getFilteredActivityEvents() {
+  const events = getDashboardEvents();
+  const day = getActivityDayFilter();
+  if (!day) return events;
+  return events.filter(ev => eventDayKey(ev) === day);
+}
+export function toggleContribDayFilter() {
+  const key = getContribSelectedDayKey();
+  if (!key) return null;
+  if (appState.dashboardContribDayFilter === key) {
+    appState.dashboardContribDayFilter = null;
+    showMessage('Day filter cleared', 'info');
+  } else {
+    appState.dashboardContribDayFilter = key;
+    appState.dashboardActivityScroll = 0;
+    appState.dashboardActivitySelected = 0;
+    const n = getFilteredActivityEvents().length;
+    showMessage(n > 0 ? 'Filtering activity to ' + key + ' (' + n + ')' : 'No activity on ' + key, n > 0 ? 'info' : 'warning');
+  }
+  render();
+  return appState.dashboardContribDayFilter;
+}
+export function clearContribDayFilter(silent = false) {
+  if (!appState.dashboardContribDayFilter) return;
+  appState.dashboardContribDayFilter = null;
+  appState.dashboardActivityScroll = 0;
+  appState.dashboardActivitySelected = 0;
+  if (!silent) showMessage('Day filter cleared', 'info');
+  render();
+}
+export function moveContribSelection(dDays) {
+  const maxIdx = CONTRIB_DAYS - 1;
+  clampContribSelected();
+  appState.dashboardContribSelected = Math.max(0, Math.min(maxIdx, appState.dashboardContribSelected + dDays));
+  render();
+}
+
 // Top-5 repos by stars, same ordering as the TOP REPOS section render.
 // Prefers the memoized D14 cache, falling back to a live sort when the
 // cache is empty (e.g. recompute hasn't run yet).
@@ -349,6 +493,22 @@ export function recomputeDashboardDerived() {
   const repos = getDashboardRepos();
   const staleResult = findStaleRepos(repos);
   appState.dashboardContributions = buildHeatmap(getDashboardEvents(), repos);
+  clampContribSelected();
+  // Drop a day filter that no longer matches any visible event (e.g. after
+  // a local-repo scope change) so the activity feed can't get stuck empty.
+  if (appState.dashboardContribDayFilter) {
+    const stillMatches = getDashboardEvents().some(ev => eventDayKey(ev) === appState.dashboardContribDayFilter);
+    if (!stillMatches) {
+      // Keep the filter key only when the heatmap day itself still has
+      // activity — otherwise the user filtered to a day with zero rows.
+      const hm = appState.dashboardContributions;
+      const idx = hm && Number.isFinite(hm.gridStartMs)
+        ? Math.floor((Date.parse(appState.dashboardContribDayFilter + 'T00:00:00Z') - hm.gridStartMs) / 86400000)
+        : -1;
+      const dayCount = hm && Array.isArray(hm.perDay) && idx >= 0 && idx < hm.perDay.length ? hm.perDay[idx] : 0;
+      if (dayCount === 0) appState.dashboardContribDayFilter = null;
+    }
+  }
   appState.dashboardStaleCount = staleResult.count;
   appState.dashboardStaleRepos = staleResult.repos;
   appState.dashboardStarHistory = buildStarHistory(getDashboardStarred());
@@ -513,8 +673,9 @@ export function renderDashboard(screen, y, h) {
   const dashboardPRs = getDashboardPRs();
   const attentionItems = getNeedsAttention();
   appState.dashboardAttentionItems = attentionItems;
+  clampContribSelected();
   clampList(attentionItems, 'dashboardAttentionSelected', 'dashboardAttentionScroll');
-  clampList(dashboardEvents, 'dashboardActivitySelected', 'dashboardActivityScroll');
+  clampList(getFilteredActivityEvents(), 'dashboardActivitySelected', 'dashboardActivityScroll');
   clampList(getFilteredTrending(), 'trendingSelected', 'trendingScroll');
   clampList(dashboardIssues, 'dashboardIssueSelected', 'dashboardIssueScroll');
   clampList(dashboardPRs, 'dashboardPRSelected', 'dashboardPRScroll');
@@ -753,26 +914,48 @@ export function renderDashboard(screen, y, h) {
   const heatTopY = ly;
 
   // ── Heatmap (left sub-column) ──
+  // Honest label: this is PUBLIC events only (REST caps at ~100 rows, no
+  // private contributions). Totals + streak come from buildHeatmap so the
+  // header can't mix commit counts with event-cell counts.
   if (ly < y + h - 4 && !isDashboardHidden('contributions')) {
     const hm = appState.dashboardContributions;
-    if (hm) {
+    const eventsLoading = isWidgetLoading('events');
+    if (!hm && eventsLoading) {
+      const loadingVisible = sectionHeader(screen, leftX, ly, 'CONTRIBUTIONS (PUBLIC)', null, 'dashboard:contributions');
+      ly++;
+      if (loadingVisible) {
+        loadingIndicator(screen, leftX, ly, 'loading contributions');
+        ly += 2;
+      }
+    } else if (hm) {
       const dayLabels = ['S', 'M', 'T', 'W', 'T', 'F', 'S'];
-      const heatW = heatRightX - leftX - 4;
-      const cellW = Math.max(1, Math.min(2, Math.floor(heatW / hm.weeks)));
-      const commitCount = dashboardEvents
-        .filter(ev => ev.type === 'PushEvent')
-        .reduce((sum, ev) => sum + ((ev.payload && (ev.payload.size || ev.payload.distinct_size)) || 0), 0);
-      const totalEvents = hm.grid.flat().reduce((a, b) => a + b, 0);
+      const heatW = Math.max(0, heatRightX - leftX - 4);
+      const cellW = Math.max(1, Math.min(2, Math.floor(heatW / hm.weeks) || 1));
+      const totalEvents = hm.total || 0;
+      const commitCount = hm.commitCount || 0;
+      const contribFocused = appState.dashboardFocusZone === 'contributions';
 
-      const activityLabel = commitCount === 0
-        ? (totalEvents === 0 ? 'RECENT ACTIVITY' : 'RECENT ACTIVITY · ' + totalEvents)
-        : 'RECENT ACTIVITY · ' + commitCount + ' commits';
-      const activityVisible = sectionHeader(screen, leftX, ly, activityLabel, null, 'dashboard:contributions');
+      let activityLabel;
+      if (totalEvents === 0) activityLabel = 'CONTRIBUTIONS (PUBLIC)';
+      else if (commitCount > 0) activityLabel = 'CONTRIBUTIONS (PUBLIC) · ' + totalEvents + ' ev · ' + commitCount + ' commits';
+      else activityLabel = 'CONTRIBUTIONS (PUBLIC) · ' + totalEvents + ' ev';
+      // Keep the header inside the left column so it never bleeds into the
+      // languages sub-column on narrow-but-not-stacked widths.
+      const maxLabelLen = Math.max(10, heatRightX - leftX - 2);
+      activityLabel = truncate(activityLabel, maxLabelLen);
+      const contribHint = contribFocused ? '[←→] day [Enter] filter' : null;
+      const activityVisible = sectionHeader(screen, leftX, ly, activityLabel, contribHint, 'dashboard:contributions');
       ly++;
 
       if (activityVisible) {
-      if (totalEvents === 0) {
-        screen.writeStr(leftX, ly++, 'No recent public activity — private contributions are not visible via REST', { dim: true });
+      if (totalEvents === 0 && !eventsLoading) {
+        screen.writeStr(leftX, ly++, truncate('No recent public activity — private needs GraphQL', Math.max(10, heatRightX - leftX)), { dim: true });
+        // Even with zero events the scope caveat stays visible so an empty
+        // grid is never mistaken for "no contributions at all".
+        screen.writeStr(leftX, ly++, truncate('REST: last ~100 public events only', Math.max(10, heatRightX - leftX)), { dim: true });
+      } else if (totalEvents === 0 && eventsLoading) {
+        loadingIndicator(screen, leftX, ly, 'loading contributions');
+        ly++;
       } else {
 
   const heatStyle = (level) => {
@@ -788,6 +971,35 @@ export function renderDashboard(screen, y, h) {
         const heatChars = appState.accessible
           ? [' ', '.', 'o', 'O', '#']
           : [' ', '░', '▒', '▓', '█'];
+        // Month strip: one 3-letter label per week column where the UTC
+        // month flips. Skipped when the column is too narrow to fit.
+        if (cellW >= 1 && ly < y + h - 1) {
+          const monthRowAvail = heatRightX - leftX - 3;
+          if (monthRowAvail >= hm.weeks) {
+            screen.writeStr(leftX + 3, ly, '', null);
+            let monthStr = '';
+            for (let col = 0; col < hm.weeks; col++) {
+              const lbl = (hm.monthLabels && hm.monthLabels[col]) || '';
+              // Each week column occupies cellW cells; show the first
+              // letter of a new month so labels never overlap.
+              const ch = lbl ? lbl[0] : ' ';
+              monthStr += ch.repeat(cellW).slice(0, cellW);
+              if (leftX + 3 + col * cellW >= heatRightX - 1) break;
+            }
+            screen.writeStr(leftX + 3, ly, truncate(monthStr, monthRowAvail), { dim: true });
+            ly++;
+          }
+        }
+        clampContribSelected();
+        const selIdx = appState.dashboardContribSelected;
+        const selCol = Math.floor(selIdx / 7);
+        const selRow = selIdx % 7;
+        // Remember grid geometry for mouse click→day mapping. Store the
+        // viewport-mapped Y of the first grid row so screen coords compare
+        // correctly while the dashboard body is scrolled.
+        const gridStartLy = ly;
+        const renderedGridY = typeof screen.mapViewportY === 'function' ? screen.mapViewportY(gridStartLy) : gridStartLy;
+        appState._contribGeom = { gridY: renderedGridY, cellW, leftX, weeks: hm.weeks, heatRightX };
         for (let row = 0; row < 7; row++) {
           if (ly >= y + h - 1) break;
           screen.writeStr(leftX, ly, dayLabels[row], { dim: true });
@@ -798,16 +1010,53 @@ export function renderDashboard(screen, y, h) {
             const level = val === 0 ? 0
               : hm.max <= 4 ? Math.min(4, val)
               : Math.min(4, Math.ceil((val / hm.max) * 4));
-            screen.writeStr(cx, ly, heatChars[level].repeat(cellW), heatStyle(level));
+            const isSel = contribFocused && col === selCol && row === selRow;
+            const cell = heatChars[level].repeat(cellW);
+            if (isSel) {
+              // Selection cursor: paint the cell with the list-selection
+              // style so keyboard focus is unmistakable.
+              for (let x = cx; x < cx + cellW && x < heatRightX; x++) screen.setStyle(x, ly, { bg: 'blue', fg: 'white', bold: true });
+              screen.writeStr(cx, ly, cell, { bg: 'blue', fg: 'white', bold: true });
+            } else {
+              screen.writeStr(cx, ly, cell, heatStyle(level));
+            }
           }
           ly++;
         }
         if (appState.accessible) {
-          screen.writeStr(leftX, ly, 'Less . : : # More', { dim: true });
+          screen.writeStr(leftX, ly, 'Less . o O # More', { dim: true });
         } else {
           screen.writeStr(leftX, ly, 'Less ░▒▓█ More', { dim: true });
         }
         ly++;
+        // Totals + streak line: distinct metrics on one honest row.
+        const statsLine = totalEvents + ' events · ' + commitCount + ' commits · ' + hm.streak + 'd streak · best ' + hm.best + '/day';
+        screen.writeStr(leftX, ly, truncate(statsLine, Math.max(10, heatRightX - leftX)), { dim: true });
+        ly++;
+        // Selected-day line when focused; day-filter state always visible.
+        if (contribFocused) {
+          const dayKey = getContribSelectedDayKey();
+          const dayCount = getContribSelectedDayCount();
+          const selLine = (dayKey || '—') + ': ' + dayCount + ' ev · [Enter] filter feed';
+          screen.writeStr(leftX, ly, truncate(selLine, Math.max(10, heatRightX - leftX)), { fg: 'cyan' });
+          ly++;
+        }
+        if (appState.dashboardContribDayFilter) {
+          const fLine = 'Feed filtered to ' + appState.dashboardContribDayFilter + ' · [Enter] clear';
+          screen.writeStr(leftX, ly, truncate(fLine, Math.max(10, heatRightX - leftX)), { fg: 'yellow' });
+          ly++;
+        }
+        // Permanent scope caveat — the previous build only showed this when
+        // the grid was empty, letting partial data pass as complete.
+        screen.writeStr(leftX, ly, truncate('public only · private needs GraphQL', Math.max(10, heatRightX - leftX)), { dim: true });
+        ly++;
+        // Stale-data signal: the loader keeps the last good grid on widget
+        // failure, so stamp its age instead of letting it look fresh.
+        const evAge = appState.dashboardWidgetFetched['events'];
+        if (evAge && appState.dashboardWidgetErrorCount > 0) {
+          screen.writeStr(leftX, ly, truncate('last good data · ' + getWidgetAge('events') + ' old · [r] retry', Math.max(10, heatRightX - leftX)), { fg: 'yellow' });
+          ly++;
+        }
       }
       } // activityVisible
       ly++;
@@ -836,7 +1085,11 @@ export function renderDashboard(screen, y, h) {
       }
       const total = langTotal;
       const sorted = langSorted;
-      const barW = Math.max(3, halfW - Math.floor(halfW * 0.58) - 14);
+      // Available width for the bar: full left-column width when stacked,
+      // otherwise the right sub-column width. Clamp so the bar + label +
+      // count never overflow on narrow terminals.
+      const langAvailW = isNarrow ? leftW : Math.max(10, splitX - langLeftX - 2);
+      const barW = Math.max(3, Math.min(20, langAvailW - 12));
       let lly = langY + 1;
       if (sorted.length === 0) {
         screen.writeStr(langX, lly, 'No language data — repos may not have languages detected', { dim: true });
@@ -891,26 +1144,35 @@ export function renderDashboard(screen, y, h) {
   // When the activity zone is focused, advertise a working key. The previous
   // "[Enter] open first" was misleading — pressing Enter used to fall through
   // to the trending zone and open trendingSelected, NOT the first event.
-  const activityHint = activityFocused ? '[Enter] open repo' : null;
-  const activityVisible = sectionHeader(screen, rightX, ry, 'RECENT ACTIVITY', activityHint, 'dashboard:recentActivity');
+  const dayFilter = getActivityDayFilter();
+  const activityEvents = dayFilter ? getFilteredActivityEvents() : dashboardEvents;
+  const activityTitle = dayFilter ? 'ACTIVITY · ' + dayFilter : 'RECENT ACTIVITY';
+  const activityHint = activityFocused ? '[Enter] open repo' : (dayFilter ? '[x] clear day' : null);
+  const activityVisible = sectionHeader(screen, rightX, ry, activityTitle, activityHint, 'dashboard:recentActivity');
   ry++;
+  if (dayFilter) {
+    screen.writeStr(rightX, ry, truncate('day ' + dayFilter + ' · ' + activityEvents.length + ' ev · [x] clear', Math.max(10, rightW)), { fg: 'yellow' });
+    ry++;
+  }
   if (activityVisible) {
-    if (dashboardEvents.length === 0) {
+    if ((dayFilter ? activityEvents : dashboardEvents).length === 0) {
       if (!appState.dashboardLoaded) {
         loadingIndicator(screen, rightX, ry, 'loading events');
         ry++;
+      } else if (dayFilter) {
+        screen.writeStr(rightX, ry++, truncate('No activity on ' + dayFilter + ' — [x] clear filter', Math.max(10, rightW)), { dim: true });
       } else {
         screen.writeStr(rightX, ry++, 'No activity yet — [r] to refresh', { dim: true });
       }
     } else {
       const maxEvents = Math.min(7, Math.max(1, Math.floor((y + h - bodyY) * 0.30)));
       // Honour keyboard scroll: viewport starts at dashboardActivityScroll.
-      const activityStart = Math.min(appState.dashboardActivityScroll, dashboardEvents.length);
-      const activityEnd = Math.min(activityStart + maxEvents, dashboardEvents.length);
+      const activityStart = Math.min(appState.dashboardActivityScroll, activityEvents.length);
+      const activityEnd = Math.min(activityStart + maxEvents, activityEvents.length);
       const activityStartY = ry;
       for (let i = activityStart; i < activityEnd; i++) {
         if (ry >= y + h - 1) break;
-        const ev = dashboardEvents[i];
+        const ev = activityEvents[i];
         const sel = activityFocused && i === appState.dashboardActivitySelected;
         const [icon, c, label] = eventGlyph(ev.type);
         const repo = truncate(ev.repo && ev.repo.name ? ev.repo.name : '?', Math.max(10, rightW - 22));
@@ -927,7 +1189,7 @@ export function renderDashboard(screen, y, h) {
         screen.writeStr(rightX + rightW - when.length, ry, when, sel ? { bg: 'blue', fg: 'white' } : { dim: true });
         ry++;
       }
-      scrollIndicators(screen, activityStartY, ry - 1, appState.dashboardActivityScroll, dashboardEvents.length);
+      scrollIndicators(screen, activityStartY, ry - 1, appState.dashboardActivityScroll, activityEvents.length);
     }
     ry++;
   }
@@ -1402,6 +1664,14 @@ export const keys = {
     reloadTrending(previousPeriod);
   },
   '/': () => startInput('Filter trending: ', 'dashboard-filter'),
+  'x': () => {
+    if (appState.dashboardContribDayFilter) clearContribDayFilter();
+    else showMessage('No day filter to clear', 'info');
+  },
+  'c': () => {
+    if (appState.dashboardContribDayFilter) clearContribDayFilter();
+    else showMessage('No day filter to clear', 'info');
+  },
   'n': () => {
     import('../issue-create.mjs').then(m => m.startCreateIssue());
   },
@@ -1454,6 +1724,11 @@ export function dashboardUp() {
     return;
   }
   if (zone === 'cards') return;
+  if (zone === 'contributions') {
+    // Vertical step = one week back in the heatmap grid.
+    moveContribSelection(-7);
+    return;
+  }
   if (zone === 'custom') {
     const sections = dashboardCustomSectionsWithItems();
     let sectionIndex = appState.dashboardCustomSectionSelected;
@@ -1474,7 +1749,7 @@ export function dashboardUp() {
   }
   if (zone === 'trending') { trendingUp(); return; }
   if (zone === 'activity') {
-    const events = getDashboardEvents();
+    const events = getFilteredActivityEvents();
     if (events.length === 0) return;
     appState.dashboardActivitySelected = Math.max(0, appState.dashboardActivitySelected - 1);
     if (appState.dashboardActivitySelected < appState.dashboardActivityScroll) {
@@ -1532,6 +1807,10 @@ export function dashboardDown() {
     return;
   }
   if (zone === 'cards') return;
+  if (zone === 'contributions') {
+    moveContribSelection(7);
+    return;
+  }
   if (zone === 'custom') {
     const sections = dashboardCustomSectionsWithItems();
     let sectionIndex = appState.dashboardCustomSectionSelected;
@@ -1552,7 +1831,7 @@ export function dashboardDown() {
   }
   if (zone === 'trending') { trendingDown(); return; }
   if (zone === 'activity') {
-    const events = getDashboardEvents();
+    const events = getFilteredActivityEvents();
     if (events.length === 0) return;
     const screen = getScreen();
     const H = screen ? screen.height : 24;
@@ -1654,6 +1933,7 @@ export function openDashboardItem() {
   const zone = appState.dashboardFocusZone;
   if (zone === 'attention') { openNeedsAttention(); return; }
   if (zone === 'cards') { openFocusedCard(); return; }
+  if (zone === 'contributions') { toggleContribDayFilter(); return; }
   if (zone === 'trending') { openTrendingRepo(); return; }
   if (zone === 'custom') {
     const sections = dashboardCustomSectionsWithItems();
@@ -1678,7 +1958,7 @@ export function openDashboardItem() {
     return;
   }
   if (zone === 'activity') {
-    const ev = getDashboardEvents()[appState.dashboardActivitySelected];
+    const ev = getFilteredActivityEvents()[appState.dashboardActivitySelected];
     if (!ev) return;
     // GitHub events have no single stable browser URL across all event
     // types; the most useful drill-in is the affected repo. We switch to
@@ -1783,12 +2063,27 @@ export function unfocusCards() {
   appState.dashboardFocusZone = 'trending';
   render();
 }
+// Contributions day cursor: ←/→ move one day, ↑/↓ (via dashboardUp/Down)
+// move one week. Only active when the contributions zone holds focus so the
+// global card arrows keep working elsewhere.
+export function leftContrib() {
+  if (appState.dashboardFocusZone !== 'contributions') return false;
+  moveContribSelection(-1);
+  return true;
+}
+export function rightContrib() {
+  if (appState.dashboardFocusZone !== 'contributions') return false;
+  moveContribSelection(1);
+  return true;
+}
 export function leftCard() {
+  if (appState.dashboardFocusZone === 'contributions') { moveContribSelection(-1); return; }
   if (!appState.dashboardCardsFocus) return;
   appState.dashboardSelectedCard = Math.max(0, appState.dashboardSelectedCard - 1);
   render();
 }
 export function rightCard() {
+  if (appState.dashboardFocusZone === 'contributions') { moveContribSelection(1); return; }
   if (!appState.dashboardCardsFocus) return;
   appState.dashboardSelectedCard = Math.min(4, appState.dashboardSelectedCard + 1);
   render();
@@ -1807,6 +2102,7 @@ export function getCurrentSection() {
   const zone = appState.dashboardFocusZone;
   if (zone === 'trending') return 'dashboard:trending';
   if (zone === 'attention') return 'dashboard:attention';
+  if (zone === 'contributions') return 'dashboard:contributions';
   if (zone === 'activity') return 'dashboard:recentActivity';
   if (zone === 'issues') return 'dashboard:issues';
   if (zone === 'prs') return 'dashboard:prs';

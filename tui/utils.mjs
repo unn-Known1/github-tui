@@ -355,6 +355,55 @@ export function eventGlyph(type) {
   }
 }
 
+// Accessible-ASCII symbol table (U2). Pure lookup — no imports — so every
+// tab can share one text-only vocabulary for `--accessible` mode without
+// creating an import cycle (utils must NOT import theme; theme.mjs owns the
+// isAccessible() gate via a typeof-guarded call at each paint site).
+// Callers gate on appState.accessible / theme isAccessible() themselves;
+// these helpers never consult global state.
+export function a11ySymbol(name) {
+  switch (name) {
+    case 'spinner':   return '[..]';
+    case 'up':        return '^';
+    case 'down':      return 'v';
+    case 'both':      return '!';
+    case 'right':     return '>';
+    case 'downArrow': return 'v';
+    case 'ok':        return '[OK]';
+    case 'err':       return '[ERR]';
+    case 'star':      return '[*]';
+    case 'dot':       return '[.]';
+    case 'unread':    return '[!]';
+    default:          return '[?]';
+  }
+}
+
+// Accessible twin of eventGlyph(type): same labels, ASCII icons, no color.
+// eventGlyph returns [icon, color, label] — its shape is load-bearing for
+// callers, so it is left untouched. This helper reuses eventGlyph's label
+// table verbatim (labels can't drift) and swaps only icon→ASCII, color→null.
+// Dashboard wiring to select between the two is a later pass; both are
+// exported here for that pass to consume.
+export function eventGlyphA11y(type) {
+  const label = eventGlyph(type)[2];
+  switch (type) {
+    case 'PushEvent':              return ['[+]',  null, label];
+    case 'PullRequestEvent':       return ['[PR]', null, label];
+    case 'IssuesEvent':            return ['[#]',  null, label];
+    case 'IssueCommentEvent':      return ['[.]',  null, label];
+    case 'PullRequestReviewEvent': return ['[*]',  null, label];
+    case 'WatchEvent':             return ['[*]',  null, label];
+    case 'ForkEvent':              return ['[Y]',  null, label];
+    case 'CreateEvent':            return ['[+]',  null, label];
+    case 'DeleteEvent':            return ['[-]',  null, label];
+    case 'ReleaseEvent':           return ['[>]',  null, label];
+    case 'PublicEvent':            return ['[o]',  null, label];
+    case 'MemberEvent':            return ['[+]',  null, label];
+    case 'GollumEvent':            return ['[W]',  null, label];
+    default:                       return ['[.]',  null, label];
+  }
+}
+
 // Color helper for notification subject types.
 export function notifTypeColor(type) {
   switch (type) {

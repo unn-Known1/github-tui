@@ -13,7 +13,7 @@ import {
 import { enableMouse, disableMouse } from './tui/mouse.mjs';
 import { enableBracketedPaste, disableBracketedPaste } from './tui/input.mjs';
 import { loadToken } from './tui/config.mjs';
-import { loadTheme } from './tui/theme.mjs';
+import { loadTheme, setAccessible } from './tui/theme.mjs';
 import { initScreen, render } from './tui/render.mjs';
 import { handleKey, registerCoreActions } from './tui/keys.mjs';
 import { registerInputHandler } from './tui/input.mjs';
@@ -167,6 +167,7 @@ async function main() {
   // with bracketed ASCII labels.
   if (process.argv.includes('--accessible') || process.argv.includes('--a11y') || process.argv.includes('--accessible=linear')) {
     appState.accessible = true;
+    setAccessible(true);
     appState.linearAccessibility = process.argv.includes('--accessible=linear');
   }
   if (process.argv.includes('--help') || process.argv.includes('-h')) {

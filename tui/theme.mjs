@@ -128,7 +128,7 @@ const DEFAULT = makeTheme({
   emptyIcon:   { fg: P.d_teal },
   emptyTitle:  { fg: P.d_fg,     bold: true },
   emptyMessage:{ fg: P.d_fgDim },
-  heatmapLow:  { fg: '#0e4429' },
+  heatmapLow:  { fg: '#2ea043' },
   heatmapMid:  { fg: '#26a641' },
   heatmapHigh: { fg: '#39d353', bold: true },
   traffic:     { fg: P.d_teal },
@@ -224,6 +224,14 @@ const THEMES = {
 };
 
 let active = 'default';
+
+// ── Accessible-mode flag (U1) ───────────────────────────────────────
+// Module-local so theme.mjs keeps its minimal imports (config + fs +
+// state only) and stays import-cycle safe. Set once from app.mjs flag
+// parsing; consumed by color() here and isAccessible() elsewhere.
+let _accessible = false;
+export function setAccessible(v) { _accessible = !!v; }
+export function isAccessible() { return _accessible; }
 // NO_COLOR is imported from config.mjs — single source of truth
 
 export function listThemes() { return Object.keys(THEMES); }
@@ -249,6 +257,7 @@ export function loadTheme() {
 
 export function color(role) {
   if (NO_COLOR) return null;
+  if (_accessible) return null;
   const style = THEMES[active][role];
   if (!style) return null;
   // Return a shallow copy to prevent accidental mutation of theme objects

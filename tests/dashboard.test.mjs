@@ -10,6 +10,12 @@ import {
   getDashboardPRs,
   getFilteredTrending,
   getNeedsAttention,
+  contribDayKey,
+  getTodayContribIndex,
+  clampContribSelected,
+  getFilteredActivityEvents,
+  toggleContribDayFilter,
+  moveContribSelection,
 } from '../tui/tabs/dashboard.mjs';
 import { focusNext, focusDashboardZone, getFocusZone, resetFocus } from '../tui/focus.mjs';
 import { dashboardDown, dashboardUp } from '../tui/tabs/dashboard.mjs';
@@ -30,6 +36,8 @@ const keysToSave = [
   'dashboardQuickActions', 'dashboardTopRepos', 'dashboardLangHistogram',
   'dashboardTotals', 'dashboardTopSelected', 'dashboardTopScroll',
   'dashboardStaleSelected', 'dashboardStaleScroll',
+  'dashboardContributions', 'dashboardContribSelected', 'dashboardContribDayFilter',
+  '_contribGeom',
 ];
 for (const key of keysToSave) saved[key] = appState[key];
 
@@ -41,15 +49,83 @@ function restore() {
 afterEach(restore);
 
 describe('Dashboard data helpers', () => {
-  it('places today in the current Sunday-based heatmap week', () => {
-    const today = new Date();
-    today.setHours(12, 0, 0, 0);
+  it('places today in the current Sunday-based heatmap week (UTC)', () => {
+    const now = new Date();
+    const todayUTC = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate(), 12, 0, 0, 0));
     const heatmap = buildHeatmap([
-      { type: 'PushEvent', created_at: today.toISOString(), payload: { size: 1 } },
-      { type: 'WatchEvent', created_at: today.toISOString(), payload: {} },
+      { type: 'PushEvent', created_at: todayUTC.toISOString(), payload: { size: 1 } },
+      { type: 'WatchEvent', created_at: todayUTC.toISOString(), payload: {} },
     ], []);
-    assert.equal(heatmap.grid[today.getDay()][14], 1);
+    const utcDay = new Date(heatmap.todayMs).getUTCDay();
+    assert.equal(heatmap.grid[utcDay][14], 1);
     assert.equal(heatmap.grid.flat().reduce((a, b) => a + b, 0), 1);
+    assert.equal(heatmap.total, 1);
+  });
+
+  it('counts Create/Fork as contributions but still ignores Watch (stars have own widget)', () => {
+    const now = new Date();
+    const iso = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate(), 12)).toISOString();
+    const hm = buildHeatmap([
+      { type: 'CreateEvent', created_at: iso },
+      { type: 'ForkEvent', created_at: iso },
+      { type: 'WatchEvent', created_at: iso },
+    ], []);
+    assert.equal(hm.total, 2);
+  });
+
+  it('returns honest totals, commit counts, streak and month labels', () => {
+    const now = new Date();
+    const todayMs = Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate());
+    const todayIso = new Date(todayMs).toISOString();
+    const hm = buildHeatmap([
+      { type: 'PushEvent', created_at: todayIso, payload: { size: 3 } },
+    ], []);
+    assert.equal(hm.total, 1);
+    assert.equal(hm.commitCount, 3);
+    assert.ok(hm.streak >= 1);
+    assert.equal(hm.weeks, 15);
+    assert.equal(hm.perDay.length, 105);
+    assert.equal(hm.monthLabels.length, 15);
+    assert.ok(Number.isFinite(hm.gridStartMs));
+  });
+
+  it('resolves the day cursor to today and filters the activity feed by day', () => {
+    const now = new Date();
+    const todayMs = Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate());
+    const todayIso = new Date(todayMs).toISOString();
+    const yesterdayIso = new Date(todayMs - 86400000).toISOString();
+    appState.localRepo = null;
+    appState.localRepoFilter = false;
+    appState.events = [
+      { type: 'PushEvent', created_at: todayIso, repo: { name: 'me/a' }, payload: { size: 1 } },
+      { type: 'PushEvent', created_at: yesterdayIso, repo: { name: 'me/b' }, payload: { size: 1 } },
+    ];
+    appState.dashboardContributions = buildHeatmap(appState.events, []);
+    appState.dashboardContribSelected = null;
+    appState.dashboardContribDayFilter = null;
+    const todayIdx = getTodayContribIndex();
+    assert.equal(clampContribSelected(), todayIdx);
+    toggleContribDayFilter();
+    assert.equal(appState.dashboardContribDayFilter, contribDayKey(todayMs));
+    assert.equal(getFilteredActivityEvents().length, 1);
+    toggleContribDayFilter();
+    assert.equal(appState.dashboardContribDayFilter, null);
+    assert.equal(getFilteredActivityEvents().length, 2);
+  });
+
+  it('moves the day cursor by days and weeks', () => {
+    appState.dashboardContribSelected = 50;
+    moveContribSelection(-1);
+    assert.equal(appState.dashboardContribSelected, 49);
+    moveContribSelection(7);
+    assert.equal(appState.dashboardContribSelected, 56);
+    // edges clamp instead of overflowing
+    appState.dashboardContribSelected = 104;
+    moveContribSelection(7);
+    assert.equal(appState.dashboardContribSelected, 104);
+    appState.dashboardContribSelected = 0;
+    moveContribSelection(-7);
+    assert.equal(appState.dashboardContribSelected, 0);
   });
 
   it('filters Dashboard collections to the detected local repository', () => {
@@ -109,6 +185,7 @@ describe('Dashboard data helpers', () => {
 describe('Dashboard focus and viewport behavior', () => {
   it('focuses cards first, then the actionable widget', () => {
     appState.dashboardAttentionItems = [{ id: 'unread', count: 1 }];
+    appState.dashboardContributions = null;
     resetFocus(0);
     assert.equal(getFocusZone(), null);
     focusNext();
@@ -117,6 +194,21 @@ describe('Dashboard focus and viewport behavior', () => {
     focusNext();
     assert.equal(getFocusZone()?.id, 'attention');
     assert.equal(appState.dashboardFocusZone, 'attention');
+  });
+
+  it('includes contributions in Tab order when the heatmap has data', () => {
+    const now = new Date();
+    const iso = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate(), 12)).toISOString();
+    appState.dashboardAttentionItems = [];
+    appState.dashboardContributions = buildHeatmap([{ type: 'PushEvent', created_at: iso }], []);
+    appState.dashboardHidden = [];
+    assert.equal(focusDashboardZone('contributions'), true);
+    assert.equal(getFocusZone()?.id, 'contributions');
+    dashboardDown();
+    // one week forward clamps at the grid edge, never throws
+    assert.ok(Number.isFinite(appState.dashboardContribSelected));
+    dashboardUp();
+    assert.ok(Number.isFinite(appState.dashboardContribSelected));
   });
 
   it('can synchronize focus after a mouse selection', () => {

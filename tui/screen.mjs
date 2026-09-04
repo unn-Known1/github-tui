@@ -2,6 +2,7 @@ const ESC = '\x1b';
 const RESET = `${ESC}[0m`;
 
 import { NO_COLOR, FORCE_COLOR as _FORCE_COLOR_CFG } from './config.mjs';
+import { isAccessible } from './theme.mjs';
 
 // ── Terminal capability detection (done early, used by compileStyle) ──
 const TERM = process.env.TERM || '';
@@ -209,6 +210,7 @@ function isWideCodePoint(cp) {
     (cp >= 0xFE30 && cp <= 0xFE6F) || // CJK Compatibility Forms
     (cp >= 0xFF01 && cp <= 0xFF60) || // Fullwidth Forms
     (cp >= 0xFFE0 && cp <= 0xFFE6) ||
+    (cp >= 0x1F300 && cp <= 0x1FAFF) || // Emoji + pictographs (agree with utils.mjs isWide)
     (cp >= 0x20000 && cp <= 0x2FFFD) || // CJK Unified Extension B-F
     (cp >= 0x30000 && cp <= 0x3FFFD);
 }
@@ -355,7 +357,9 @@ export class Screen {
       this.styleBuf[y][cx] = style;
       // For wide characters, fill the next cell with a continuation marker
       if (w === 2 && cx + 1 < this.width) {
-        this.charBuf[y][cx + 1] = '\u200B'; // zero-width space as filler
+        // U9b: plain space under --accessible so screen-reader/copy buffers
+        // don't collect invisible ZWSP bytes; ZWSP otherwise.
+        this.charBuf[y][cx + 1] = isAccessible() ? ' ' : '\u200B'; // zero-width space as filler
         this.styleBuf[y][cx + 1] = style;
       }
       cx += w;
@@ -377,7 +381,7 @@ export class Screen {
       if (cx < 0 || cx >= this.width) break;
       this.charBuf[y][cx] = ch;
       if (w === 2 && cx + 1 < this.width) {
-        this.charBuf[y][cx + 1] = '\u200B';
+        this.charBuf[y][cx + 1] = isAccessible() ? ' ' : '\u200B';
       }
       cx += w;
     }
@@ -577,7 +581,11 @@ export class Screen {
     if (curCompiled) out.push(RESET);
 
     if (out.length > 0) {
-      process.stdout.write(out.join(''));
+      // U6b: hide the hardware cursor on every painted frame (idempotent;
+      // batched into the same write, before painting). The painted █ caret
+      // remains the visible caret. Restored via ?25h in app.mjs shutdown()
+      // (`\x1b[?25h\x1b[2J\x1b[H`). No-op frames stay silent (no extra write).
+      process.stdout.write(`${ESC}[?25l` + out.join(''));
     }
 
     // Swap buffers instead of copying — zero allocation after warm-up.

@@ -7,6 +7,23 @@ import { truncate, truncateToWidth } from './utils.mjs';
 const actions = [];
 const seen = new Set();
 
+// Bracketed-paste assembly buffer for handleKey (see below).
+let _pasteActive = false;
+let _pasteBuf = '';
+
+function insertPasteChars(str) {
+  let out = '';
+  for (const ch of String(str)) {
+    const c = ch.codePointAt(0);
+    if (c >= 32 && c !== 127) out += ch;
+  }
+  if (out) {
+    appState.paletteQuery = (appState.paletteQuery || '') + out;
+    appState.paletteCursor = 0;
+  }
+  render();
+}
+
 export function register(action) {
   if (!action || !action.id || seen.has(action.id)) return;
   seen.add(action.id);
@@ -40,12 +57,16 @@ export function open() {
   appState.showPalette = true;
   appState.paletteQuery = '';
   appState.paletteCursor = 0;
+  _pasteActive = false;
+  _pasteBuf = '';
   render();
 }
 export function close() {
   appState.showPalette = false;
   appState.paletteQuery = '';
   appState.paletteCursor = 0;
+  _pasteActive = false;
+  _pasteBuf = '';
   render();
 }
 export function execSelected() {
@@ -59,6 +80,32 @@ export function execSelected() {
 
 export function handleKey(key) {
   if (!appState.showPalette) return false;
+  // Bracketed-paste path (minimal standalone mirror of input.mjs:73-159).
+  // input.mjs couples paste to its cursor/insert helpers, so the palette
+  // keeps a small local version: accumulate between \x1b[200~ … \x1b[201~,
+  // then insert the printable chars as query text. Split-chunk pastes
+  // reuse the same module-local buffer across calls.
+  const PASTE_START = '\x1b[200~';
+  const PASTE_END = '\x1b[201~';
+  if (_pasteActive) {
+    const endIdx = key.indexOf(PASTE_END);
+    if (endIdx === -1) { _pasteBuf += key; return true; }
+    _pasteBuf += key.slice(0, endIdx);
+    insertPasteChars(_pasteBuf);
+    _pasteBuf = '';
+    _pasteActive = false;
+    const rest = key.slice(endIdx + PASTE_END.length);
+    if (rest.length > 0) return handleKey(rest);
+    return true;
+  }
+  const startIdx = key.indexOf(PASTE_START);
+  if (startIdx !== -1) {
+    _pasteActive = true;
+    _pasteBuf = '';
+    const after = key.slice(startIdx + PASTE_START.length);
+    if (after.length > 0) return handleKey(after);
+    return true;
+  }
   if (key === '\r' || key === '\n') { execSelected(); return true; }
   if (key === '\x1b') { close(); return true; }
   if (key === '\x7f' || key === '\b') {

@@ -910,6 +910,8 @@ export function up(screen) {
     render();
     return;
   }
+  const total = floatPinsToTop(applyAllFilters(sortRepos(appState.repos, appState.repoSort))).length;
+  if (total === 0) { render(); return; }
   if (appState.repoSelected > 0) appState.repoSelected--;
   if (appState.repoSelected < appState.repoScroll) appState.repoScroll = appState.repoSelected;
   render();
@@ -927,6 +929,7 @@ export function down(screen) {
   // but aren't data rows) from the visible-row budget.
   const fullList = floatPinsToTop(applyAllFilters(sortRepos(appState.repos, appState.repoSort)));
   const total = fullList.length;
+  if (total === 0) { render(); return; }
   appState.repoSelected = Math.min(total - 1, appState.repoSelected + 1);
   const rawV = visibleRows(screen);
   const v = Math.max(1, rawV - pinnedHeaderCount(fullList, appState.repoScroll, rawV));
@@ -963,6 +966,7 @@ export function bottom(screen) {
   // over the trailing window, since scroll depends on v and vice versa).
   const fullList = floatPinsToTop(applyAllFilters(sortRepos(appState.repos, appState.repoSort)));
   const total = fullList.length;
+  if (total === 0) { render(); return; }
   appState.repoSelected = Math.max(0, total - 1);
   const rawV = visibleRows(screen);
   const v = Math.max(1, rawV - pinnedHeaderCount(fullList, Math.max(0, total - rawV), rawV));

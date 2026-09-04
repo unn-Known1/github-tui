@@ -1,7 +1,7 @@
 // Focus management system — tracks which widget has keyboard focus
 // and supports Tab/Shift+Tab navigation between focusable elements.
 
-import { appState, render } from './state.mjs';
+import { appState, render, isDashboardHidden } from './state.mjs';
 
 function localRepoName() {
   return appState.localRepo && appState.localRepoFilter
@@ -33,22 +33,24 @@ const FOCUS_ZONES = {
   0: [ // Dashboard
     // Tab order mirrors top-to-bottom reading of the dashboard:
     //   cards (top full-width row)
-    // → attention → activity (1st on the right column)
-    // → issues, prs (middle of right column)
-    // → topRepos, stale (left/right body sections)
-    // → custom → trending (anchored to the bottom of right column).
-    // Previously trending was 2nd in the list, which made the second Tab
-    // hop from "top of UI → bottom-right corner → top-of-right corner",
-    // a confusing jump.
+    // → attention → activity → issues → prs → stale → custom → trending
+    //   (right column, top to bottom — matches render order in dashboard.mjs:
+    //   NEEDS ATTENTION, RECENT ACTIVITY, RECENT ISSUES, RECENT PRs,
+    //   STALE REPOS, custom sections, TRENDING last)
+    // → topRepos → contributions (left column, top to bottom — Tab reaches
+    //   them after the right column; previously they sat between attention
+    //   and activity, breaking the right-column flow, and contributions sat
+    //   above topRepos though it renders below it).
     { id: 'cards', label: 'Stat Cards', canFocus: () => true },
     { id: 'attention', label: 'Needs Attention', canFocus: () => appState.dashboardAttentionItems?.length > 0 },
     { id: 'activity', label: 'Recent Activity', canFocus: () => hasDashboardItems(appState.events) },
     { id: 'issues', label: 'Recent Issues', canFocus: () => hasDashboardItems(appState.dashboardRecentIssues) },
     { id: 'prs', label: 'Recent PRs', canFocus: () => hasDashboardItems(appState.dashboardRecentPRs) },
-    { id: 'topRepos', label: 'Top Repos', canFocus: () => (appState.repos||[]).length > 0 },
     { id: 'stale', label: 'Stale Repos', canFocus: () => (appState.dashboardStaleCount||0) > 0 },
     { id: 'custom', label: 'Custom Sections', canFocus: () => appState.customSections?.some(s => s.items?.length > 0) },
     { id: 'trending', label: 'Trending', canFocus: () => hasDashboardItems(appState.trending) },
+    { id: 'topRepos', label: 'Top Repos', canFocus: () => (appState.repos||[]).length > 0 },
+    { id: 'contributions', label: 'Contributions', canFocus: () => !isDashboardHidden('contributions') && !!appState.dashboardContributions },
   ],
   1: [ // Repos
     { id: 'list', label: 'Repo List', canFocus: () => appState.repos?.length > 0 },
@@ -162,6 +164,15 @@ export function getFocusedSelection() {
     if (zone.id === 'cards') return { type: 'card', index: appState.dashboardSelectedCard };
     if (zone.id === 'trending') return { type: 'list', index: appState.trendingSelected, scroll: appState.trendingScroll };
     if (zone.id === 'attention') return { type: 'list', index: appState.dashboardAttentionSelected, scroll: appState.dashboardAttentionScroll };
+    if (zone.id === 'contributions') {
+      let idx = appState.dashboardContribSelected;
+      if (!Number.isFinite(idx)) {
+        const now = new Date();
+        const todayMs = Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate());
+        idx = 14 * 7 + new Date(todayMs).getUTCDay();
+      }
+      return { type: 'contrib', index: idx, filter: appState.dashboardContribDayFilter || null };
+    }
     if (zone.id === 'activity') return { type: 'list', index: appState.dashboardActivitySelected, scroll: appState.dashboardActivityScroll };
     if (zone.id === 'issues') return { type: 'list', index: appState.dashboardIssueSelected, scroll: appState.dashboardIssueScroll };
     if (zone.id === 'prs') return { type: 'list', index: appState.dashboardPRSelected, scroll: appState.dashboardPRScroll };

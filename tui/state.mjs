@@ -193,6 +193,9 @@ export function resetAccountState() {
   appState.dashboardRecentPRs = [];
   appState.dashboardAttentionItems = [];
   appState.dashboardContributions = null;
+  appState.dashboardContribSelected = null; // null = today (resolved by clampContribSelected)
+  appState.dashboardContribDayFilter = null; // 'YYYY-MM-DD' UTC or null — filters activity feed to one heatmap day
+  appState._contribGeom = null;
   appState.dashboardStarHistory = [];
   appState.dashboardLoaded = false;
   appState.dashboardWidgetErrorCount = 0;
@@ -212,6 +215,9 @@ export function resetAccountState() {
   appState.dashboardTopScroll = 0;
   appState.dashboardStaleSelected = 0;
   appState.dashboardStaleScroll = 0;
+  appState.dashboardContribSelected = null;
+  appState.dashboardContribDayFilter = null;
+  appState._contribGeom = null;
   appState._moreReposAvailable = false;
 }
 
@@ -499,7 +505,10 @@ export const appState = {
   dashboardLoadingWidgets: {},  // { [widgetName]: boolean } — per-widget loading state
   dashboardLoadingOwners: {},    // { [widgetName]: generation handle } — stale clears cannot hide newer work
   dashboardWidgetFetched: {},    // { [widgetName]: ms } — last successful widget response
-  dashboardContributions: null,  // { weeks: [[day, day, ...], ...] } heatmap data
+  dashboardContributions: null,  // { weeks, grid, max, total, commitCount, streak, best, gridStartMs, todayMs } heatmap data
+  dashboardContribSelected: null, // day index 0..104, null = today (resolved by clampContribSelected)
+  dashboardContribDayFilter: null, // 'YYYY-MM-DD' UTC filter for the activity feed, set via contributions Enter
+  _contribGeom: null, // heatmap grid geometry for mouse click→day mapping { gridY, cellW, leftX, weeks, heatRightX }
   dashboardRecentIssues: [],     // recently opened/updated issues across repos
   dashboardRecentPRs: [],        // recently opened/updated PRs across repos
   dashboardAttentionItems: [],   // compact actionable summary rows
@@ -716,6 +725,7 @@ const TOAST_ICONS = {
 };
 
 export function showMessage(text, type = 'info', durationMs = 3000) {
+  if (durationMs === 3000) durationMs = type === 'error' ? 6000 : type === 'warning' ? 5000 : 3000;
   appState.message = { text, type, icon: TOAST_ICONS[type] || 'ⓘ' };
   if (appState.messageTimer) clearTimeout(appState.messageTimer);
   appState.messageTimer = setTimeout(() => {

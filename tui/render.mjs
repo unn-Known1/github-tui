@@ -5,7 +5,7 @@
 import { appState, TABS, tabState, bindRender, checkLoadingWatchdog, getUnreadCount } from './state.mjs';
 import { Screen } from './screen.mjs';
 import { lastRateLimit, offlineState, getCacheStats } from './github.mjs';
-import { color } from './theme.mjs';
+import { color, isAccessible as _isA11y } from './theme.mjs';
 import { truncate, truncateToWidth, displayWidth } from './utils.mjs';
 import { readFileSync } from 'fs';
 import { fileURLToPath } from 'url';
@@ -142,13 +142,16 @@ const SPINNER = ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', 
 let spinnerIdx = 0;
 
 export function getSpinner() {
+  const a11y = typeof _isA11y === 'function' ? _isA11y() : !!appState.accessible;
+  if (a11y) return '[..]';
   spinnerIdx = (spinnerIdx + 1) % SPINNER.length;
   return SPINNER[spinnerIdx];
 }
 
 export function loadingIndicator(screen, x, y, label = 'loading', style) {
   const s = style || { fg: 'cyan' };
-  screen.writeStr(x, y, getSpinner() + ' ' + label, s);
+  const a11y = typeof _isA11y === 'function' ? _isA11y() : !!appState.accessible;
+  screen.writeStr(x, y, (a11y ? '[..] ' : getSpinner() + ' ') + label, s);
 }
 
 // Minimum terminal dimensions.
@@ -262,11 +265,15 @@ export function scrollIndicators(screen, topY, botY, scroll, total, pageSize) {
   const effectivePageSize = pageSize ?? (botY - topY + 1);
   const hasBelow = scroll + effectivePageSize < total;
   if (!hasAbove && !hasBelow) return;
+  const a11y = typeof _isA11y === 'function' ? _isA11y() : !!appState.accessible;
+  const up = a11y ? '^' : '↑';
+  const down = a11y ? 'v' : '↓';
+  const both = a11y ? '!' : '↕';
   if (topY === botY) {
-    screen.writeStr(W - 2, topY, hasAbove && hasBelow ? '↕' : hasAbove ? '↑' : '↓', { dim: true });
+    screen.writeStr(W - 2, topY, hasAbove && hasBelow ? both : hasAbove ? up : down, { dim: true });
   } else {
-    if (hasAbove) screen.writeStr(W - 2, topY, '↑', { dim: true });
-    if (hasBelow) screen.writeStr(W - 2, botY, '↓', { dim: true });
+    if (hasAbove) screen.writeStr(W - 2, topY, up, { dim: true });
+    if (hasBelow) screen.writeStr(W - 2, botY, down, { dim: true });
   }
 }
 
@@ -288,7 +295,8 @@ import { isCollapsed } from './state.mjs';
 
 export function collapsibleHeader(screen, x, y, section, label, hint) {
   const collapsed = isCollapsed(section);
-  const arrow = collapsed ? '▸' : '▾';
+  const a11y = typeof _isA11y === 'function' ? _isA11y() : !!appState.accessible;
+  const arrow = a11y ? (collapsed ? '>' : 'v') : (collapsed ? '▸' : '▾');
   const W = screen.width;
   const text = arrow + ' ' + label;
   screen.writeStr(x, y, text, { fg: 'cyan', bold: true });
@@ -319,10 +327,27 @@ function renderHeader(W) {
   checkLoadingWatchdog();
 
   // P0-2 a11y swap: replace unicode glyphs with bracketed ASCII labels.
-  const a11y = !!appState.accessible;
+  const a11y = typeof _isA11y === 'function' ? _isA11y() : !!appState.accessible;
   const titleBullet = a11y ? '*' : '◈';
   const offlineBanner = a11y ? '[OFFLINE]' : '⚠ OFFLINE';
   const starBanner = a11y ? '[NOT SIGNED IN]' : '⚠  not signed in';
+
+  // U4: reserve right-side widths BEFORE drawing left content.
+  // Priority (high→low): offline > login > rate > cache > tip.
+  // Under 80 cols hide cache stats; under 70 cols the rate bar collapses
+  // to compact `API n/n` text. Identical to before at >=120 cols.
+  const cacheStats = getCacheStats();
+  const showCache = cacheStats.entries > 0 && W >= 80;
+  const hasRate = lastRateLimit.remaining !== null && lastRateLimit.limit !== null;
+  const showRateFull = hasRate && W >= 70;
+
+  // Row 0 right item first: login.
+  const login = appState.token
+    ? (appState.user ? '@' + appState.user.login : (a11y ? '[loading]' : 'loading…'))
+    : null;
+  const loginW = login ? displayWidth(login) : 0;
+  const loginX = login ? Math.max(2, W - loginW - 2) : W - 2;
+  const rightReserved0 = login ? loginW + 2 : 0;
 
   // Row 0: app title + version (left)  |  user (right)
   screen.writeStr(2, 0, titleBullet, { fg: 'cyan', bold: true });
@@ -330,9 +355,12 @@ function renderHeader(W) {
   const version = 'v' + VERSION;
   screen.writeStr(15, 0, version, { fg: 'gray', dim: true });
 
-  // Offline banner — shows when offline.
+  // Offline banner — shows when offline, truncated before the login reserve.
   if (offlineState.isOffline) {
-    screen.writeStr(22, 0, offlineBanner, { fg: 'yellow', bold: true });
+    const maxOff = (login ? loginX : W - 2) - 22 - 1;
+    if (maxOff > 0) {
+      screen.writeStr(22, 0, truncateToWidth(offlineBanner, maxOff, ''), { fg: 'yellow', bold: true });
+    }
   }
 
   // User greeting on the right of the top line.
@@ -342,73 +370,93 @@ function renderHeader(W) {
   //   - neither                    → no greeting          (signed-out)
   // This avoids a blank header window during the seconds-long
   // getAuthenticatedUser() roundtrip on cold boot.
-  if (appState.token) {
-    const login = appState.user ? '@' + appState.user.login : (a11y ? '[loading]' : 'loading…');
+  if (login) {
     const style = appState.user ? { fg: 'cyan', bold: true } : { dim: true };
-    const x = Math.max(2, W - login.length - 2);
-    screen.writeStr(x, 0, login, style);
+    screen.writeStr(loginX, 0, login, style);
   }
 
-  // Row 1: tagline (left)  |  rate-limit + cache stats (right)
-  screen.writeStr(2, 1, 'A zero-dependency terminal client for GitHub', subtitleStyle);
-
-  // Cache stats on the right (small, dim).
-  const cacheStats = getCacheStats();
-  if (cacheStats.entries > 0) {
-    const cacheTxt = '[' + cacheStats.totalKB + 'KB]';
-    const cx = Math.max(2, W - cacheTxt.length - 2);
-    screen.writeStr(cx, 1, cacheTxt, { dim: true });
-  }
-
-  if (lastRateLimit.remaining !== null && lastRateLimit.limit !== null) {
+  // Row 1: pre-compute right-hand texts before drawing left content.
+  let cacheTxt = null;
+  if (showCache) cacheTxt = '[' + cacheStats.totalKB + 'KB]';
+  let rateTxt = null, rateStyle = null;
+  if (hasRate) {
     const r = lastRateLimit.remaining, lim = lastRateLimit.limit;
     const pct = lim > 0 ? r / lim : 0;
-    const barWidth = 10;
-    // rate-limit bar uses unicode block chars by default;
-    // in --accessible mode it's a plain `[######....]` bracketed bar.
-    let bar;
-    if (appState.accessible) {
-      bar = '[' + '#'.repeat(Math.round(pct * barWidth)) + '.'.repeat(barWidth - Math.round(pct * barWidth)) + ']';
-    } else {
-      const filled = Math.round(pct * barWidth);
-      bar = '█'.repeat(filled) + '░'.repeat(barWidth - filled);
-    }
-    const style = r === 0 ? { fg: 'red', bold: true }
+    rateStyle = r === 0 ? { fg: 'red', bold: true }
       : pct < 0.1 ? { fg: 'yellow', bold: true }
       : pct < 0.3 ? { fg: 'yellow' }
       : { fg: 'green' };
-    const txt = 'API ' + bar + ' ' + r + '/' + lim;
+    if (showRateFull) {
+      const barWidth = 10;
+      // rate-limit bar uses unicode block chars by default;
+      // in --accessible mode it's a plain `[######....]` bracketed bar.
+      let bar;
+      if (a11y) {
+        bar = '[' + '#'.repeat(Math.round(pct * barWidth)) + '.'.repeat(barWidth - Math.round(pct * barWidth)) + ']';
+      } else {
+        const filled = Math.round(pct * barWidth);
+        bar = '█'.repeat(filled) + '░'.repeat(barWidth - filled);
+      }
+      rateTxt = 'API ' + bar + ' ' + r + '/' + lim;
+    } else {
+      rateTxt = 'API ' + r + '/' + lim;
+    }
+  }
+  const showStar = !hasRate && !appState.token;
+  // Track rightReserved so the left tagline never overlaps right badges.
+  const rightReserved1 = (cacheTxt ? displayWidth(cacheTxt) + 2 : 0)
+    + (rateTxt ? displayWidth(rateTxt) + 3 : 0)
+    + (showStar ? displayWidth(starBanner) + 2 : 0);
+  // Row 1: tagline (left, truncated to fit)  |  rate-limit + cache stats (right)
+  const tagline = 'A zero-dependency terminal client for GitHub';
+  const tagAvail = Math.max(0, W - 2 - rightReserved1 - 1);
+  screen.writeStr(2, 1, truncateToWidth(tagline, tagAvail, ''), subtitleStyle);
+
+  // Cache stats on the right (small, dim).
+  if (cacheTxt) {
+    const cx = Math.max(2, W - displayWidth(cacheTxt) - 2);
+    screen.writeStr(cx, 1, cacheTxt, { dim: true });
+  }
+
+  if (rateTxt) {
     // Position before cache stats if both shown.
-    const cacheW = cacheStats.entries > 0 ? cacheStats.totalKB.toString().length + 8 : 0;
-    const x = Math.max(2, W - txt.length - cacheW - 3);
-    screen.writeStr(x, 1, txt, style);
-  } else if (!appState.token) {
+    const cacheW = showCache ? cacheStats.totalKB.toString().length + 8 : 0;
+    const x = Math.max(2, W - displayWidth(rateTxt) - cacheW - 3);
+    screen.writeStr(x, 1, rateTxt, rateStyle);
+  } else if (showStar) {
     // Show "not signed in" only when the token itself is absent.
     // Previously gated on !appState.user, which is null until
     // getAuthenticatedUser() resolves — leaving a visible race where
     // authenticated users saw the warning until the API call landed.
     // Token presence is the source of truth (Settings also gates on it).
-    const x = Math.max(2, W - starBanner.length - 2);
+    const x = Math.max(2, W - displayWidth(starBanner) - 2);
     screen.writeStr(x, 1, starBanner, { fg: 'yellow', bold: true });
   }
 
   // Row 2: breadcrumb + quick hint (left)  |  loading (right)
+  // Compute the right-hand width first so the breadcrumb cap never overlaps it.
+  let rightW2 = 0, loadingTxt = null, tipTxt = null;
+  if (appState.loading) {
+    loadingTxt = getSpinner() + ' loading';
+    rightW2 = displayWidth(loadingTxt) + 2;
+  } else if (appState.recentRepos.length > 0 && tabState.current === 0) {
+    tipTxt = 'Last visited: ' + appState.recentRepos[0].full_name;
+    rightW2 = displayWidth(tipTxt) + 2;
+  }
   const crumb = buildBreadcrumb();
   if (crumb.length > 0) {
-    screen.breadcrumb(2, 2, crumb, Math.floor(W * 0.6));
+    const cap = Math.max(0, Math.min(Math.floor(W * 0.6), W - 2 - rightW2 - 2));
+    screen.breadcrumb(2, 2, crumb, cap);
   }
-  if (appState.loading) {
-    const txt = getSpinner() + ' loading';
-    const x = Math.max(2, W - txt.length - 2);
-    screen.writeStr(x, 2, txt, { fg: 'cyan' });
-  } else {
-    // Show recent repo hint if any.
-    if (appState.recentRepos.length > 0 && tabState.current === 0) {
-      const last = appState.recentRepos[0];
-      const tip = 'Last visited: ' + last.full_name;
-      const x = Math.max(2, W - tip.length - 2);
-      screen.writeStr(x, 2, tip, { dim: true });
-    }
+  if (loadingTxt) {
+    const x = Math.max(2, W - displayWidth(loadingTxt) - 2);
+    screen.writeStr(x, 2, loadingTxt, { fg: 'cyan' });
+  } else if (tipTxt) {
+    // Truncate the tip so it never overpaints the breadcrumb.
+    const maxTip = Math.max(0, W - 2 - Math.min(Math.floor(W * 0.6), W - 4) - 3);
+    const shown = maxTip > 0 ? truncateToWidth(tipTxt, Math.min(displayWidth(tipTxt), Math.max(maxTip, Math.min(displayWidth(tipTxt), W - 4))), '') : tipTxt;
+    const x = Math.max(2, W - displayWidth(shown) - 2);
+    screen.writeStr(x, 2, shown, { dim: true });
   }
 
   // Row 3: separator
@@ -466,8 +514,10 @@ function renderTabStrip(y, W) {
     // Tab text: colored icon chip + dim label; the active tab renders on
     // the selection chip with a leading ▸ pointer. On narrow terminals the
     // icon is dropped per-tab so labels never clip into the divider.
+    // In --accessible mode icons are always skipped (same narrow path).
     const tx = bx + 1;
-    const kt = '[' + key + ']' + (tabW >= 14 ? ' ' + TAB_ICONS[i] : '');
+    const a11y = typeof _isA11y === 'function' ? _isA11y() : !!appState.accessible;
+    const kt = '[' + key + ']' + (tabW >= 14 && !a11y ? ' ' + TAB_ICONS[i] : '');
     const lt = ' ' + label;
     const text = isActive ? '▸ ' + kt + lt : kt + lt;
     if (isActive) {
