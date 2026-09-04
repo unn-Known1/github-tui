@@ -100,6 +100,8 @@ const CATEGORIES = [
     { key: 'M',         desc: 'Mark ALL as read' },
     { key: 'u',         desc: 'Unsubscribe (ignore future updates)' },
     { key: 'f',         desc: 'Cycle filter: all → unread → mentions → review' },
+    { key: 'Z',         desc: 'Unsnooze current thread' },
+    { key: 'v / V',     desc: 'Save / apply named filters' },
     { key: 'r',         desc: 'Refresh notifications' },
     { key: 'Enter / o', desc: 'Open detail popup (issues/PRs) or browser' },
   ]},
@@ -128,7 +130,7 @@ const CATEGORIES = [
     { key: 'Enter',     desc: 'Select / activate the highlighted item' },
     { key: 's / S',     desc: 'Star the github-tui repo (show support!)' },
     { key: 'o',         desc: 'Open github-tui repo in browser' },
-    { key: 'r',         desc: 'Refresh user data' },
+    { key: 'r',         desc: 'Refresh dashboard + user data' },
   ]},
   { id: 'confirm',    name: 'CONFIRM DIALOG',    shortcuts: [
     { key: 'y / Y / Enter', desc: 'Confirm a destructive action' },

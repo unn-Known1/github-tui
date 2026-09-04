@@ -221,6 +221,7 @@ Your current token scopes are shown in the Settings → System panel so you can 
 | `/` | Text search across title and repo name |
 | `G` | Toggle grouping by thread |
 | `z` | Snooze thread for 1 hour |
+| `Z` | Unsnooze current thread |
 | `v` / `V` | Save / apply named filters |
 | `Space` | Load more notifications (append next page) |
 | `r` | Refresh notifications |
@@ -233,7 +234,7 @@ Your current token scopes are shown in the Settings → System panel so you can 
 | `Enter` | Select / activate the highlighted item |
 | `s` / `S` | Star the github-tui repo (show support!) |
 | `o` | Open github-tui repo in browser |
-| `r` | Refresh user data |
+| `r` | Refresh dashboard + user data |
 
 ## 🗂️ Project Layout
 
@@ -340,7 +341,9 @@ Every tab module exports `render(screen, y, h)`, an optional `keys` map for tab-
 
 ### 5 · Settings
 - **Authentication:** Login (GitHub CLI) — uses `gh auth token` if `gh` is installed; Login (PAT) — paste a Personal Access Token; Logout.
-- **Actions:** Refresh Dashboard, Refresh User Data, Auto-Refresh, **Change Theme**, Clear Token File, Token display.
+- **Actions:** Refresh Dashboard, Refresh User Data (`r` refreshes both), Auto-Refresh (interval persists across restarts), **Change Theme**, Clear Token File, Token display.
+- **Integrations:** Enterprise host, profiles list/switch, organizations, config export/import.
+- **Data management:** Clear Local Data (bookmarks/pins/searches/filters/sections/cache) with per-store counts in the System panel.
 - **System panel:** app version (`0.7.1`), config dir, token file path, Node version, platform/arch, terminal size, **API remaining / limit / reset-in minutes**, **token scopes**, active keychain backend.
 
 ### 6 · Inbox

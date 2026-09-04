@@ -1355,8 +1355,14 @@ function dispatchSettingsClick(sx, sy) {
   }
 
   // Click on the star row → trigger starRepo() directly with full feedback.
+  // (Wide hit area; the same row is also in _settingsRowBounds as cursor 8.)
   const starBounds = appState._starRowBounds;
   if (starBounds && sy === starBounds.y && sx >= starBounds.x1 && sx < starBounds.x2) {
+    if (!settings.isSettingsCursorEnabled(8)) {
+      showMessage('That row is unavailable right now', 'warning');
+      render();
+      return;
+    }
     appState.settingsCursor = 8;
     import('./tabs/settings.mjs').then(m => m.starRepo());
     render();
@@ -1364,18 +1370,18 @@ function dispatchSettingsClick(sx, sy) {
   }
 
   // Click on settings menu row → select and activate.
+  // enter() already routes every cursor (7 → wipe confirm, 8 → star).
   const rowBounds = appState._settingsRowBounds;
   if (rowBounds) {
     for (const rb of rowBounds) {
       if (sy === rb.y) {
-        appState.settingsCursor = rb.cursor;
-        // Star row (cursor 7) is handled above via _starRowBounds for wider hit area,
-        // but also handle it here in case it falls through.
-        if (rb.cursor === 7) {
-          import('./tabs/settings.mjs').then(m => m.starRepo());
-        } else {
-          import('./tabs/settings.mjs').then(m => m.enter());
+        if (!settings.isSettingsCursorEnabled(rb.cursor)) {
+          showMessage('That row is unavailable right now', 'warning');
+          render();
+          return;
         }
+        appState.settingsCursor = rb.cursor;
+        import('./tabs/settings.mjs').then(m => m.enter());
         render();
         return;
       }

@@ -75,7 +75,7 @@ function startAutoRefresh() {
     try {
       await fn();
     } catch (e) { debugAsync('auto-refresh error:', e.message); }
-  }, appState.autoRefreshIntervalMs);
+  }, Math.max(1000, appState.autoRefreshIntervalMs || 300000));
 }
 
 // Export for settings to restart after interval change.

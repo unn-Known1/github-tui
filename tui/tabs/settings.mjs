@@ -10,6 +10,7 @@ import {
 import {
   getAuthenticatedUser, getUserRepositories,
   lastRateLimit, lastScopes, getCacheStats, clearAccountCache, offlineState, isStarred as checkStarred,
+  getGitHubHosts,
 } from '../github.mjs';
 import { startInput, registerInputHandler } from '../input.mjs';
 import { color, listThemes, getThemeName, setTheme } from '../theme.mjs';
@@ -17,6 +18,7 @@ import { refreshDashboard, loadDashboardWidgets } from './dashboard.mjs';
 import { loadUserData, loadAllReposBackground } from './repos.mjs';
 import { openUrl, truncateToWidth, displayWidth } from '../utils.mjs';
 import { starRepo as apiStarRepo } from '../github.mjs';
+import { loadBookmarks, loadPins, loadSavedSearches, loadInboxFilters, saveBookmarks, savePins, saveSavedSearches, saveInboxFilters } from '../store.mjs';
 import { execFile } from 'child_process';
 import { promisify } from 'util';
 const execFileAsync = promisify(execFile);
@@ -196,6 +198,15 @@ export function renderSettings(screen, y, h) {
       }
     }).catch(() => {});
   }
+  // S3: refresh star state on first Settings render per session (one-shot,
+  // same pattern as _ghAvailable above). When logged out, leave as-is.
+  if (appState._starChecked !== true && appState.token) {
+    appState._starChecked = true;
+    checkStarred(appState.token, 'unn-Known1', 'github-tui').then(v => {
+      appState._repoIsStarred = !!v;
+      render();
+    }).catch(() => {});
+  }
 
   screen.writeStr(2, y, 'SETTINGS', color('title') || { fg: 'white', bold: true });
   screen.hline(y + 1, '─', { dim: true });
@@ -307,11 +318,35 @@ export function renderSettings(screen, y, h) {
   }
   row++;  // blank line before next section
 
+  // INTEGRATIONS
+  sectionHeader(screen, 2, row, '◆ INTEGRATIONS', leftMaxW);
+  row += 2;
+  let _apiHostLabel = 'Configure API/web host';
+  try {
+    const _hosts = getGitHubHosts();
+    if (_hosts && _hosts.apiHost) _apiHostLabel = 'Current: ' + _hosts.apiHost;
+  } catch {}
+  const integrationsItems = [
+    { label: 'Enterprise Host', desc: _apiHostLabel, enabled: true, sel: appState.settingsCursor === 9 },
+    { label: 'List Profiles', desc: 'Show account/host profiles', enabled: true, sel: appState.settingsCursor === 10 },
+    { label: 'Switch Profile', desc: 'Change account/host', enabled: true, sel: appState.settingsCursor === 11 },
+    { label: 'Export Config', desc: 'Save portable JSON', enabled: true, sel: appState.settingsCursor === 12 },
+    { label: 'Import Config', desc: 'Load portable JSON', enabled: true, sel: appState.settingsCursor === 13 },
+  ];
+  for (const item of integrationsItems) {
+    if (row >= y + sectionH) break;
+    renderRow(screen, row, leftMaxW, item.label, item.desc, item.enabled, item.sel);
+    rowBounds.push({ cursor: integrationsItems.indexOf(item) + 9, y: row });
+    row++;
+  }
+  row += 2;
+
   // DANGER ZONE
   sectionHeader(screen, 2, row, '! DANGER ZONE', leftMaxW);
   row += 2;
   const dangerItems = [
-    { label: 'Clear Saved Token', desc: 'Wipe token from all storage',  enabled: isLoggedIn, sel: appState.settingsCursor === 7 },
+    { cursor: 7, label: 'Clear Saved Token', desc: 'Wipe token from all storage',  enabled: isLoggedIn, sel: appState.settingsCursor === 7 },
+    { cursor: 14, label: 'Clear Local Data', desc: 'Wipe bookmarks/pins/searches/filters', enabled: true, sel: appState.settingsCursor === 14 },
   ];
   for (const item of dangerItems) {
     if (row >= y + sectionH) break;
@@ -319,7 +354,7 @@ export function renderSettings(screen, y, h) {
       ? { bg: 'red', fg: 'white', bold: true }
       : (item.enabled ? { fg: 'red', bold: true } : { dim: true });
     renderRow(screen, row, leftMaxW, item.label, item.desc, item.enabled, item.sel, dangerStyle);
-    rowBounds.push({ cursor: 7, y: row });
+    rowBounds.push({ cursor: item.cursor, y: row });
     row++;
   }
 
@@ -391,7 +426,7 @@ export function renderSettings(screen, y, h) {
     screen.writeStr(21, creditY, '(https://github.com/unn-Known1)', { dim: true });
   }
 
-  appState._maxSettingsCursor = 8;
+  appState._maxSettingsCursor = 14;
 }
 
 function renderSystemPanel(screen, x, y, w, h, screenW) {
@@ -452,6 +487,14 @@ function buildSystemLines(screenW) {
     lines.push(['Cache', cs.entries + ' entries, ' + cs.totalKB + ' KB', { dim: true }]);
     lines.push(['Cache age', age, { dim: true }]);
   }
+  // S5: local store counts (sync cached reads)
+  try {
+    const nb = loadBookmarks().length;
+    const np = loadPins().length;
+    const ns = loadSavedSearches().length;
+    const nf = loadInboxFilters().length;
+    lines.push(['Saved', nb + ' bookmarks · ' + np + ' pins · ' + ns + ' searches · ' + nf + ' filters', { dim: true }]);
+  } catch {}
   if (appState.user?.login) {
     lines.push(['Account', '@' + appState.user.login, { fg: 'cyan', bold: true }]);
   }
@@ -510,7 +553,8 @@ export const keys = {
 const AUTH_ITEMS = [0, 1, 2];  // Login (CLI), Login (PAT), Logout
 const DATA_ITEMS = [3, 4, 5];  // Refresh Dashboard, Refresh User Data, Auto-Refresh
 const APPEARANCE_ITEMS = [6]; // Change Theme
-const DANGER_ITEMS = [7];  // Clear Token
+const INTEGRATIONS_ITEMS = [9, 10, 11, 12, 13]; // Enterprise host, profiles, config portability
+const DANGER_ITEMS = [7, 14];  // Clear Token, Clear Local Data
 const ABOUT_ITEMS = [8];  // Star repo
 
 export function isSettingsCursorEnabled(cursor, ghReady = appState._ghAvailable === true) {
@@ -525,7 +569,11 @@ export function isSettingsCursorEnabled(cursor, ghReady = appState._ghAvailable 
     return isLoggedIn;
   }
   if (APPEARANCE_ITEMS.includes(cursor)) return true;
-  if (DANGER_ITEMS.includes(cursor)) return isLoggedIn;
+  if (INTEGRATIONS_ITEMS.includes(cursor)) return true;
+  if (DANGER_ITEMS.includes(cursor)) {
+    if (cursor === 14) return true;
+    return isLoggedIn;
+  }
   if (ABOUT_ITEMS.includes(cursor)) return true;
   return false;
 }
@@ -546,7 +594,7 @@ export function up() {
   }
 }
 export function down() {
-  const max = appState._maxSettingsCursor != null ? appState._maxSettingsCursor : 8;
+  const max = appState._maxSettingsCursor != null ? appState._maxSettingsCursor : 14;
   let cur = appState.settingsCursor;
   while (cur < max) {
     cur++;
@@ -605,7 +653,10 @@ export function enter() {
         showMessage('Auto-refresh: every 1 min', 'success');
       } else {
         const curIdx = intervals.indexOf(appState.autoRefreshIntervalMs);
-        const nextIdx = curIdx + 1;
+        // S7 guard: indexOf returns -1 for nonstandard intervals (e.g. restored
+        // from session) — clamp to 0 so we never write interval 0 / hot-loop.
+        const safeIdx = curIdx < 0 ? 0 : curIdx;
+        const nextIdx = safeIdx + 1;
         if (nextIdx >= intervals.length) {
           appState.autoRefreshEnabled = false;
           showMessage('Auto-refresh: Off', 'info');
@@ -641,5 +692,50 @@ export function enter() {
     case 8:
       starRepo();
       break;
+    case 9:
+      startInput('API host (https://...): ', 'enterprise-host');
+      break;
+    case 10:
+      import('../profiles.mjs').then(m => showMessage(m.loadProfiles().map(p => p.id + ': ' + p.apiHost).join(' | ') || 'No profiles configured', 'info', 6000));
+      break;
+    case 11:
+      startInput('Profile id (re-login if account changes): ', 'profile-switch');
+      break;
+    case 12:
+      startInput('Export path: ', 'config-export');
+      break;
+    case 13:
+      startInput('Import path: ', 'config-import');
+      break;
+    case 14: {
+      const nb = loadBookmarks().length;
+      const np = loadPins().length;
+      const ns = loadSavedSearches().length;
+      const nf = loadInboxFilters().length;
+      confirm(
+        'Wipe ' + nb + ' bookmarks, ' + np + ' pins, ' + ns + ' searches, ' + nf + ' filters? API cache and token untouched.',
+        () => {
+          saveBookmarks([]);
+          savePins([]);
+          saveSavedSearches([]);
+          saveInboxFilters([]);
+          showMessage('Local data cleared', 'success');
+          render();
+        },
+        'Clear Local Data'
+      );
+      break;
+    }
   }
+}
+
+export function refreshAll() {
+  if (!appState.token) { showMessage('Login first (Settings → Login)', 'warning'); return; }
+  setManualLoading(true);
+  render();
+  Promise.allSettled([refreshDashboard(), import('./repos.mjs').then(m => m.loadUserData())]).finally(() => {
+    setManualLoading(false);
+    render();
+  });
+  showMessage('Refreshing dashboard + user data...', 'info');
 }

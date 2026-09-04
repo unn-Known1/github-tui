@@ -6,7 +6,7 @@ import {
   getNotifications, markNotificationRead,
   markAllNotificationsRead, unsubscribeNotification,
 } from '../github.mjs';
-import { relTime, notifTypeColor, notificationToHtmlUrl, openUrl, truncate } from '../utils.mjs';
+import { relTime, notifTypeColor, notifReasonLabel, notificationToHtmlUrl, openUrl, truncate } from '../utils.mjs';
 import { color } from '../theme.mjs';
 import { emptyState, loadingIndicator, scrollIndicators } from '../render.mjs';
 import { openDetail } from './detail.mjs';
@@ -15,9 +15,33 @@ import { startInput, registerInputHandler } from '../input.mjs';
 import { showError } from '../error-recovery.mjs';
 import { groupNotifications } from '../recommended-features.mjs';
 import { addInboxFilter } from '../store.mjs';
+import { CONFIG_DIR, readJson, writeJson } from '../config.mjs';
+import { join } from 'path';
 
 const FILTERS = ['all', 'unread', 'mentions', 'review'];
 const INBOX_PER_PAGE = 50;
+
+// I3: persisted snooze — map {id → untilTs} survives restarts via
+// ~/.github-tui/inbox-snoozed.json (same readJson/writeJson pattern as store.mjs).
+const SNOOZE_FILE = join(CONFIG_DIR, 'inbox-snoozed.json');
+let _snoozeLoaded = false;
+export function loadSnoozedState() {
+  try {
+    const raw = readJson(SNOOZE_FILE, {});
+    const now = Date.now();
+    const clean = {};
+    for (const [k, v] of Object.entries(raw || {})) if (v > now) clean[k] = v;
+    appState.inboxSnoozed = { ...(appState.inboxSnoozed || {}), ...clean };
+  } catch {}
+  _snoozeLoaded = true;
+}
+export function saveSnoozedState() {
+  try { writeJson(SNOOZE_FILE, appState.inboxSnoozed || {}); } catch {}
+}
+
+// I7: memoize filter pipeline (dashboard D14 pattern).
+let _filterCache = { key: null, result: null };
+export function bumpInboxFilterGen() { _filterCache.key = null; }
 
 export async function loadNotifications() {
   if (!appState.token) {
@@ -35,6 +59,7 @@ export async function loadNotifications() {
     appState.inboxHasMore = notes.length >= INBOX_PER_PAGE;
     appState.inboxScroll = 0;
     appState.selectedNotification = 0;
+    bumpInboxFilterGen();
     showMessage('Loaded ' + appState.notifications.length + ' notifications', 'success');
   } catch (e) {
     if (!isStale(gen)) showError(e.message || 'Unknown error', 'Load notifications', { retry: loadNotifications });
@@ -55,6 +80,7 @@ export async function loadMoreNotifications() {
     appState.notifications = [...appState.notifications, ...more];
     appState.inboxPage = page;
     appState.inboxHasMore = more.length >= INBOX_PER_PAGE;
+    bumpInboxFilterGen();
     normalizeInboxCursor();
   } catch (e) {
     if (!isStale(gen)) showMessage(e.message || 'Failed to load more', 'error');
@@ -63,12 +89,15 @@ export async function loadMoreNotifications() {
   if (!isStale(gen)) render();
 }
 
+// I1: single viewport truth — canonical renderer geometry (h - 7).
+export function inboxMaxRows(h) { return Math.max(1, (h || 24) - 7); }
+
 // Page keys move through the already-loaded, append-only list. If PageDown
 // reaches the end, fetches the next server page without replacing earlier rows.
 export function pageUp(screen) {
   const list = getFilteredNotifications();
   const maxRows = appState._inboxListBounds?.maxRows
-    || Math.max(1, (screen ? screen.height : process.stdout.rows || 24) - 15);
+    || inboxMaxRows(screen ? screen.height : process.stdout.rows || 24);
   appState.selectedNotification = Math.max(0, appState.selectedNotification - maxRows);
   normalizeInboxCursor(screen);
   render();
@@ -77,7 +106,7 @@ export function pageUp(screen) {
 export function pageDown(screen) {
   const list = getFilteredNotifications();
   const maxRows = appState._inboxListBounds?.maxRows
-    || Math.max(1, (screen ? screen.height : process.stdout.rows || 24) - 15);
+    || inboxMaxRows(screen ? screen.height : process.stdout.rows || 24);
   if (appState.selectedNotification >= Math.max(0, list.length - 1) && appState.inboxHasMore) {
     loadMoreNotifications();
     return;
@@ -88,6 +117,9 @@ export function pageDown(screen) {
 }
 
 export function getFilteredNotifications() {
+  if (!_snoozeLoaded) loadSnoozedState();
+  const key = [appState.notifications.length, appState.inboxFilter, appState.inboxTextFilter, appState.inboxHideProcessed, appState.localRepoFilter, appState.inboxGrouped, Object.keys(appState.inboxSnoozed || {}).length, (appState.notifications._mutGen || 0)].join('|');
+  if (_filterCache.key === key && _filterCache.result) return _filterCache.result;
   let list = appState.notifications;
   if (appState.inboxHideProcessed) list = list.filter(n => n.unread);
   if (appState.localRepo && appState.localRepoFilter) {
@@ -111,13 +143,16 @@ export function getFilteredNotifications() {
     });
   }
   if (appState.inboxGrouped) {
-    return groupNotifications(list).map(group => ({
+    const result = groupNotifications(list).map(group => ({
       ...(group.latest || {}),
       _groupCount: group.count,
       _groupUnread: group.unread,
       _groupNotifications: group.notifications,
     }));
+    _filterCache = { key, result };
+    return result;
   }
+  _filterCache = { key, result: list };
   return list;
 }
 
@@ -128,7 +163,7 @@ export function getSelectedNotification() {
 export function normalizeInboxCursor(screen = null) {
   const list = getFilteredNotifications();
   const maxRows = appState._inboxListBounds?.maxRows
-    || Math.max(1, (screen ? screen.height : process.stdout.rows || 24) - 15);
+    || inboxMaxRows(screen ? screen.height : process.stdout.rows || 24);
   appState.selectedNotification = Math.max(0, Math.min(appState.selectedNotification, Math.max(0, list.length - 1)));
   const maxScroll = Math.max(0, list.length - maxRows);
   appState.inboxScroll = Math.max(0, Math.min(appState.inboxScroll, maxScroll));
@@ -154,6 +189,7 @@ export async function markCurrentRead() {
   try {
     await markNotificationRead(appState.token, n.id);
     n.unread = false;
+    bumpInboxFilterGen();
     // Clamp both selection and scroll after the filtered row disappears.
     normalizeInboxCursor();
     showMessage('✓ Marked as read', 'success');
@@ -161,14 +197,57 @@ export async function markCurrentRead() {
   } catch (e) { showMessage('Failed: ' + e.message, 'error'); }
 }
 
+export async function markGroupRead() {
+  const list = getFilteredNotifications();
+  const n = list[appState.selectedNotification];
+  if (!n) return;
+  const members = n._groupNotifications && n._groupNotifications.length > 1 ? n._groupNotifications : [n];
+  confirm('Mark ' + members.length + ' thread(s) as read?', async () => {
+    try {
+      for (const m of members) {
+        if (m.unread) {
+          await markNotificationRead(appState.token, m.id);
+          m.unread = false;
+        }
+      }
+      bumpInboxFilterGen();
+      normalizeInboxCursor();
+      showMessage('✓ Marked ' + members.length + ' as read', 'success');
+      render();
+    } catch (e) { showMessage('Failed: ' + e.message, 'error'); }
+  }, 'Mark Group Read');
+}
+
 export function markAllRead() {
-  confirm('Mark ALL notifications as read?', async () => {
+  const list = getFilteredNotifications();
+  const snoozed = appState.inboxSnoozed || {};
+  const now = Date.now();
+  // Expand grouped pseudo-rows to members; belt-and-braces snooze exclusion
+  // (getFilteredNotifications already excludes active snoozes).
+  const seen = new Set();
+  const targets = [];
+  for (const n of list) {
+    const members = n._groupNotifications && n._groupNotifications.length ? n._groupNotifications : [n];
+    for (const m of members) {
+      if (seen.has(m.id)) continue;
+      seen.add(m.id);
+      if (!(snoozed[m.id] > now)) targets.push(m);
+    }
+  }
+  confirm('Mark ' + targets.length + ' visible as read? (filtered view; snoozed excluded)', async () => {
     if (!appState.token) return;
     try {
-      await markAllNotificationsRead(appState.token);
-      for (const n of appState.notifications) n.unread = false;
+      let count = 0;
+      for (const m of targets) {
+        if (m.unread) {
+          await markNotificationRead(appState.token, m.id);
+          m.unread = false;
+          count++;
+        }
+      }
+      bumpInboxFilterGen();
       normalizeInboxCursor();
-      showMessage('✓ All notifications marked as read', 'success');
+      showMessage('✓ Marked ' + count + ' as read', 'success');
       render();
     } catch (e) { showMessage('Failed: ' + e.message, 'error'); }
   }, 'Mark All Read');
@@ -182,6 +261,7 @@ export async function unsubscribeCurrent() {
     try {
       await unsubscribeNotification(appState.token, n.id);
       n.unread = false;
+      bumpInboxFilterGen();
       normalizeInboxCursor();
       showMessage('Unsubscribed from thread', 'success');
       render();
@@ -193,6 +273,7 @@ export function toggleGrouped() {
   appState.inboxGrouped = !appState.inboxGrouped;
   appState.inboxScroll = 0;
   appState.selectedNotification = 0;
+  bumpInboxFilterGen();
   normalizeInboxCursor();
   showMessage('Grouped notifications: ' + (appState.inboxGrouped ? 'on' : 'off'), 'info');
   render();
@@ -201,9 +282,27 @@ export function toggleGrouped() {
 export function snoozeCurrent() {
   const n = selected();
   if (!n) return;
-  appState.inboxSnoozed[n.id] = Date.now() + 60 * 60 * 1000;
+  // Snooze duration stays 1h; Z unsnoozes (duration choice is follow-up).
+  const ids = n._groupNotifications ? n._groupNotifications.map(g => g.id) : [n.id];
+  const now = Date.now() + 60 * 60 * 1000;
+  for (const id of ids) appState.inboxSnoozed[id] = now;
+  saveSnoozedState();
+  bumpInboxFilterGen();
   normalizeInboxCursor();
   showMessage('Snoozed notification for 1 hour', 'info');
+  render();
+}
+
+export function unsnoozeCurrent() {
+  const n = selected();
+  if (!n) return;
+  const ids = n._groupNotifications ? n._groupNotifications.map(g => g.id) : [n.id];
+  let cleared = 0;
+  for (const id of ids) if (appState.inboxSnoozed && appState.inboxSnoozed[id]) { delete appState.inboxSnoozed[id]; cleared++; }
+  saveSnoozedState();
+  bumpInboxFilterGen();
+  normalizeInboxCursor();
+  showMessage(cleared ? 'Unsnoozed ' + cleared + ' thread(s)' : 'Current thread is not snoozed', cleared ? 'success' : 'info');
   render();
 }
 
@@ -211,6 +310,7 @@ export function toggleHideProcessed() {
   appState.inboxHideProcessed = !appState.inboxHideProcessed;
   appState.inboxScroll = 0;
   appState.selectedNotification = 0;
+  bumpInboxFilterGen();
   normalizeInboxCursor();
   showMessage('Hide processed: ' + (appState.inboxHideProcessed ? 'on' : 'off'), 'info');
   render();
@@ -221,6 +321,7 @@ export function cycleFilter() {
   appState.inboxFilter = FILTERS[(i + 1) % FILTERS.length];
   appState.inboxScroll = 0;
   appState.selectedNotification = 0;
+  bumpInboxFilterGen();
   normalizeInboxCursor();
   showMessage('Filter: ' + appState.inboxFilter, 'info');
   render();
@@ -383,7 +484,7 @@ export function renderInbox(screen, y, h) {
   screen.writeStr(Math.min(listW - 4, 68), headerY, 'WHEN', { fg: 'cyan', bold: true });
   screen.hline(headerY + 1, '─', { dim: true });
 
-  const maxRows = Math.max(1, h - 7);
+  const maxRows = inboxMaxRows(h);
   // Self-heal stale selection/scroll: a shorter list can arrive while this
   // tab is inactive (dashboard auto-refresh replaces appState.notifications
   // without resetting inboxScroll). Without this a leftover scroll would
@@ -433,7 +534,7 @@ export function renderInbox(screen, y, h) {
       sel ? color('selection') : (unread ? color('listItem') : color('listItemDim')));
 
     screen.writeStr(Math.min(listW - 12, 56), row,
-      truncate(n.reason || '?', 11), sel ? color('selection') : color('dim'));
+      truncate(notifReasonLabel(n.reason), 11), sel ? color('selection') : color('dim'));
     const when = n.updated_at ? relTime(n.updated_at) : '';
     screen.writeStr(Math.min(listW - 4, 68), row, when, sel ? color('selection') : color('date'));
   }
@@ -482,6 +583,7 @@ registerInputHandler('inbox-filter-apply', (value) => {
   appState.inboxGrouped = !!filter.inboxGrouped;
   appState.selectedNotification = 0;
   appState.inboxScroll = 0;
+  bumpInboxFilterGen();
   normalizeInboxCursor();
   showMessage('Applied Inbox filter: ' + item.label, 'success');
   render();
@@ -491,6 +593,7 @@ registerInputHandler('inbox-filter', (value) => {
   appState.inboxTextFilter = (value || '').trim();
   appState.inboxScroll = 0;
   appState.selectedNotification = 0;
+  bumpInboxFilterGen();
   normalizeInboxCursor();
   showMessage(appState.inboxTextFilter
     ? 'Filtering: "' + appState.inboxTextFilter + '"'
@@ -502,13 +605,16 @@ export const keys = {
   // Reopening '/' prefills the active query so a stale search is visible in
   // the prompt and easy to edit/clear (Enter with an empty buffer resets it).
   '/': () => startInput('Search notifications: ', 'inbox-filter', false, appState.inboxTextFilter || ''),
-  'm': markCurrentRead,
+  // I5-part: no collapsible headers here — global collapse-all (Z/X) is
+  // intentionally shadowed; Z reclaims unsnooze-current (pairs with I3).
+  'm': () => { const n = getSelectedNotification(); if (n && n._groupCount > 1) markGroupRead(); else markCurrentRead(); },
   'M': markAllRead,
   'u': unsubscribeCurrent,
   'f': cycleFilter,
   'H': toggleHideProcessed,
   'G': toggleGrouped,
   'z': snoozeCurrent,
+  'Z': unsnoozeCurrent,
   'v': saveCurrentFilter,
   'V': applySavedFilter,
 };
@@ -516,7 +622,8 @@ export const keys = {
 export function bottom(screen) {
   const list = getFilteredNotifications();
   appState.selectedNotification = Math.max(0, list.length - 1);
-  const maxVisible = Math.max(1, (screen ? screen.height : process.stdout.rows || 24) - 12);
+  const maxVisible = appState._inboxListBounds?.maxRows
+    || inboxMaxRows(screen ? screen.height : process.stdout.rows || 24);
   appState.inboxScroll = Math.max(0, list.length - maxVisible);
   render();
 }
@@ -524,7 +631,8 @@ export function bottom(screen) {
 export function up(screen) {
   const list = getFilteredNotifications();
   if (list.length === 0) return;
-  const maxVisible = Math.max(1, (screen ? screen.height : process.stdout.rows || 24) - 15);
+  const maxVisible = appState._inboxListBounds?.maxRows
+    || inboxMaxRows(screen ? screen.height : process.stdout.rows || 24);
   appState.selectedNotification = Math.max(0, appState.selectedNotification - 1);
   // Scroll up to keep selection visible
   if (appState.selectedNotification < appState.inboxScroll) {
@@ -535,7 +643,8 @@ export function up(screen) {
 export function down(screen) {
   const list = getFilteredNotifications();
   if (list.length === 0) return;
-  const maxVisible = Math.max(1, (screen ? screen.height : process.stdout.rows || 24) - 15);
+  const maxVisible = appState._inboxListBounds?.maxRows
+    || inboxMaxRows(screen ? screen.height : process.stdout.rows || 24);
   appState.selectedNotification = Math.min(list.length - 1, appState.selectedNotification + 1);
   // Scroll down to keep selection visible
   if (appState.selectedNotification >= appState.inboxScroll + maxVisible) {

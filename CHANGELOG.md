@@ -25,6 +25,24 @@ All notable changes to this project will be documented in this file.
 - Changed: per-pane Issues/PRs filters (`repoIssuesFilter`/`repoPRsFilter`) plus `exploreLandingScroll`, all reset on account switch.
 - Verification: new `tests/explore.test.mjs` covers forks sort, filter labels, landing caps/merge order, and state defaults.
 
+### Settings
+- Fixed danger-row mouse routing: Clear Saved Token opens the wipe confirm instead of starring the repo.
+- Mouse clicks respect disabled-row guards instead of parking the cursor on disabled rows.
+- Star row refreshes its state on first Settings open per session instead of always showing unstarred.
+- Added INTEGRATIONS rows: Enterprise host, profiles list/switch, config export/import.
+- Added data management: System panel shows store counts (bookmarks/pins/searches/filters) with a Clear Local Data row.
+- Persisted auto-refresh enabled/interval in session storage with validation; `r` on Settings refreshes dashboard + user data.
+- Hardened auto-refresh cycling: non-list intervals fall back safely and the timer is clamped to a minimum of 1000ms.
+
+### Inbox
+- Unified list viewport math behind a single helper so keyboard, mouse, and render agree on page size.
+- Added group-level triage: mark-group-read over grouped threads with a count toast.
+- Persisted snooze state across restarts with expiry pruning; added `Z` unsnooze-current.
+- Scoped `M` mark-all to the visible filtered view (excludes snoozed threads) with an explicit confirm.
+- Reclaimed `Z` for unsnooze-current (`z` still snoozes); documented `X` as no-op here.
+- Added friendly reason labels (@mentioned/review/assigned/comment/subscribed…) in place of raw API strings.
+- Memoized the filter/group pipeline so scroll and render reuse the cached result until inputs change.
+
 ## [0.7.1] - 2026-09-02
 
 ### Added

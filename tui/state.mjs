@@ -1085,6 +1085,8 @@ export function saveSession() {
       searchQuery: appState.searchQuery,
       searchType: appState.searchType,
       reposView: appState.reposView,
+      autoRefreshEnabled: appState.autoRefreshEnabled,
+      autoRefreshIntervalMs: appState.autoRefreshIntervalMs,
       // Persist filter text too (Fix #9): without this the user comes back
       // and silently sees filtered results with no visual chip indicator.
       inboxTextFilter: appState.inboxTextFilter,
@@ -1114,6 +1116,8 @@ export function loadSession() {
     if (s.searchQuery) appState.searchQuery = s.searchQuery;
     if (s.searchType) appState.searchType = s.searchType;
     if (s.reposView) appState.reposView = s.reposView;
+    if (typeof s.autoRefreshEnabled === 'boolean') appState.autoRefreshEnabled = s.autoRefreshEnabled;
+    if (Number.isFinite(s.autoRefreshIntervalMs)) appState.autoRefreshIntervalMs = Math.min(3600000, Math.max(60000, s.autoRefreshIntervalMs));
     if (typeof s.inboxTextFilter === 'string') appState.inboxTextFilter = s.inboxTextFilter;
     if (typeof s.lastSeenVersion === 'string') appState.lastSeenVersion = s.lastSeenVersion;
   } catch {}

@@ -469,3 +469,20 @@ export function sectionHeader(screen, x, y, text, hint) {
     if (hx > x + text.length + 4) screen.writeStr(hx, y, hint, { dim: true });
   }
 }
+
+export function notifReasonLabel(reason) {
+  switch (reason) {
+    case 'mention': return '@mentioned';
+    case 'review_requested': return 'review';
+    case 'assign': return 'assigned';
+    case 'author': return 'own thread';
+    case 'comment': return 'comment';
+    case 'subscribed': return 'subscribed';
+    case 'team_mention': return 'team @';
+    case 'state_change': return 'state';
+    case 'manual': return 'manual';
+    case 'invitation': return 'invite';
+    case 'security_alert': return 'security';
+    default: return reason || '?';
+  }
+}

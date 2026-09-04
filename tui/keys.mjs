@@ -237,6 +237,8 @@ function refreshCurrent() {
     else actions.loadActionsRepos();
   } else if (t === 4) {
     inbox.loadNotifications();
+  } else if (t === 5) {
+    settings.refreshAll();
   }
 }
 
@@ -575,6 +577,15 @@ export function handleKey(key) {
       return;
     }
     case 'Z': {
+      // Inbox binds 'Z' to unsnooze (advertised in its footer hint); the
+      // global collapse-all used to swallow it. Other tabs keep the
+      // generic collapse-all.
+      if (tabState.current === 4) {
+        Promise.resolve()
+          .then(() => inbox.keys.Z())
+          .catch((e) => showMessage((e && e.message) || 'Action failed', 'error'));
+        return;
+      }
       // in the files pane, Z triggers a zipball download; everywhere
       // else it collapses all collapsible sections. Explicit dispatch.
       if (tabState.current === 2 && appState.analyzeView === 'details' && appState.detailsPane === 'files') {
