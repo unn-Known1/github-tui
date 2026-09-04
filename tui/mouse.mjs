@@ -1058,12 +1058,22 @@ function dispatchReposClick(sx, sy) {
 
   const hit = reposItemAt(sx, sy);
   if (!hit) return;
+  // Single click selects without moving the viewport: the clicked row was
+  // painted, so it is already visible — re-centering scroll here made every
+  // click jump the list. Only follow when the hit lies outside the visible
+  // window (stale-scroll safety), mirroring the keyboard nav guards.
+  const screen = getScreen();
+  const v = screen ? repos.visibleRows(screen) : 10;
   if (appState.reposView === 'starred') {
-    appState.starredScroll = Math.max(0, hit.index - 5);
     appState.starredSelected = hit.index;
+    if (hit.index < appState.starredScroll || hit.index >= appState.starredScroll + v) {
+      appState.starredScroll = Math.max(0, hit.index - 5);
+    }
   } else {
-    appState.repoScroll = Math.max(0, hit.index - 5);
     appState.repoSelected = hit.index;
+    if (hit.index < appState.repoScroll || hit.index >= appState.repoScroll + v) {
+      appState.repoScroll = Math.max(0, hit.index - 5);
+    }
   }
   render();
 }
