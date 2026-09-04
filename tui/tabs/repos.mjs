@@ -125,11 +125,12 @@ export async function loadUserData({ loadDashboard = true, awaitBackground = fal
   } catch (e) {
     if (!isStale(gen, 'repos')) {
       const msg = (e && e.message) || '';
-      if (/401|Bad credentials|Unauthorized/i.test(msg)) {
+      const status = e && e.status;
+      if (status === 401 || /401|Bad credentials|Unauthorized/i.test(msg)) {
         resetAccountState();
         removeToken();
         setTab(5);
-        showError('Token rejected', 'Authentication', { retry: loadUserData });
+        showError('Token expired or invalid — please log in again', 'Authentication', { retry: loadUserData });
       } else {
         showError(msg || 'Unknown error', 'Load repos', { retry: loadUserData });
       }

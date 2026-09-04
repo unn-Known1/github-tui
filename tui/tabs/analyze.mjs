@@ -2,7 +2,7 @@
 // toggle Issues/PRs sub-panes, view README, hop to Forks sub-view.
 // v0.5+ polish: pushes to recent-repos list, cleaner section headings.
 
-import { appState, render, startAsync, isStale, showMessage, pushRecentRepo, beginLoading, finishLoading } from '../state.mjs';
+import { appState, render, startAsync, isStale, showMessage, pushRecentRepo, beginLoading, finishLoading, resetAccountState, setTab } from '../state.mjs';
 import {
   getRepositoryDetails,
   getRepositoryLanguages, getRepositoryContributors,
@@ -10,6 +10,7 @@ import {
   getRepoCheckRuns, getRepoDependabotAlerts, getBranchProtection,
 } from '../github.mjs';
 import { startInput } from '../input.mjs';
+import { removeToken } from '../config.mjs';
 import { shortNum, truncate, truncateToWidth, displayWidth, padRight, openUrl, sectionHeader, formatBytes, relTime, wrapText } from '../utils.mjs';
 import { color } from '../theme.mjs';
 import { loadForks, loadMoreForks, renderForks, toggleForkSort } from './forks.mjs';
@@ -316,7 +317,18 @@ export async function loadRepoDetails(owner, name) {
       render();
     }).catch(() => {});
   } catch (e) {
-    if (!isStale(gen, 'analyze-details')) showMessage(e.message || 'Failed to load repository', 'error');
+    if (!isStale(gen, 'analyze-details')) {
+      const msg = (e && e.message) || '';
+      const status = e && e.status;
+      if (status === 401 || /401|Bad credentials|Unauthorized/i.test(msg)) {
+        resetAccountState();
+        removeToken();
+        setTab(5);
+        showMessage('Token expired or invalid — please log in again in Settings', 'error', 8000);
+      } else {
+        showMessage(msg || 'Failed to load repository', 'error');
+      }
+    }
   }
   finishLoading(gen);
   if (!isStale(gen, 'analyze-details')) render();
