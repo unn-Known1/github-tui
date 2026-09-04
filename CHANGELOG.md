@@ -43,6 +43,25 @@ All notable changes to this project will be documented in this file.
 - Added friendly reason labels (@mentioned/review/assigned/comment/subscribed…) in place of raw API strings.
 - Memoized the filter/group pipeline so scroll and render reuse the cached result until inputs change.
 
+### Repos
+- R1: Registered `repos.load-more` palette action wrapping the `l` handler and fixed the pagination-cap toast plus help.
+- R2: Clamped the filter-chip row to the star button with `+N` overflow and checked star bounds before chips.
+- R3: Made PgUp/PgDn pure viewport moves in own and starred views with `Space` as the sole loader (append-only).
+- R4: Gave starred ops their own async scope so background pagination and starred paging no longer abort each other.
+- R5: Added bounded page prefetch, throttled derived recompute, and scroll-idle enrichment for visible rows.
+- R6: Counted pinned-section header rows in viewport math so nav never parks under a header.
+- R7: Added `parseRepoQuery` qualifiers (`stars:`/`forks:`/`issues:` with `>`/`>=`/`<`/`<=`/`=` default `>=`, `lang:`/`language:`) ANDed with substring text.
+
+### Actions
+- A1: Fixed runs footer to `[Enter] Expand [o] Browser [r] Re-run [x] Cancel [Esc] Back` and split help rows per view.
+- A2: Documented `F`/`d`/`l`/`R` in help and both footers (failures, dispatch, log, rescan).
+- A3: Resolved run actions against the Enter-time repo snapshot with a rerun confirm and collapsed runs on filter change.
+- A4: Resolved failure-Enter through the filtered list via repo `full_name` lookup.
+- A5: Made failure-list `down()` follow selection with `selected - maxVisible + 1` scroll (added `followScroll`).
+- A6: Preserved the expanded run (plus jobs/steps cache) across reloads and auto-refresh ticks.
+- A7: Added live scan progress, a first-scan cap with `+N unscanned` note, and `x` cancel for workflow discovery.
+- A8: Made the failure queue concurrent, push-sorted before slicing, with honest `Scanned 20/N` coverage toasts.
+
 ## [0.7.1] - 2026-09-02
 
 ### Added

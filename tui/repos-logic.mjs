@@ -25,6 +25,47 @@ export function sortRepos(repos, sort) {
   return sorted;
 }
 
+export function parseRepoQuery(q) {
+  const out = { text: '', stars: null, forks: null, issues: null, lang: null };
+  if (q == null) return out;
+  const s = String(q);
+  if (!s.trim()) return out;
+  const tokens = s.split(/\s+/).filter(t => t.length > 0);
+  const rest = [];
+  for (const tok of tokens) {
+    let m = tok.match(/^(stars|forks|issues):(>=?|<=?|=)?(\d+)$/i);
+    if (m) {
+      const key = m[1].toLowerCase();
+      const op = m[2] || '>=';
+      const n = Number(m[3]);
+      const val = { op, n };
+      if (key === 'stars') out.stars = val;
+      else if (key === 'forks') out.forks = val;
+      else if (key === 'issues') out.issues = val;
+      continue;
+    }
+    m = tok.match(/^lang(?:uage)?:(.+)$/i);
+    if (m) {
+      out.lang = m[1];
+      continue;
+    }
+    rest.push(tok);
+  }
+  out.text = rest.join(' ');
+  return out;
+}
+
+function _cmpCount(v, op, n) {
+  switch (op) {
+    case '>': return v > n;
+    case '>=': return v >= n;
+    case '<': return v < n;
+    case '<=': return v <= n;
+    case '=': return v === n;
+    default: return v >= n;
+  }
+}
+
 export function applyAllFilters(repos, filters) {
   let out = [...repos];
   const { typeFilter, langFilter, staleOnly, textFilter } = filters;
@@ -48,12 +89,29 @@ export function applyAllFilters(repos, filters) {
   }
 
   if (textFilter) {
-    const q = textFilter.toLowerCase();
-    out = out.filter(r =>
-      (r.name||'').toLowerCase().includes(q) ||
-      (r.description||'').toLowerCase().includes(q) ||
-      (r.language||'').toLowerCase().includes(q)
-    );
+    const parsed = parseRepoQuery(textFilter);
+    const hasQualifiers = !!(parsed.stars || parsed.forks || parsed.issues || parsed.lang);
+    if (!hasQualifiers) {
+      const q = textFilter.toLowerCase();
+      out = out.filter(r =>
+        (r.name||'').toLowerCase().includes(q) ||
+        (r.description||'').toLowerCase().includes(q) ||
+        (r.language||'').toLowerCase().includes(q)
+      );
+    } else {
+      if (parsed.stars) out = out.filter(r => _cmpCount(r.stargazers_count || 0, parsed.stars.op, parsed.stars.n));
+      if (parsed.forks) out = out.filter(r => _cmpCount(r.forks_count || 0, parsed.forks.op, parsed.forks.n));
+      if (parsed.issues) out = out.filter(r => _cmpCount(r.open_issues_count || 0, parsed.issues.op, parsed.issues.n));
+      if (parsed.lang) out = out.filter(r => (r.language || '') === parsed.lang);
+      if (parsed.text) {
+        const q = parsed.text.toLowerCase();
+        out = out.filter(r =>
+          (r.name||'').toLowerCase().includes(q) ||
+          (r.description||'').toLowerCase().includes(q) ||
+          (r.language||'').toLowerCase().includes(q)
+        );
+      }
+    }
   }
 
   return out;

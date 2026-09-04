@@ -622,9 +622,9 @@ function statusLine() {
     }
     case 3: {
       if (appState.actionsView === 'runs') {
-        return ' [Enter] Open in browser' + sep + '[r] Re-run' + sep + '[x] Cancel' + sep + '[Esc] Back' + sep + '[?] Help';
+        return ' [Enter] Expand' + sep + '[o] Browser' + sep + '[r] Re-run' + sep + '[x] Cancel' + sep + '[l] Log' + sep + '[d] Dispatch' + sep + '[Esc] Back' + sep + '[?] Help';
       }
-      return ' [↑↓jk] Nav' + sep + '[Enter] View runs' + sep + '[?] Help';
+      return ' [↑↓jk] Nav' + sep + '[Enter] View runs' + sep + '[/] Filter' + sep + '[F] Failures' + sep + '[R] Rescan' + sep + '[?] Help';
     }
     case 4: return ' [↑↓jk] Nav' + sep + '[Enter] Open' + sep + '[m] Read' + sep + '[M] All' + sep + '[f] Filter' + sep + '[H] Hide processed' + sep + '[u] Unsubscribe';
     case 5: return ' [↑↓] Nav' + sep + '[Enter] Select' + sep + '[s] Star repo' + sep + '[c] Clear account cache' + sep + '[?] Help';

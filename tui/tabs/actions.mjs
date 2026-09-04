@@ -58,6 +58,13 @@ function stepStatusIcon(step) {
 
 const WORKFLOW_SCAN_CONCURRENCY = 5; // bounded probes per repo, like fork compares
 
+export function followScroll(selected, scroll, maxVisible) { if (selected < scroll) return selected; if (selected >= scroll + maxVisible) return selected - maxVisible + 1; return scroll; }
+
+function activeRepo() { const snap = appState.actionsActiveRepo; if (snap) { const hit = (appState.actionsRepos || []).find(r => r.full_name === snap); if (hit) return hit; } const repos = getFilteredRepos(); return repos[appState.actionsRepoSelected] || null; }
+
+let _scanCancelled = false;
+export function cancelWorkflowScan() { _scanCancelled = true; }
+
 export async function loadActionsRepos() {
   if (!appState.token) return;
   // Copy whatever's in appState.repos — never early-return on empty, since
@@ -84,10 +91,17 @@ export async function loadActionsRepos() {
     appState.actionsRepos = filterReposByWorkflowState(appState.repos || []);
     const total = appState.repos.length;
     const shown = appState.actionsRepos.length;
-    showMessage(shown > 0
-      ? 'Showing ' + shown + ' of ' + total + ' repos with workflows'
-      : 'No GitHub workflows found in any of your ' + total + ' repos',
-      shown > 0 ? 'success' : 'info', 5000);
+    const unscanned = Math.max(0, total - 200);
+    if (_scanCancelled) {
+      showMessage('Scan cancelled — partial results', 'warning', 5000);
+    } else if (total > 200 && shown > 0) {
+      showMessage('Showing ' + shown + ' of ' + total + ' repos with workflows (first 200 scanned)', 'success', 5000);
+    } else {
+      showMessage(shown > 0
+        ? 'Showing ' + shown + ' of ' + total + ' repos with workflows'
+        : 'No GitHub workflows found in any of your ' + total + ' repos',
+        shown > 0 ? 'success' : 'info', 5000);
+    }
     render();
   }
 }
@@ -98,26 +112,35 @@ export async function loadActionsRepos() {
 // couldn't inspect.
 async function scanReposForWorkflows(gen) {
   const repos = Array.isArray(appState.repos) ? appState.repos : [];
+  const CAP = 200;
+  const capped = repos.slice(0, CAP);
   const noWorkflow = new Set();
-  const queue = repos.slice();
+  const queue = capped.slice();
+  _scanCancelled = false;
+  let done = 0;
   const worker = async () => {
-    while (queue.length > 0 && !isStale(gen)) {
+    while (queue.length > 0 && !isStale(gen) && !_scanCancelled) {
       const r = queue.shift();
-      if (!r || !r.full_name) continue;
+      if (!r || !r.full_name) { done++; if (done % 5 === 0) { appState.actionsScanProgress = { done, total: queue.length + done }; render(); } continue; }
       const [owner, name] = r.full_name.split('/');
-      if (!owner || !name) continue;
+      if (!owner || !name) { done++; if (done % 5 === 0) { appState.actionsScanProgress = { done, total: queue.length + done }; render(); } continue; }
       try {
         const result = await getWorkflows(appState.token, owner, name, gen.signal);
         const workflows = Array.isArray(result) ? result : (result?.workflows || []);
         if (workflows.length === 0) noWorkflow.add(r.full_name);
       } catch { /* keep repo visible — could not determine */ }
+      done++;
+      if (done % 5 === 0) { appState.actionsScanProgress = { done, total: queue.length + done }; render(); }
     }
   };
   const count = Math.min(WORKFLOW_SCAN_CONCURRENCY, Math.max(1, queue.length));
   await Promise.all(Array.from({ length: count }, worker));
-  if (!isStale(gen)) {
+  appState.actionsScanProgress = null;
+  if (!isStale(gen) && !_scanCancelled) {
     appState.actionsNoWorkflowRepos = noWorkflow;
     appState.actionsScanDone = true;
+  } else if (!isStale(gen) && _scanCancelled) {
+    appState.actionsNoWorkflowRepos = noWorkflow;
   }
 }
 
@@ -131,8 +154,7 @@ export async function rescanWorkflowRepos() {
 }
 
 export async function openWorkflowLog(jobId) {
-  const repos = getFilteredRepos();
-  const repo = repos[appState.actionsRepoSelected];
+  const repo = activeRepo();
   if (!repo || !jobId) return;
   const [owner, name] = repo.full_name.split('/');
   const gen = startAsync('actions-log');
@@ -156,8 +178,7 @@ export async function openWorkflowLog(jobId) {
 }
 
 export async function startWorkflowDispatch() {
-  const repos = getFilteredRepos();
-  const repo = repos[appState.actionsRepoSelected];
+  const repo = activeRepo();
   if (!repo || !appState.token) return;
   const [owner, name] = repo.full_name.split('/');
   const gen = startAsync('actions-dispatch-workflows');
@@ -244,18 +265,30 @@ export async function loadFailureQueue() {
   try {
     // Keep the aggregate deliberately bounded to protect rate limits. Users
     // can still drill into the normal per-repository run view.
-    for (const repo of appState.actionsRepos.slice(0, 20)) {
-      if (isStale(gen)) return;
-      const [owner, name] = (repo.full_name || '').split('/');
-      if (!owner || !name) continue;
-      try {
-        const result = await getWorkflowRuns(appState.token, owner, name, 1, 10, gen.signal);
-        groups.push({ repo: repo.full_name, runs: result?.workflow_runs || [] });
-      } catch { /* preserve partial aggregate */ }
-    }
+    // Sort candidates by recency so the bounded slice covers the most
+    // likely-active repos first.
+    const candidates = [...appState.actionsRepos].sort((a,b) => Date.parse(b.pushed_at||b.updated_at||0) - Date.parse(a.pushed_at||a.updated_at||0)).slice(0, 20);
+    const queue = candidates.slice();
+    const worker = async () => {
+      while (queue.length > 0) {
+        if (isStale(gen)) return;
+        const repo = queue.shift();
+        if (!repo) continue;
+        const [owner, name] = (repo.full_name || '').split('/');
+        if (!owner || !name) continue;
+        try {
+          const result = await getWorkflowRuns(appState.token, owner, name, 1, 10, gen.signal);
+          groups.push({ repo: repo.full_name, runs: result?.workflow_runs || [] });
+        } catch { /* preserve partial aggregate */ }
+      }
+    };
+    const count = Math.min(5, Math.max(1, queue.length));
+    await Promise.all(Array.from({ length: count }, worker));
     if (!isStale(gen)) {
       appState.actionsFailures = buildFailureQueue(groups);
-      showMessage('Found ' + appState.actionsFailures.length + ' failed workflow runs', 'info');
+      const total = appState.actionsRepos.length;
+      const scanned = candidates.length;
+      showMessage('Found ' + appState.actionsFailures.length + ' failed runs (scanned ' + scanned + '/' + total + ' repos)', 'info');
     }
   } finally {
     if (!isStale(gen)) { appState.actionsFailureLoading = false; render(); }
@@ -267,21 +300,33 @@ export async function loadWorkflowRuns() {
   const idx = appState.actionsRepoSelected;
   const repo = repos[idx];
   if (!repo) return;
+  appState.actionsActiveRepo = repo.full_name;
   const [owner, name] = repo.full_name.split('/');
+  const keepExpanded = appState.actionsExpandedRun;
+  const keepJobs = appState.actionsJobs;
+  const keepSteps = appState.actionsJobSteps;
   const gen = startAsync('actions-runs');
   appState.actionsLoading = true;
   appState.actionsRuns = [];
   appState.actionsSelected = 0;
   appState.actionsScroll = 0;
-  appState.actionsExpandedRun = null;
-  appState.actionsJobs = {};
-  appState.actionsJobSteps = {};
   render();
   try {
     const result = await getWorkflowRuns(appState.token, owner, name, 1, RUNS_PER_PAGE, gen.signal);
     if (isStale(gen)) return;
     const runs = result && result.workflow_runs ? result.workflow_runs : [];
     appState.actionsRuns = runs;
+    // Auto-refresh therefore no longer collapses open runs: preserve
+    // expansion + cached jobs/steps when the same run id still exists.
+    if (keepExpanded && runs.some(r => r.id === keepExpanded)) {
+      appState.actionsExpandedRun = keepExpanded;
+      appState.actionsJobs = keepJobs;
+      appState.actionsJobSteps = keepSteps;
+    } else {
+      appState.actionsExpandedRun = null;
+      appState.actionsJobs = {};
+      appState.actionsJobSteps = {};
+    }
     appState.actionsRunsPage = 1;
     appState.actionsRunsHasMore = runs.length >= RUNS_PER_PAGE;
     appState.actionsView = 'runs';
@@ -295,8 +340,7 @@ export async function loadWorkflowRuns() {
 }
 
 export async function loadMoreWorkflowRuns() {
-  const repos = getFilteredRepos();
-  const repo = repos[appState.actionsRepoSelected];
+  const repo = activeRepo();
   if (!repo || !appState.actionsRunsHasMore || appState.actionsLoading) return;
   const [owner, name] = repo.full_name.split('/');
   const gen = startAsync('actions-runs-more');
@@ -336,8 +380,7 @@ export async function toggleRunDetail() {
   // Expand — load jobs if not cached
   appState.actionsExpandedRun = runId;
   if (!appState.actionsJobs[runId]) {
-    const repos = getFilteredRepos();
-    const repo = repos[appState.actionsRepoSelected];
+    const repo = activeRepo();
     if (!repo) return;
     const [owner, name] = repo.full_name.split('/');
     const gen = startAsync('actions-jobs');
@@ -364,17 +407,18 @@ export async function toggleRunDetail() {
 export async function rerunSelected() {
   const run = appState.actionsRuns[appState.actionsSelected];
   if (!run) return;
-  const repos = getFilteredRepos();
-  const repo = repos[appState.actionsRepoSelected];
+  const repo = activeRepo();
   if (!repo) return;
   const [owner, name] = repo.full_name.split('/');
-  try {
-    await rerunWorkflow(appState.token, owner, name, run.id);
-    showMessage('Re-queued run #' + run.id, 'success');
-    loadWorkflowRuns();
-  } catch (e) {
-    showMessage(e.message || 'Re-run failed', 'error');
-  }
+  confirm('Re-run workflow "' + (run.name||run.id) + ' #' + run.run_number + '" on ' + repo.full_name + '?', async () => {
+    try {
+      await rerunWorkflow(appState.token, owner, name, run.id);
+      showMessage('Re-queued run #' + run.id, 'success');
+      loadWorkflowRuns();
+    } catch (e) {
+      showMessage(e.message || 'Re-run failed', 'error');
+    }
+  }, 'Re-run workflow');
 }
 
 export async function cancelSelected() {
@@ -384,8 +428,7 @@ export async function cancelSelected() {
     showMessage('Run is not running', 'warning');
     return;
   }
-  const repos = getFilteredRepos();
-  const repo = repos[appState.actionsRepoSelected];
+  const repo = activeRepo();
   if (!repo) return;
   const [owner, name] = repo.full_name.split('/');
   confirm('Cancel run #' + run.run_number + ' on ' + repo.full_name + '?', async () => {
@@ -491,9 +534,16 @@ function getFilteredRepos() {
 
 function renderRepoList(screen, y, h, W) {
   const filterHint = appState.actionsFilter ? ' | filter: "' + appState.actionsFilter + '"' : '';
-  screen.writeStr(2, y, appState.actionsScanning
-    ? 'Scanning ' + (appState.repos?.length || 0) + ' repos for GitHub workflows…' + filterHint
-    : 'Select a repo to view workflow runs:' + filterHint, { dim: true });
+  let scanLabel;
+  if (appState.actionsScanning) {
+    const prog = appState.actionsScanProgress;
+    scanLabel = prog
+      ? 'Scanning ' + prog.done + '/' + prog.total + ' repos…' + filterHint
+      : 'Scanning ' + (appState.repos?.length || 0) + ' repos for GitHub workflows…' + filterHint;
+  } else {
+    scanLabel = 'Select a repo to view workflow runs:' + filterHint;
+  }
+  screen.writeStr(2, y, scanLabel, { dim: true });
   y += 2;
   const repos = getFilteredRepos();
   if (repos.length === 0) {
@@ -688,6 +738,7 @@ registerInputHandler('actions-filter', (value) => {
   appState.actionsFilter = (value || '').trim();
   appState.actionsRepoScroll = 0;
   appState.actionsRepoSelected = 0;
+  appState.actionsExpandedRun = null;
   showMessage(appState.actionsFilter
     ? 'Filtering repos: "' + appState.actionsFilter + '"'
     : 'Repo filter cleared', 'info');
@@ -700,6 +751,8 @@ export const keys = {
   'd': () => { if (appState.actionsView === 'runs') startWorkflowDispatch(); },
   'l': () => {
     if (appState.actionsView === 'runs') {
+      const repo = activeRepo();
+      if (!repo) return;
       const run = appState.actionsRuns[appState.actionsSelected];
       const jobs = run && appState.actionsJobs[run.id];
       const job = jobs && jobs.find(j => j.conclusion === 'failure') || jobs && jobs[0];
@@ -720,7 +773,7 @@ export const keys = {
     if (appState.actionsView === 'runs') rerunSelected();
     else if (appState.actionsView === 'repos') rescanWorkflowRepos();
   },
-  'x': () => { if (appState.actionsView === 'runs') cancelSelected(); },
+  'x': () => { if (appState.actionsView === 'runs') cancelSelected(); else if (appState.actionsView === 'repos' && appState.actionsScanning) cancelWorkflowScan(); },
 };
 
 export function up() {
@@ -728,25 +781,23 @@ export function up() {
     appState.actionsLogScroll = Math.max(0, appState.actionsLogScroll - 1);
     render();
   } else if (appState.actionsView === 'failures') {
+    const maxVisible = appState._actionsListBounds?.maxRows || Math.max(1, 10);
     appState.actionsSelected = Math.max(0, appState.actionsSelected - 1);
-    appState.actionsScroll = Math.min(appState.actionsScroll, appState.actionsSelected);
+    appState.actionsScroll = followScroll(appState.actionsSelected, appState.actionsScroll, maxVisible);
     render();
   } else if (appState.actionsView === 'repos') {
     const repos = getFilteredRepos();
     if (repos.length === 0) return;
     appState.actionsRepoSelected = Math.max(0, appState.actionsRepoSelected - 1);
-    if (appState.actionsRepoSelected < appState.actionsRepoScroll) {
-      appState.actionsRepoScroll = appState.actionsRepoSelected;
-    }
+    const maxVisible = appState._actionsListBounds?.maxRows || Math.max(1, 10);
+    appState.actionsRepoScroll = followScroll(appState.actionsRepoSelected, appState.actionsRepoScroll, maxVisible);
     render();
   } else {
     const runs = appState.actionsRuns;
     if (runs.length === 0) return;
     appState.actionsSelected = Math.max(0, appState.actionsSelected - 1);
-    // Scroll up to keep selection visible
-    if (appState.actionsSelected < appState.actionsScroll) {
-      appState.actionsScroll = appState.actionsSelected;
-    }
+    const maxVisible = appState._actionsListBounds?.maxRows || Math.max(1, 10);
+    appState.actionsScroll = followScroll(appState.actionsSelected, appState.actionsScroll, maxVisible);
     // Don't auto-collapse expanded run on arrow navigation
     render();
   }
@@ -758,25 +809,25 @@ export function down() {
     appState.actionsLogScroll = Math.min(Math.max(0, lines.length - 1), appState.actionsLogScroll + 1);
     render();
   } else if (appState.actionsView === 'failures') {
-    appState.actionsSelected = Math.min(Math.max(0, appState.actionsFailures.length - 1), appState.actionsSelected + 1);
+    const failures = appState.actionsFailures || [];
+    if (failures.length === 0) return;
+    const maxVisible = appState._actionsListBounds?.maxRows || Math.max(1, 10);
+    appState.actionsSelected = Math.min(failures.length - 1, appState.actionsSelected + 1);
+    appState.actionsScroll = followScroll(appState.actionsSelected, appState.actionsScroll, maxVisible);
     render();
   } else if (appState.actionsView === 'repos') {
     const repos = getFilteredRepos();
     const maxVisible = Math.max(1, (process.stdout.rows || 24) - 12);
     if (repos.length === 0) return;
     appState.actionsRepoSelected = Math.min(repos.length - 1, appState.actionsRepoSelected + 1);
-    if (appState.actionsRepoSelected >= appState.actionsRepoScroll + maxVisible) {
-      appState.actionsRepoScroll = appState.actionsRepoSelected - maxVisible + 1;
-    }
+    appState.actionsRepoScroll = followScroll(appState.actionsRepoSelected, appState.actionsRepoScroll, maxVisible);
     render();
   } else {
     const runs = appState.actionsRuns;
     const maxVisible = Math.max(1, (process.stdout.rows || 24) - 16);
     if (runs.length === 0) return;
     appState.actionsSelected = Math.min(runs.length - 1, appState.actionsSelected + 1);
-    if (appState.actionsSelected >= appState.actionsScroll + maxVisible) {
-      appState.actionsScroll = appState.actionsSelected - maxVisible + 1;
-    }
+    appState.actionsScroll = followScroll(appState.actionsSelected, appState.actionsScroll, maxVisible);
     // Don't auto-collapse expanded run on arrow navigation
     render();
   }
@@ -806,7 +857,7 @@ export function enter() {
   } else if (appState.actionsView === 'failures') {
     const failure = appState.actionsFailures[appState.actionsSelected];
     if (failure?.repo) {
-      const idx = appState.actionsRepos.findIndex(r => r.full_name === failure.repo);
+      const idx = getFilteredRepos().findIndex(r => r.full_name === failure.repo);
       if (idx >= 0) { appState.actionsRepoSelected = idx; appState.actionsView = 'runs'; loadWorkflowRuns(); }
     }
   } else {

@@ -53,6 +53,7 @@ const CATEGORIES = [
     { key: 'P',         desc: 'Pin / unpin repo (sticky top, persisted)' },
     { key: 'n / S / f / i / u', desc: 'Sort by name / stars / forks / issues / updated' },
     { key: 'V',         desc: 'Toggle starred / own repos' },
+    { key: 'l',         desc: 'Load more repos after background cap' },
     { key: 'g / G',     desc: 'Jump to top / bottom' },
     { key: 'PgUp / PgDn', desc: 'Navigate pages (starred repos)' },
   ]},
@@ -94,6 +95,10 @@ const CATEGORIES = [
     { key: 'x',         desc: 'Cancel running workflow' },
     { key: 't',         desc: 'Back to repo list (from runs view)' },
     { key: '/',         desc: 'Filter repos' },
+    { key: 'F',         desc: 'Scan failure queue (up to 20 repos)' },
+    { key: 'd',         desc: 'Dispatch workflow (runs view)' },
+    { key: 'l',         desc: 'Open selected run log (expand first)' },
+    { key: 'R',         desc: 'Rescan repos / re-run selected' },
   ]},
   { id: 'inbox',      name: 'INBOX',             shortcuts: [
     { key: 'm',         desc: 'Mark current as read' },

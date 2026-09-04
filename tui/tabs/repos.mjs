@@ -41,6 +41,25 @@ export function toggleRepoSort(field) {
   render();
 }
 
+// Starred-view sort override (module-local by contract — no appState fields).
+// Null = API order (zero behavior change unless the user sorts in starred view).
+let starredSortOverride = null;
+let _starredView = null; // last sorted starred list produced by render
+export function getStarredSort() { return starredSortOverride; }
+export function starredViewList() {
+  const base = appState.starred || [];
+  return starredSortOverride ? sortRepos(base, starredSortOverride) : base;
+}
+function toggleStarredSort(field) {
+  if (starredSortOverride && starredSortOverride.field === field) starredSortOverride.asc = !starredSortOverride.asc;
+  else starredSortOverride = { field, asc: field === 'name' };
+  appState.starredSelected = 0;
+  appState.starredScroll = 0;
+  const opt = REPO_SORT_OPTIONS.find(o => o.field === field);
+  showMessage('Starred sort: ' + (opt ? opt.label : field) + (starredSortOverride.asc ? ' ↑' : ' ↓'), 'info');
+  render();
+}
+
 export function applyAllFilters(repos) {
   return _applyAllFilters(repos, {
     typeFilter: appState.repoTypeFilter,
@@ -125,7 +144,6 @@ export async function loadAllReposBackground(gen) {
   // very high safety ceiling for malformed pagination responses, while
   // avoiding the old 300-repository truncation in normal accounts.
   const MAX_PAGES = 1000;
-  let page = 2;
   let capped = false;
   // Background pagination shares the account generation but owns a separate
   // loading contribution; the foreground first-page request may finish while
@@ -133,25 +151,61 @@ export async function loadAllReposBackground(gen) {
   const loadingHandle = { ...gen, scope: 'repos-background' };
   beginLoading(loadingHandle);
   try {
-  while (appState.reposHasMore && page <= MAX_PAGES) {
-    try {
-      const more = await getUserRepositories(appState.token, page, REPOS_PER_PAGE, gen.signal);
-      if (isStale(gen, 'repos')) { finishLoading(loadingHandle); return; }
-      appState.repos = [...appState.repos, ...more];
+  // Bounded prefetch pool (CONCURRENCY=3). Pages are committed to
+  // appState.repos in page order via the buffered ordered-commit below, so
+  // out-of-order fetch completion can never scramble list order. Over-fetch
+  // past the last page is bounded by CONCURRENCY-1 tail pages (discarded).
+  const CONCURRENCY = 3;
+  let nextPage = 2;
+  let commitPage = 2;
+  const buffered = new Map(); // page -> repos[]; committed when contiguous
+  let exhausted = !appState.reposHasMore;
+  let fetchError = null;
+  let sawStale = false;
+  const commitContiguous = () => {
+    while (buffered.has(commitPage)) {
+      const items = buffered.get(commitPage);
+      buffered.delete(commitPage);
+      if (exhausted) { commitPage++; continue; } // discard over-fetched tail
+      appState.repos = [...appState.repos, ...items];
       // Actions consumes a snapshot of repositories; keep it complete while
       // background pagination discovers additional account repos. Once the
       // Actions workflow scan has run, drop repos confirmed workflow-less so
       // late pages don't resurrect them.
       if (appState.actionsView === 'repos') appState.actionsRepos = filterReposByWorkflowState(appState.repos);
-      appState.reposPage = page;
-      appState.reposHasMore = more.length >= REPOS_PER_PAGE;
-      recomputeDashboardDerived();
-      page++;
-    } catch (e) {
-      if (!isStale(gen, 'repos')) showError(((e && e.message) || 'unknown'), 'Background repo load', { retry: () => loadAllReposBackground(gen) });
-      finishLoading(loadingHandle);
-      return;
+      appState.reposPage = commitPage;
+      appState.reposHasMore = items.length >= REPOS_PER_PAGE;
+      // Recompute derived at most every 5 pages + final (was: every page,
+      // O(pages x repos) with Date parsing per repo per page). The cheap
+      // per-page actionsRepos sync above is kept ungated.
+      if (commitPage % 5 === 0 || !appState.reposHasMore) recomputeDashboardDerived();
+      commitPage++;
+      if (!appState.reposHasMore) exhausted = true;
     }
+  };
+  const worker = async () => {
+    while (!exhausted && !fetchError && !sawStale && !isStale(gen, 'repos')) {
+      const p = nextPage++;
+      if (p > MAX_PAGES) return;
+      let more;
+      try {
+        more = await getUserRepositories(appState.token, p, REPOS_PER_PAGE, gen.signal);
+      } catch (e) {
+        if (isStale(gen, 'repos')) { sawStale = true; return; }
+        fetchError = e;
+        return;
+      }
+      if (isStale(gen, 'repos')) { sawStale = true; return; }
+      buffered.set(p, more);
+      commitContiguous();
+    }
+  };
+  await Promise.all(Array.from({ length: CONCURRENCY }, worker));
+  if (sawStale || isStale(gen, 'repos')) { finishLoading(loadingHandle); return; }
+  if (fetchError) {
+    showError(((fetchError && fetchError.message) || 'unknown'), 'Background repo load', { retry: () => loadAllReposBackground(gen) });
+    finishLoading(loadingHandle);
+    return;
   }
   // If the upstream still has more repos but we stopped at MAX_PAGES, surface
   // a non-modal hint so the user knows they can load more.
@@ -161,7 +215,7 @@ export async function loadAllReposBackground(gen) {
     capped = true;
     if (!isStale(gen, 'repos')) showMessage(
       'Loaded first ' + appState.repos.length + ' repos (' + MAX_PAGES + ' pages). ' +
-      'Press [l] or run \":repos loadMore\" in palette to fetch more.',
+      'Press [l] or run "repos.load-more" in the palette to fetch more.',
       'info', 6000
     );
   }
@@ -233,7 +287,10 @@ export async function enrichIssueCounts() {
   list = applyAllFilters(list);
   list = floatPinsToTop(list);
   const now = Date.now();
-  const targets = list.slice(0, ISSUE_ENRICH_CAP).filter(r => {
+  // Scroll-idle enrichment: target the visible window instead of always the
+  // first page, so rows scrolled into view get true counts too.
+  const start = appState.repoScroll || 0;
+  const targets = list.slice(start, start + ISSUE_ENRICH_CAP).filter(r => {
     const e = appState.repoTrueIssues[r.full_name];
     return !e || now - e.ts > ISSUE_ENRICH_TTL;
   });
@@ -271,6 +328,17 @@ export function visibleRows(screen) {
   return Math.max(1, Math.floor((screen.height - overhead) / (compact ? 1 : 2)));
 }
 
+// Count pinned-run header rows ("★ PINNED" section starts) inside the
+// window [start, start+count) of a pin-floated list. Exported for tests and
+// used by nav to discount header rows from visibleRows().
+export function pinnedHeaderCount(list, start, count) {
+  let n = 0;
+  for (let i = start; i < Math.min(list.length, start + count); i++) {
+    if (isPinnedLocal(list[i].full_name) && (i === 0 || !isPinnedLocal(list[i - 1].full_name))) n++;
+  }
+  return n;
+}
+
 function badgeChar(r) {
   if (r.private)     return { ch: 'P', style: color('warning'), label: 'private' };
   if (r.fork)        return { ch: 'F', style: color('fork'),    label: 'fork' };
@@ -297,7 +365,10 @@ function renderStarredList(screen, y, h) {
   // own-repos view must not linger.
   appState._reposStarBounds = null;
   const W = screen.width;
-  const list = appState.starred;
+  // Sorted ONCE per render; selection/mouse must resolve through
+  // starredViewList() so indexes match this order.
+  const list = starredViewList();
+  _starredView = list;
 
   screen.writeStr(2, y, 'STARRED REPOSITORIES', color('title') || { fg: 'white', bold: true });
   const countText = list.length + ' repos';
@@ -394,8 +465,19 @@ export function renderRepos(screen, y, h) {
   }
 
   if (chips.length > 0) {
-    for (const chip of chips) {
+    // Width guard: stop emitting chips before they can underlap the star
+    // button, collapsing the remainder into a +N overflow chip. Length is
+    // computed before writeStr; coords are kept for rendered chips only.
+    for (let ci = 0; ci < chips.length; ci++) {
+      const chip = chips[ci];
       const text = ' ' + chip.label + ' ✕ ';
+      if (chipX + text.length > starRight - 2) {
+        const overflowText = ' +' + (chips.length - ci) + ' ';
+        if (chipX + overflowText.length <= starRight - 2) {
+          screen.writeStr(chipX, chipY, overflowText, { bg: 'darkGray', fg: 'white' });
+        }
+        break;
+      }
       screen.writeStr(chipX, chipY, text, { bg: 'darkGray', fg: 'cyan' });
       // Store chip positions for click-to-dismiss.
       chip._x1 = chipX;
@@ -418,8 +500,9 @@ export function renderRepos(screen, y, h) {
     const hintX = Math.max(statusText.length + 4, starRight - hint.length - 2);
     screen.writeStr(hintX, chipY, hint, { dim: true });
   }
-  // Store chips for click handling.
-  appState._filterChips = chips;
+  // Store chips for click handling (rendered chips only — hidden overflow
+  // chips carry no coords so tryDismissChipAt can't hit them).
+  appState._filterChips = chips.filter(c => typeof c._x1 === 'number');
   appState._chipY = chipY;
 
   if (!repos || repos.length === 0) {
@@ -650,8 +733,10 @@ export async function toggleStarRepo(r) {
 
 export async function toggleStarCurrent() {
   // Works in both the own-repos view and the starred view (V).
+  // Starred branch resolves through starredViewList() so the index matches
+  // the rendered (possibly sorted) order.
   const r = appState.reposView === 'starred'
-    ? appState.starred[appState.starredSelected]
+    ? starredViewList()[appState.starredSelected]
     : currentRepo();
   await toggleStarRepo(r);
 }
@@ -706,12 +791,12 @@ function _seedStarredCache() {
 
 async function loadStarredRepos() {
   if (!appState.token) return;
-  const gen = startAsync('repos');
+  const gen = startAsync('repos-starred');
   beginLoading(gen);
   render();
   try {
     const starred = await getStarredRepos(appState.token, 1, 100, gen.signal);
-    if (isStale(gen, 'repos')) { finishLoading(gen); return; }
+    if (isStale(gen, 'repos-starred')) { finishLoading(gen); return; }
     appState.starred = Array.isArray(starred) ? starred.map(s => ({
       ...s.repo,
       starred_at: s.starred_at || s.repo?.starred_at || null,
@@ -721,21 +806,21 @@ async function loadStarredRepos() {
     appState.starredHasMore = appState.starred.length >= 100;
     showMessage('Loaded ' + appState.starred.length + ' starred repos', 'success');
   } catch (e) {
-    if (!isStale(gen, 'repos')) showMessage('Failed to load starred repos: ' + e.message, 'error');
+    if (!isStale(gen, 'repos-starred')) showMessage('Failed to load starred repos: ' + e.message, 'error');
   }
   finishLoading(gen);
-  if (!isStale(gen, 'repos')) render();
+  if (!isStale(gen, 'repos-starred')) render();
 }
 
 export async function loadMoreStarred() {
   if (!appState.token || !appState.starredHasMore) return;
-  const gen = startAsync('repos');
+  const gen = startAsync('repos-starred');
   beginLoading(gen);
   render();
   try {
     const page = appState.starredPage + 1;
     const more = await getStarredRepos(appState.token, page, 100, gen.signal);
-    if (isStale(gen, 'repos')) { finishLoading(gen); return; }
+    if (isStale(gen, 'repos-starred')) { finishLoading(gen); return; }
     if (Array.isArray(more) && more.length > 0) {
       const mapped = more.map(s => ({ ...(s.repo || s), starred_at: s.starred_at || s.repo?.starred_at || null }));
       appState.starred = [...appState.starred, ...mapped];
@@ -750,64 +835,46 @@ export async function loadMoreStarred() {
       showMessage('All starred repos loaded', 'info');
     }
   } catch (e) {
-    if (!isStale(gen, 'repos')) showMessage('Failed to load more starred repos', 'error');
+    if (!isStale(gen, 'repos-starred')) showMessage('Failed to load more starred repos', 'error');
   }
   finishLoading(gen);
-  if (!isStale(gen, 'repos')) render();
+  if (!isStale(gen, 'repos-starred')) render();
 }
 
+const PAGE_STEP = 10;
+
 export function pageUp() {
-  if (appState.reposView === 'starred' && appState.starredPage > 1) {
-    const page = appState.starredPage - 1;
-    const gen = startAsync('repos');
-    beginLoading(gen);
+  // Pure viewport scroll-up over the loaded list (no server replace-fetch).
+  // pageUp takes no screen arg, so a fixed STEP is used.
+  if (appState.reposView === 'starred') {
+    appState.starredSelected = Math.max(0, appState.starredSelected - PAGE_STEP);
+    appState.starredScroll = Math.min(appState.starredScroll, appState.starredSelected);
     render();
-    getStarredRepos(appState.token, page, 100, gen.signal).then(more => {
-      if (isStale(gen, 'repos')) { finishLoading(gen); return; }
-      if (Array.isArray(more)) {
-        appState.starred = more.map(s => ({ ...(s.repo || s), starred_at: s.starred_at || s.repo?.starred_at || null }));
-        _seedStarredCache();
-        appState.starredPage = page;
-        appState.starredHasMore = more.length >= 100;
-        appState.starredSelected = 0;
-        appState.starredScroll = 0;
-      }
-      finishLoading(gen);
-      render();
-    }).catch((e) => {
-      if (!isStale(gen, 'repos')) showMessage('Failed to load starred page: ' + ((e && e.message) || 'unknown'), 'error');
-      finishLoading(gen);
-      if (!isStale(gen, 'repos')) render();
-    });
+    return;
   }
+  appState.repoSelected = Math.max(0, appState.repoSelected - PAGE_STEP);
+  appState.repoScroll = Math.min(appState.repoScroll, appState.repoSelected);
+  render();
 }
 
 export function pageDown() {
-  if (appState.reposView === 'starred' && appState.starredHasMore) {
-    const page = appState.starredPage + 1;
-    const gen = startAsync('repos');
-    beginLoading(gen);
+  if (appState.reposView === 'starred') {
+    // Append-model paging: Space stays the sole loader — delegate so the
+    // list grows instead of being replaced and selection is preserved.
+    if (appState.starredHasMore) { loadMoreStarred(); return; }
+    // Fully loaded: pure viewport move over the loaded list.
+    const total = starredViewList().length;
+    appState.starredSelected = total > 0 ? Math.min(total - 1, appState.starredSelected + PAGE_STEP) : 0;
+    if (appState.starredSelected >= appState.starredScroll + PAGE_STEP) appState.starredScroll = appState.starredSelected - PAGE_STEP + 1;
     render();
-    getStarredRepos(appState.token, page, 100, gen.signal).then(more => {
-      if (isStale(gen, 'repos')) { finishLoading(gen); return; }
-      if (Array.isArray(more) && more.length > 0) {
-        appState.starred = more.map(s => ({ ...(s.repo || s), starred_at: s.starred_at || s.repo?.starred_at || null }));
-        _seedStarredCache();
-        appState.starredPage = page;
-        appState.starredHasMore = more.length >= 100;
-        appState.starredSelected = 0;
-        appState.starredScroll = 0;
-      } else {
-        appState.starredHasMore = false;
-      }
-      finishLoading(gen);
-      render();
-    }).catch((e) => {
-      if (!isStale(gen, 'repos')) showMessage('Failed to load starred page: ' + ((e && e.message) || 'unknown'), 'error');
-      finishLoading(gen);
-      if (!isStale(gen, 'repos')) render();
-    });
+    return;
   }
+  // Own view: viewport paging (was: early-return, dead keys). Total mirrors
+  // down()/bottom() (WITHOUT pins — lengths equal); fixed STEP scroll pin.
+  const total = applyAllFilters(sortRepos(appState.repos, appState.repoSort)).length;
+  appState.repoSelected = total > 0 ? Math.min(total - 1, appState.repoSelected + PAGE_STEP) : 0;
+  if (appState.repoSelected >= appState.repoScroll + PAGE_STEP) appState.repoScroll = appState.repoSelected - PAGE_STEP + 1;
+  render();
 }
 
 export const keys = {
@@ -822,11 +889,11 @@ export const keys = {
       loadAllReposBackground(gen);
     }
   },
-  'n': () => { if (appState.reposView === 'own') toggleRepoSort('name'); },
-  'S': () => { if (appState.reposView === 'own') toggleRepoSort('stars'); },
-  'f': () => { if (appState.reposView === 'own') toggleRepoSort('forks'); },
-  'i': () => { if (appState.reposView === 'own') toggleRepoSort('issues'); },
-  'u': () => { if (appState.reposView === 'own') toggleRepoSort('updated'); },
+  'n': () => { if (appState.reposView === 'starred') toggleStarredSort('name'); else toggleRepoSort('name'); },
+  'S': () => { if (appState.reposView === 'starred') toggleStarredSort('stars'); else toggleRepoSort('stars'); },
+  'f': () => { if (appState.reposView === 'starred') toggleStarredSort('forks'); else toggleRepoSort('forks'); },
+  'i': () => { if (appState.reposView === 'starred') toggleStarredSort('issues'); else toggleRepoSort('issues'); },
+  'u': () => { if (appState.reposView === 'starred') toggleStarredSort('updated'); else toggleRepoSort('updated'); },
   't': () => { if (appState.reposView === 'own') cycleTypeFilter(); },
   'L': () => { if (appState.reposView === 'own') startInput('Language: ', 'lang-filter'); },
   'x': () => { if (appState.reposView === 'own') toggleStale(); },
@@ -849,16 +916,20 @@ export function up(screen) {
 }
 export function down(screen) {
   if (appState.reposView === 'starred') {
-    const total = appState.starred.length;
+    const total = starredViewList().length;
     appState.starredSelected = Math.min(total - 1, appState.starredSelected + 1);
     const v = visibleRows(screen);
     if (appState.starredSelected >= appState.starredScroll + v) appState.starredScroll = appState.starredSelected - v + 1;
     render();
     return;
   }
-  const total = applyAllFilters(sortRepos(appState.repos, appState.repoSort)).length;
+  // Own view: discount "★ PINNED" header rows (which consume rendered rows
+  // but aren't data rows) from the visible-row budget.
+  const fullList = floatPinsToTop(applyAllFilters(sortRepos(appState.repos, appState.repoSort)));
+  const total = fullList.length;
   appState.repoSelected = Math.min(total - 1, appState.repoSelected + 1);
-  const v = visibleRows(screen);
+  const rawV = visibleRows(screen);
+  const v = Math.max(1, rawV - pinnedHeaderCount(fullList, appState.repoScroll, rawV));
   if (appState.repoSelected >= appState.repoScroll + v) appState.repoScroll = appState.repoSelected - v + 1;
   render();
 }
@@ -868,7 +939,7 @@ export function space() {
 }
 export function enter() {
   if (appState.reposView === 'starred') {
-    const r = appState.starred[appState.starredSelected];
+    const r = starredViewList()[appState.starredSelected];
     if (r) {
       const [owner, name] = r.full_name.split('/');
       setTab(2);
@@ -881,16 +952,20 @@ export function enter() {
 
 export function bottom(screen) {
   if (appState.reposView === 'starred') {
-    const total = appState.starred.length;
+    const total = starredViewList().length;
     appState.starredSelected = Math.max(0, total - 1);
     const v = visibleRows(screen);
     appState.starredScroll = Math.max(0, total - v);
     render();
     return;
   }
-  const total = applyAllFilters(sortRepos(appState.repos, appState.repoSort)).length;
+  // Own view: discount pinned headers from the visible budget (approximated
+  // over the trailing window, since scroll depends on v and vice versa).
+  const fullList = floatPinsToTop(applyAllFilters(sortRepos(appState.repos, appState.repoSort)));
+  const total = fullList.length;
   appState.repoSelected = Math.max(0, total - 1);
-  const v = visibleRows(screen);
+  const rawV = visibleRows(screen);
+  const v = Math.max(1, rawV - pinnedHeaderCount(fullList, Math.max(0, total - rawV), rawV));
   appState.repoScroll = Math.max(0, total - v);
   render();
 }

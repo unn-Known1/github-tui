@@ -1010,7 +1010,9 @@ function dispatchDashboardClick(sx, sy) {
 // { list, index } or null.
 function reposItemAt(sx, sy) {
   if (appState.reposView === 'starred') {
-    const list = appState.starred;
+    // Resolve through the sorted view when a starred sort override is active
+    // (R7) so clicks match the rendered order, not raw API order.
+    const list = typeof repos.starredViewList === 'function' ? repos.starredViewList() : appState.starred;
     const itemIdx = sy - (HEADER_HEIGHT + 5) + appState.starredScroll;
     if (itemIdx >= 0 && itemIdx < list.length) return { list, index: itemIdx };
     return null;
@@ -1039,10 +1041,10 @@ function reposItemAt(sx, sy) {
 }
 
 function dispatchReposClick(sx, sy) {
-  if (repos.tryDismissChipAt(sx, sy)) { render(); return; }
-
   // Clickable star / unstar button ([s] ★ Star) for the highlighted repo.
   // Mirrors the `s` key — shows the same toast feedback via toggleStarCurrent.
+  // Checked BEFORE chip dismiss: the star target is smaller and explicit, so
+  // it wins when a chip strip underlaps it (R2).
   const starB = appState._reposStarBounds;
   if (starB && sy === starB.y && sx >= starB.x1 && sx < starB.x2) {
     Promise.resolve()
@@ -1051,6 +1053,8 @@ function dispatchReposClick(sx, sy) {
     render();
     return;
   }
+
+  if (repos.tryDismissChipAt(sx, sy)) { render(); return; }
 
   const hit = reposItemAt(sx, sy);
   if (!hit) return;

@@ -121,7 +121,7 @@ Your current token scopes are shown in the Settings → System panel so you can 
 | Key | Action |
 |---|---|
 | `Enter` | Open the highlighted repo in Analyze → details (**double-click** a repo row does the same) |
-| `/` | Substring filter (name + description + language) |
+| `/` | Substring filter (name + description + language) with qualifiers (`stars:>100`, `lang:rust`) |
 | `c` | Clear **ALL** filters in one go |
 | `t` | Cycle type filter: all → sources → forks → archived → private → public → templates |
 | `L` | Filter by exact language… |
@@ -307,7 +307,7 @@ Every tab module exports `render(screen, y, h)`, an optional `keys` map for tab-
 ### 2 · Repos
 - Header shows aggregate **★/⑂/⚡** totals across all your repos plus archived count.
 - **Dismissible filter chips** above the list — each chip has an `✕` to remove just that filter. `c` still clears all in one go.
-- Sortable columns and a substring filter (`/`).
+- Sortable columns and a substring filter (`/`) with qualifiers (`stars:>100`, `forks:>=10`, `issues:=0`, `lang:rust`, `language:go`).
 - **Type cycle (`t`)** lets you jump straight to sources / forks / archived / private / public / templates.
 - **Language facet (`L`)** narrows to one language.
 - **Stale-only (`x`)** surfaces side-projects with no push in 6+ months.
@@ -315,7 +315,7 @@ Every tab module exports `render(screen, y, h)`, an optional `keys` map for tab-
 - **Pins (`P`)** float favorites to the top with a `★ PINNED` section header — persisted on disk so they survive restarts.
 - Each row shows visibility badges (🔒 private, 🔱 fork, 📦 archived, 🗄 template, 📌 pinned, ★ bookmarked) and a relative push time.
 - **Real issue counts** — GitHub's `open_issues_count` combines issues *and* PRs, so the ISSUES column (and header total) subtracts each repo's open PR count (probed lazily via `/pulls`, cached 10 min) to show true open issues. The Analyze detail's "Open Issues" row uses the same value.
-- `Space` paginates beyond the first 30. `Enter` opens the repo in Analyze details.
+- `Space` paginates beyond the first 30 (`l` / palette `repos.load-more` continues a capped background fetch). `Enter` opens the repo in Analyze details.
 
 ### 3 · Analyze
 - Search any public repo. `Enter` opens a 2-column detail view.

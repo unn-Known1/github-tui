@@ -1015,6 +1015,8 @@ export function registerCoreActions() {
         hint: 'D', run: () => { setTab(1); repos.keys.D(); } });
   reg({ id: 'repos.pin', label: 'Pin / unpin highlighted repo',
         hint: 'P', run: () => { setTab(1); repos.keys.P(); } });
+  reg({ id: 'repos.load-more', label: 'Load more repositories (lift background cap)',
+        hint: 'l', run: () => { setTab(1); repos.keys.l(); } });
   reg({ id: 'analyze.files', label: 'Open File explorer for current repo',
         hint: 'F',
         run: () => {
