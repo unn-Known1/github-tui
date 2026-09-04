@@ -19,7 +19,7 @@ import { handleKey, registerCoreActions } from './tui/keys.mjs';
 import { registerInputHandler } from './tui/input.mjs';
 import { loadUserData } from './tui/tabs/repos.mjs';
 import { loadBookmarks, loadSavedSearches, loadPins, loadInboxFilters, loadRepoPrefs, saveRepoPrefs } from './tui/store.mjs';
-import { getRateLimit, resyncRateLimit, getUserRepositories, getNotifications, getWorkflowRuns } from './tui/github.mjs';
+import { getRateLimit, resyncRateLimit, resetRateLimit, getUserRepositories, getNotifications, getWorkflowRuns } from './tui/github.mjs';
 import { exportPortableConfig, importPortableConfig } from './tui/portability.mjs';
 
 import { readFileSync, appendFileSync, writeFileSync } from 'fs';
@@ -88,15 +88,32 @@ async function refreshRateLimit() {
   try {
     const data = await getRateLimit(appState.token);
     const core = data?.resources?.core || data?.rate || null;
-    // Authoritative resync: the `/rate_limit` body is ground truth for the
-    // current window, so the 60s poll corrects any drift or pinning of the
-    // live header mirror — in both directions. Per-request headers between
-    // polls stay monotonic (see updateRateLimit()).
+    // Window-guarded resync: corrects drift inside the current window, in
+    // both directions. A poll from a different window than the live header
+    // mirror is ignored (live headers own cross-window movement).
+    // Per-request headers between polls stay monotonic (see updateRateLimit()).
     if (core) {
       resyncRateLimit(core.limit, core.remaining, core.reset);
       render();
     }
-  } catch (e) { debugAsync('rate-limit refresh error:', e.message); }
+  } catch (e) {
+    // An expired/revoked token surfaces here first when the user is idle
+    // (no repo open). Mirror the repos/explore 401 flow: wipe auth state
+    // and counter so the header doesn't keep showing a stale budget.
+    if (e && (e.status === 401 || /401|Bad credentials|Unauthorized/i.test(e.message || ''))) {
+      try {
+        const { resetAccountState, showMessage } = await import('./tui/state.mjs');
+        const { removeToken } = await import('./tui/config.mjs');
+        resetAccountState();
+        resetRateLimit();
+        removeToken();
+        showMessage('Token expired or invalid — please log in again in Settings', 'error', 8000);
+        render();
+      } catch {}
+    } else {
+      debugAsync('rate-limit refresh error:', e.message);
+    }
+  }
 }
 
 async function runCliCommand(args) {

@@ -326,6 +326,23 @@ export class Screen {
     }
   }
 
+  // Mark every cell dirty so the next render() emits the full frame instead
+  // of a diff. Used on tab/view switches: the diff renderer skips cells
+  // whose model content is unchanged, but the TERMINAL's actual content can
+  // diverge from the model (wide-glyph width disagreements, Tour-of-Duty
+  // missed frames) — a skipped cell then preserves a stale glyph from the
+  // previous view forever. A full repaint re-asserts every column via
+  // absolute cursor moves, forcing convergence. Only called on view
+  // switches, so the per-frame cost is unaffected.
+  invalidate() {
+    for (let y = 0; y < this.height; y++) {
+      if (!this.prevChar[y]) continue;
+      for (let x = 0; x < this.width; x++) {
+        this.prevChar[y][x] = '\x00';
+      }
+    }
+  }
+
   writeStr(x, y, str, style = null) {
     y = this.mapViewportY(y);
     if (y < 0 || y >= this.height) return;

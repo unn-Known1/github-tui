@@ -28,6 +28,9 @@ import { renderOnboarding } from './tabs/onboarding.mjs';
 
 let screen;
 
+// Last painted view identity for full-repaint-on-switch (see doRender).
+let _lastViewKey = null;
+
 export function getScreen() { return screen; }
 export function initScreen() { screen = new Screen(); return screen; }
 
@@ -378,12 +381,11 @@ function renderHeader(W) {
   let rateTxt = null, rateStyle = null;
   if (hasRate) {
     const r = lastRateLimit.remaining, lim = lastRateLimit.limit;
-    const remainPct = lim > 0 ? r / lim : 0;
-    // Bar visualizes *consumed* quota (used = 1 - remaining), so a fresh
-    // token (e.g. 4925/5000) renders nearly empty `░░░░░░░░░░` instead of a
-    // misleadingly full `██████████`. Colors still key off remaining budget:
-    // empty + green = healthy, full + red = exhausted.
-    const usedPct = lim > 0 ? Math.min(1, Math.max(0, 1 - r / lim)) : 0;
+    // Bar visualizes *remaining* quota (full = healthy), consistent with the
+    // Settings tab numbers (`remaining/limit`) and the low-budget status
+    // badge — both key off remaining pct. A fresh token (4925/5000) renders
+    // nearly full; an exhausted budget renders empty + red.
+    const remainPct = lim > 0 ? Math.min(1, Math.max(0, r / lim)) : 0;
     rateStyle = r === 0 ? { fg: 'red', bold: true }
       : remainPct < 0.1 ? { fg: 'yellow', bold: true }
       : remainPct < 0.3 ? { fg: 'yellow' }
@@ -394,10 +396,10 @@ function renderHeader(W) {
       // in --accessible mode it's a plain `[######....]` bracketed bar.
       let bar;
       if (a11y) {
-        const filled = Math.round(usedPct * barWidth);
+        const filled = Math.round(remainPct * barWidth);
         bar = '[' + '#'.repeat(filled) + '.'.repeat(barWidth - filled) + ']';
       } else {
-        const filled = Math.round(usedPct * barWidth);
+        const filled = Math.round(remainPct * barWidth);
         bar = '█'.repeat(filled) + '░'.repeat(barWidth - filled);
       }
       rateTxt = 'API ' + bar + ' ' + r + '/' + lim;
@@ -730,6 +732,19 @@ function doRender() {
   const H = screen.height;
   // Buffer is already clear from the previous render's swap — no clear() needed.
   appState._sectionHeaders = {};
+  // Full repaint on view switches (tab, explore view/pane, actions view).
+  // The diff renderer skips model-unchanged cells, but the terminal can
+  // diverge from the model (wide-glyph width disagreements) — a skipped
+  // cell then keeps a stale glyph from the previous view indefinitely.
+  // Invalidating forces absolute re-assertion of every column, converging
+  // the terminal. Covers all switch paths (keys, mouse, palette, auto
+  // setTab on auth expiry) since they all funnel through doRender.
+  const viewKey = tabState.current + '|' + appState.analyzeView + '|' +
+    appState.detailsPane + '|' + appState.actionsView;
+  if (viewKey !== _lastViewKey) {
+    _lastViewKey = viewKey;
+    screen.invalidate();
+  }
 
   if (appState.linearAccessibility && W >= 40 && H >= 10) {
     renderLinear(W, H);

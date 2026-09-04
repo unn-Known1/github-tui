@@ -8,8 +8,8 @@
 //   '256:n'       → explicit xterm-256 index
 
 // Available themes:
+//   light   — dark text on bright white for daylight use (DEFAULT)
 //   default — GitHub-inspired professional dark teal/cyan on near-black
-//   light   — dark text on bright white for daylight use
 
 import { existsSync, readFileSync, writeFileSync } from 'fs';
 import { NO_COLOR } from './config.mjs';
@@ -223,7 +223,7 @@ const THEMES = {
   light:   LIGHT,
 };
 
-let active = 'default';
+let active = 'light';
 
 // ── Accessible-mode flag (U1) ───────────────────────────────────────
 // Module-local so theme.mjs keeps its minimal imports (config + fs +

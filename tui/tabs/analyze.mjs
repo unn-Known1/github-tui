@@ -7,7 +7,7 @@ import {
   getRepositoryDetails,
   getRepositoryLanguages, getRepositoryContributors,
   getRepositoryReleases, getRepositoryIssues, getRepositoryPullRequests,
-  getRepoCheckRuns, getRepoDependabotAlerts, getBranchProtection,
+  getRepoCheckRuns, getRepoDependabotAlerts, getBranchProtection, resetRateLimit,
 } from '../github.mjs';
 import { startInput } from '../input.mjs';
 import { removeToken } from '../config.mjs';
@@ -162,6 +162,7 @@ export function resetDetailState() {
   appState.repoLabelsPage = 1;
   appState.repoLabelsHasMore = false;
   appState.repoCheckRuns = [];
+  appState.repoCheckRunsTotal = 0;
   appState.repoCheckSuites = [];
   appState.repoDependabotAlerts = [];
   appState.securitySubPane = 'dependabot';
@@ -322,6 +323,7 @@ export async function loadRepoDetails(owner, name) {
       const status = e && e.status;
       if (status === 401 || /401|Bad credentials|Unauthorized/i.test(msg)) {
         resetAccountState();
+        resetRateLimit();
         removeToken();
         setTab(5);
         showMessage('Token expired or invalid — please log in again in Settings', 'error', 8000);
@@ -959,9 +961,10 @@ export function down(screen) {
     else if (appState.detailsPane === 'readme')
       listLen = (appState._readmeText || '').split(/\r?\n/).length;
     // E10: make Checks/Traffic panes scrollable via detailsScroll. Checks
-    // rows = runs + suites; Traffic rows = popular paths + referrers. When
-    // both are empty listLen is 0 and the clamp below keeps scroll at 0.
-    else if (appState.detailsPane === 'checks') listLen = appState.repoCheckRuns.length + appState.repoCheckSuites.length;
+    // rows = runs only (suites are not fetched — see analyze-checks.mjs);
+    // Traffic rows = popular paths + referrers. When both are empty listLen
+    // is 0 and the clamp below keeps scroll at 0.
+    else if (appState.detailsPane === 'checks') listLen = appState.repoCheckRuns.length;
     else if (appState.detailsPane === 'traffic') listLen = (appState.repoTrafficPopularPaths || []).length + (appState.repoTrafficPopularReferrers || []).length;
     else listLen = 0;
     appState.detailsScroll = Math.min(Math.max(0, listLen - 1), appState.detailsScroll + 1);

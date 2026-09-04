@@ -464,6 +464,7 @@ export const appState = {
   repoLabelsPage: 1,
   repoLabelsHasMore: false,
   repoCheckRuns: [],
+  repoCheckRunsTotal: 0,
   repoCheckSuites: [],
   userFollowers: [],
   userFollowing: [],
@@ -700,7 +701,7 @@ export const appState = {
   detailDiffVisibleH: 0,   // visible height for diff scrolling
 
   // ── Theme & bookmarks (v0.3+) ──
-  themeName: 'default',
+  themeName: 'light',
   bookmarks: [],         // [{ id, full_name, url, tags, addedAt }]
   showBookmarks: false,  // bookmarks browser overlay
   bookmarksCursor: 0,

@@ -10,7 +10,7 @@ import {
 import {
   getAuthenticatedUser, getUserRepositories,
   lastRateLimit, lastScopes, getCacheStats, clearAccountCache, offlineState, isStarred as checkStarred,
-  getGitHubHosts,
+  getGitHubHosts, resetRateLimit,
 } from '../github.mjs';
 import { startInput, registerInputHandler } from '../input.mjs';
 import { color, listThemes, getThemeName, setTheme } from '../theme.mjs';
@@ -96,6 +96,7 @@ export async function submitLogin(value) {
   beginLoading(gen);
   render();
   try {
+    resetRateLimit();
     const user = await getAuthenticatedUser(token, gen.signal);
     if (isStale(gen, 'login')) { finishLoading(gen); return; }
     if (user) {
@@ -144,6 +145,7 @@ export async function handleLogout() {
   // One account epoch invalidates every active/paginated request, including
   // scopes added by future panes. Private state is reset in one place.
   resetAccountState();
+  resetRateLimit();
   removeToken();
   showMessage('Logged out', 'success');
   render();

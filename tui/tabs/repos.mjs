@@ -3,7 +3,7 @@
 
 import { appState, render, startAsync, isStale, showMessage, setTab, upsertEntity,
   beginLoading, finishLoading, resetAccountState, filterReposByWorkflowState } from '../state.mjs';
-import { getAuthenticatedUser, getUserRepositories, getStarredRepos, isStarred, starRepo, unstarRepo, getRepositoryPullRequests } from '../github.mjs';
+import { getAuthenticatedUser, getUserRepositories, getStarredRepos, isStarred, starRepo, unstarRepo, getRepositoryPullRequests, resetRateLimit } from '../github.mjs';
 import { removeToken } from '../config.mjs';
 import { startInput, registerInputHandler } from '../input.mjs';
 import { shortNum, relTime, truncate, displayWidth } from '../utils.mjs';
@@ -128,6 +128,7 @@ export async function loadUserData({ loadDashboard = true, awaitBackground = fal
       const status = e && e.status;
       if (status === 401 || /401|Bad credentials|Unauthorized/i.test(msg)) {
         resetAccountState();
+        resetRateLimit();
         removeToken();
         setTab(5);
         showError('Token expired or invalid — please log in again', 'Authentication', { retry: loadUserData });

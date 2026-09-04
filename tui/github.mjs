@@ -38,9 +38,12 @@ export const lastScopes = { scopes: [], accepted: [] };
 // `remaining` must never push the displayed counter back up (4923 → 4924),
 // and the 60s `/rate_limit` poll must not jitter it either. Rules:
 //   - stale window (incoming reset < stored reset) → ignore entirely;
-//   - new window (reset moved forward), changed limit, or first baseline
-//     → accept wholesale (a fresh window legitimately restores remaining);
+//   - new window (reset moved forward) or first baseline → accept wholesale
+//     (a fresh window legitimately restores remaining);
 //   - same window → `remaining` only moves down (take the minimum).
+// A changed `limit` alone never triggers a wholesale accept: a delayed
+// response from another bucket/account would otherwise yank `remaining` up
+// or flip the limit. Account switches must call resetRateLimit() instead.
 // Returns lastRateLimit for convenience. All inputs are validated so a
 // malformed value can never poison the counter with NaN.
 export function updateRateLimit(limit, remaining, reset) {
@@ -57,17 +60,23 @@ export function updateRateLimit(limit, remaining, reset) {
     ? Math.min(Math.max(v, 0), effectiveLimit)
     : Math.max(v, 0);
   const newWindow = resetOk && Number.isFinite(storedReset) && reset > storedReset;
-  const limitChanged = limOk && Number.isFinite(lastRateLimit.limit) && limit !== lastRateLimit.limit;
-  if (newWindow || limitChanged || lastRateLimit.remaining === null || lastRateLimit.remaining === undefined) {
+  const baseline = lastRateLimit.remaining === null || lastRateLimit.remaining === undefined;
+  if (newWindow || baseline) {
     if (limOk) lastRateLimit.limit = limit;
     if (remOk) lastRateLimit.remaining = clampRemaining(remaining);
     if (resetOk) lastRateLimit.reset = reset;
     return lastRateLimit;
   }
   if (remOk) {
-    const clamped = clampRemaining(remaining);
-    if (!Number.isFinite(lastRateLimit.remaining) || clamped < lastRateLimit.remaining) {
-      lastRateLimit.remaining = clamped;
+    // Never mix budgets: a same-window response carrying a different limit
+    // belongs to another bucket/account — its `remaining` must not drag the
+    // stored counter down (or mix into e.g. 59/5000).
+    const limitMismatch = limOk && Number.isFinite(lastRateLimit.limit) && limit !== lastRateLimit.limit;
+    if (!limitMismatch) {
+      const clamped = clampRemaining(remaining);
+      if (!Number.isFinite(lastRateLimit.remaining) || clamped < lastRateLimit.remaining) {
+        lastRateLimit.remaining = clamped;
+      }
     }
   }
   if (limOk && !Number.isFinite(lastRateLimit.limit)) lastRateLimit.limit = limit;
@@ -75,20 +84,42 @@ export function updateRateLimit(limit, remaining, reset) {
   return lastRateLimit;
 }
 
-// Authoritative resync from the `/rate_limit` endpoint body (ground truth
-// for the current window). Unlike updateRateLimit() — which only lets the
+// Reset the live counter on logout / login / token-expiry so the next
+// session starts from a clean baseline instead of inheriting the previous
+// account's budget (5000 vs 60 would otherwise flap via stale headers).
+export function resetRateLimit() {
+  lastRateLimit.remaining = null;
+  lastRateLimit.limit = null;
+  lastRateLimit.reset = null;
+  lastScopes.scopes = [];
+  lastScopes.accepted = [];
+  return lastRateLimit;
+}
+
+// Authoritative resync from the `/rate_limit` endpoint body — but ONLY
+// within the same window. Unlike updateRateLimit() — which only lets the
 // counter move DOWN between polls so out-of-order responses can't jitter
-// it — this overwrites all three fields, so a counter that drifted or got
-// pinned (stale cache, bucket flap, missed headers) self-corrects on the
-// next 60s poll, in BOTH directions. Only the rate-limit poll may call
-// this; per-request headers must keep using updateRateLimit(). All inputs
-// are validated; a malformed payload leaves the counter untouched.
+// it — this overwrites limit/remaining, so a counter that drifted or got
+// pinned self-corrects on the next 60s poll, in BOTH directions.
+// Window guard: the `/rate_limit` endpoint has been observed live returning
+// a DIFFERENT window than per-request core headers (poll body: 5000 used 0
+// reset T+60min; live headers seconds apart: 4594 used 406 reset T+18min).
+// Blindly overwriting pinned the counter at 5000 forever, erasing real
+// consumption. So a poll whose reset differs from the live mirror is
+// ignored — live headers own cross-window movement (newWindow restore),
+// the poll only corrects drift inside the current window. Baseline (no
+// stored reset yet) still accepts. Only the rate-limit poll may call this;
+// per-request headers must keep using updateRateLimit(). All inputs are
+// validated; a malformed payload leaves the counter untouched.
 export function resyncRateLimit(limit, remaining, reset) {
   if (!Number.isFinite(limit) || limit <= 0) return lastRateLimit;
   if (!Number.isFinite(remaining)) return lastRateLimit;
+  const resetOk = Number.isFinite(reset) && reset > 0;
+  const storedReset = lastRateLimit.reset;
+  if (resetOk && Number.isFinite(storedReset) && reset !== storedReset) return lastRateLimit;
   lastRateLimit.limit = limit;
   lastRateLimit.remaining = Math.min(Math.max(remaining, 0), limit);
-  if (Number.isFinite(reset) && reset > 0) lastRateLimit.reset = reset;
+  if (resetOk) lastRateLimit.reset = reset;
   return lastRateLimit;
 }
 
@@ -403,23 +434,30 @@ export function request(path, opts) {
 
     req = https.request(options, (res) => {
       // Mirror the core rate-limit budget into lastRateLimit for the header
-      // counter. Two guards matter:
+      // counter. Guards:
       // 1. `x-ratelimit-resource` tells which bucket these headers belong to.
       //    Search/code-search endpoints carry tiny limits (e.g. 30/min) — adopting
       //    those would make the `API n/5000` indicator flicker to `n/30` after
       //    every search. Only `core` (or responses without the header, e.g.
       //    older GHES) update the counter.
-      // 2. Updates go through updateRateLimit(): parallel responses arrive out
+      // 2. `/rate_limit` responses are excluded: the endpoint reports a
+      //    different window/budget than live core headers (observed live:
+      //    poll 5000/used-0/reset-T+60min vs core headers 4594/used-406/
+      //    reset-T+18min seconds apart). Mirroring it would yank the counter
+      //    to 5000 via newWindow on every 60s poll. The poll body is handled
+      //    separately by window-guarded resyncRateLimit().
+      // 3. Updates go through updateRateLimit(): parallel responses arrive out
       //    of order, so a stale higher `remaining` must never push the counter
       //    back up, and malformed headers must never poison it with NaN.
+      const isRateLimitProbe = path === '/rate_limit' || path.startsWith('/rate_limit?');
       const resource = res.headers['x-ratelimit-resource'];
-      if (resource === undefined || resource === 'core') {
-        const rlParsed = res.headers['x-ratelimit-limit'] !== undefined
-          ? parseInt(res.headers['x-ratelimit-limit'], 10) : NaN;
-        const rrParsed = res.headers['x-ratelimit-remaining'] !== undefined
-          ? parseInt(res.headers['x-ratelimit-remaining'], 10) : NaN;
-        const rsParsed = res.headers['x-ratelimit-reset'] !== undefined
-          ? parseInt(res.headers['x-ratelimit-reset'], 10) : NaN;
+      const rlParsed = res.headers['x-ratelimit-limit'] !== undefined
+        ? parseInt(res.headers['x-ratelimit-limit'], 10) : NaN;
+      const rrParsed = res.headers['x-ratelimit-remaining'] !== undefined
+        ? parseInt(res.headers['x-ratelimit-remaining'], 10) : NaN;
+      const rsParsed = res.headers['x-ratelimit-reset'] !== undefined
+        ? parseInt(res.headers['x-ratelimit-reset'], 10) : NaN;
+      if (!isRateLimitProbe && (resource === undefined || resource === 'core')) {
         // Monotonic: out-of-order responses can't push the counter back up.
         updateRateLimit(rlParsed, rrParsed, rsParsed);
       }
@@ -884,7 +922,7 @@ export const getRepoLabels = (token, owner, repo, page, perPage, signal) =>
 
 // ─── Checks/CI ─────────────────────────────────────────────────────
 export const getRepoCheckRuns = (token, owner, repo, ref, signal) =>
-  request('/repos/' + owner + '/' + repo + '/commits/' + encodeURIComponent(ref || 'HEAD') + '/check-runs', { token, signal });
+  request('/repos/' + owner + '/' + repo + '/commits/' + encodeURIComponent(ref || 'HEAD') + '/check-runs?per_page=100', { token, signal });
 
 export const getRepoCheckSuites = (token, owner, repo, ref, signal) =>
   request('/repos/' + owner + '/' + repo + '/commits/' + encodeURIComponent(ref || 'HEAD') + '/check-suites', { token, signal });
