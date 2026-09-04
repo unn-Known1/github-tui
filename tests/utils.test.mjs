@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import {
   relTime, clamp, truncate, truncateToWidth, padRight, displayWidth, shortNum, formatBytes,
   greeting, eventGlyph, notifTypeColor, notificationToHtmlUrl,
-  ghCloneUrl, wrapText, wrapTextWithMap, sliceByDisplayColumns,
+  ghCloneUrl, wrapText, wrapTextWithMap, sliceByDisplayColumns, charCellWidth,
 } from '../tui/utils.mjs';
 
 describe('relTime', () => {
@@ -80,6 +80,31 @@ describe('display-width helpers', () => {
   });
   it('pads wide strings to the requested cell width', () => {
     assert.equal(padRight('中', 4), '中  ');
+  });
+  it('counts status emoji as two cells (terminals render them wide)', () => {
+    assert.equal(displayWidth('✅'), 2);
+    assert.equal(displayWidth('❌'), 2);
+    assert.equal(displayWidth('⚠'), 2);
+    assert.equal(displayWidth('⏳'), 2);
+    assert.equal(displayWidth('⭐'), 2);
+    assert.equal(displayWidth('❓'), 2);
+    assert.equal(displayWidth('✅ 2 passed'), 11);
+  });
+  it('keeps narrow UI glyphs at one cell', () => {
+    for (const ch of ['★', '☆', '▶', '◉', '○', '│', '─', '█', '░', '✕', '…', '⇄']) {
+      assert.equal(displayWidth(ch), 1, ch);
+    }
+  });
+  it('counts a VS16 emoji pair as one 2-cell unit', () => {
+    assert.equal(displayWidth('©'), 1);
+    assert.equal(displayWidth('©\uFE0F'), 2);
+    assert.equal(displayWidth('⚠\uFE0F'), 2);
+    assert.deepEqual(charCellWidth(Array.from('©\uFE0F'), 0), { width: 2, units: 2 });
+  });
+  it('never splits a VS16 pair when truncating', () => {
+    assert.equal(truncateToWidth('©\uFE0Fx', 3), '©\uFE0Fx');
+    assert.equal(truncateToWidth('©\uFE0Fabc', 4), '©\uFE0Fa…');
+    assert.equal(truncateToWidth('x©\uFE0Fyz', 4), 'x©\uFE0F…');
   });
 });
 

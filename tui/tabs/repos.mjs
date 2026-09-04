@@ -6,7 +6,7 @@ import { appState, render, startAsync, isStale, showMessage, setTab, upsertEntit
 import { getAuthenticatedUser, getUserRepositories, getStarredRepos, isStarred, starRepo, unstarRepo, getRepositoryPullRequests } from '../github.mjs';
 import { removeToken } from '../config.mjs';
 import { startInput, registerInputHandler } from '../input.mjs';
-import { shortNum, relTime, truncate } from '../utils.mjs';
+import { shortNum, relTime, truncate, displayWidth } from '../utils.mjs';
 import { color } from '../theme.mjs';
 import { emptyState, scrollIndicators, getBreakpoint } from '../render.mjs';
 import { loadDashboardWidgets, recomputeDashboardDerived } from './dashboard.mjs';
@@ -471,9 +471,11 @@ export function renderRepos(screen, y, h) {
     for (let ci = 0; ci < chips.length; ci++) {
       const chip = chips[ci];
       const text = ' ' + chip.label + ' ✕ ';
-      if (chipX + text.length > starRight - 2) {
+      // Cell-based math: filter text is user-typed and may hold CJK/emoji.
+      const textW = displayWidth(text);
+      if (chipX + textW > starRight - 2) {
         const overflowText = ' +' + (chips.length - ci) + ' ';
-        if (chipX + overflowText.length <= starRight - 2) {
+        if (chipX + displayWidth(overflowText) <= starRight - 2) {
           screen.writeStr(chipX, chipY, overflowText, { bg: 'darkGray', fg: 'white' });
         }
         break;
@@ -481,8 +483,8 @@ export function renderRepos(screen, y, h) {
       screen.writeStr(chipX, chipY, text, { bg: 'darkGray', fg: 'cyan' });
       // Store chip positions for click-to-dismiss.
       chip._x1 = chipX;
-      chip._x2 = chipX + text.length;
-      chipX += text.length + 1;
+      chip._x2 = chipX + textW;
+      chipX += textW + 1;
     }
     // Sort + density indicator on the right (kept clear of the star button).
     const sortInfo = REPO_SORT_OPTIONS.find(o => o.field === appState.repoSort.field);

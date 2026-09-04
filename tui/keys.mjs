@@ -230,6 +230,13 @@ function refreshCurrent() {
   } else if (t === 1) {
     repos.loadUserData();
   } else if (t === 2 && appState.analyzeView === 'details' && appState.repoDetails) {
+    // Files sub-pane refreshes in place (tree or file) so `r` doesn't kick
+    // the user back to Overview and lose their place in the tree.
+    if (appState.detailsPane === 'files') {
+      import('./tabs/files.mjs').then(m => m.refreshFiles()).catch(e =>
+        showMessage('Refresh failed: ' + (e && e.message || 'unknown'), 'error'));
+      return;
+    }
     const [o, n] = appState.repoDetails.full_name.split('/');
     analyze.loadRepoDetails(o, n);
   } else if (t === 3) {
@@ -511,8 +518,26 @@ export function handleKey(key) {
       }
       return;
     }
-    case 'o': openCurrent(); return;
-    case 'y': copyCurrentUrl(); return;
+    case 'o':
+      // In the Files sub-pane, `o` opens the viewed/selected file (blob),
+      // the current directory (tree), or the selected history commit —
+      // not just the repo root. Explicit dispatch like B/G/Z above.
+      if (tabState.current === 2 && appState.analyzeView === 'details' && appState.detailsPane === 'files') {
+        import('./tabs/files.mjs').then(m => m.openFileInBrowser()).catch(e =>
+          showMessage('Open failed: ' + (e && e.message || 'unknown'), 'error'));
+        return;
+      }
+      openCurrent(); return;
+    case 'y':
+      // In the Files sub-pane, `y` copies the raw github URL for the
+      // viewed/selected file (matches the pane footer hint). Everywhere
+      // else it copies the current repo/item URL as before.
+      if (tabState.current === 2 && appState.analyzeView === 'details' && appState.detailsPane === 'files') {
+        import('./tabs/files.mjs').then(m => m.copyRawUrl()).catch(e =>
+          showMessage('Copy failed: ' + (e && e.message || 'unknown'), 'error'));
+        return;
+      }
+      copyCurrentUrl(); return;
     case 'b': {
       if (tabState.current === 2 && appState.analyzeView === 'details' && appState.detailsPane === 'files') {
         import('./tabs/files.mjs').then(m => m.openFileBlame()).catch(e => showMessage('Blame failed: ' + (e?.message || 'unknown'), 'error'));
@@ -1061,6 +1086,26 @@ export function registerCoreActions() {
         hint: 'Y', run: () => { setTab(2); return import('./tabs/files.mjs').then(m => m.keys.Y()); } });
   reg({ id: 'files.history', label: 'Files: per-file commit history',
         hint: 'H', run: () => { setTab(2); return import('./tabs/files.mjs').then(m => m.keys.H()); } });
+  reg({ id: 'files.blame', label: 'Files: git blame for current file',
+        hint: 'b', run: () => { setTab(2); return import('./tabs/files.mjs').then(m => m.keys.b()); } });
+  reg({ id: 'files.copy-raw', label: 'Files: copy raw file URL',
+        hint: 'y', run: () => { setTab(2); return import('./tabs/files.mjs').then(m => m.copyRawUrl()); } });
+  reg({ id: 'files.copy-path', label: 'Files: copy repo-relative file path',
+        hint: 'p', run: () => { setTab(2); return import('./tabs/files.mjs').then(m => m.copyFilePath()); } });
+  reg({ id: 'files.open-browser', label: 'Files: open file / folder in browser',
+        hint: 'o', run: () => { setTab(2); return import('./tabs/files.mjs').then(m => m.openFileInBrowser()); } });
+  reg({ id: 'files.filter', label: 'Files: filter current directory...',
+        hint: '/', run: () => { setTab(2); return import('./tabs/files.mjs').then(m => m.promptFilesFilter()); } });
+  reg({ id: 'files.clear-filter', label: 'Files: clear directory filter',
+        hint: 'c', run: () => { setTab(2); return import('./tabs/files.mjs').then(m => m.clearFilesFilter()); } });
+  reg({ id: 'files.sort', label: 'Files: cycle tree sort (name/size/type)',
+        hint: 't', run: () => { setTab(2); return import('./tabs/files.mjs').then(m => m.cycleFilesSort()); } });
+  reg({ id: 'files.goto', label: 'Files: go to file path...',
+        hint: 'e', run: () => { setTab(2); return import('./tabs/files.mjs').then(m => m.promptGoToPath()); } });
+  reg({ id: 'files.refresh', label: 'Files: refresh tree / file',
+        hint: 'r', run: () => { setTab(2); return import('./tabs/files.mjs').then(m => m.refreshFiles()); } });
+  reg({ id: 'files.history-browser', label: 'Files: open selected history commit in browser',
+        hint: 'o', run: () => { setTab(2); return import('./tabs/files.mjs').then(m => m.openHistoryCommitInBrowser()); } });
 
   reg({ id: 'undo.undo', label: 'Undo last action', hint: 'u',
         run: () => undo() });

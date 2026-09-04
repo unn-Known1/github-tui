@@ -10,6 +10,8 @@ import { isSettingsCursorEnabled, down as settingsDown } from '../tui/tabs/setti
 import { rawFileUrl } from '../tui/tabs/files.mjs';
 import { securityStateOptions } from '../tui/tabs/analyze-security.mjs';
 import { Screen } from '../tui/screen.mjs';
+import { displayWidth } from '../tui/utils.mjs';
+import { renderAnalyze } from '../tui/tabs/analyze.mjs';
 import * as onboarding from '../tui/tabs/onboarding.mjs';
 
 describe('audit regressions', () => {
@@ -155,6 +157,71 @@ describe('audit regressions', () => {
       assert.equal(writes.length, firstWriteCount);
     } finally {
       process.stdout.write = originalWrite;
+    }
+  });
+
+  it('paints emoji without sliding following text underneath', () => {
+    const screen = new Screen();
+    screen.width = 20;
+    screen.height = 3;
+    screen._init();
+    // Emulate renderer cursor math: advance by cells, then write.
+    screen.writeStr(2, 0, '✅');
+    const nx = 2 + displayWidth('✅');
+    assert.equal(nx, 4);
+    screen.writeStr(nx, 0, 'AB');
+    assert.equal(screen.charBuf[0][2], '✅');
+    assert.equal(screen.charBuf[0][4], 'A');
+    assert.equal(screen.charBuf[0][5], 'B');
+  });
+
+  it('does not spill a wide glyph past the last column', () => {
+    const screen = new Screen();
+    screen.width = 10;
+    screen.height = 2;
+    screen._init();
+    screen.writeStr(9, 0, '✅');
+    assert.equal(screen.charBuf[0][9], ' ');
+  });
+
+  it('anchors overview badges after wide repo names instead of overdrawing them', () => {
+    const saved = {
+      token: appState.token,
+      analyzeView: appState.analyzeView,
+      detailsPane: appState.detailsPane,
+      repoDetails: appState.repoDetails,
+      repoLanguages: appState.repoLanguages,
+      repoContributors: appState.repoContributors,
+      repoReleases: appState.repoReleases,
+      repoReleaseAssets: appState.repoReleaseAssets,
+      repoIssues: appState.repoIssues,
+      repoPullRequests: appState.repoPullRequests,
+      repoHealth: appState.repoHealth,
+    };
+    try {
+      appState.token = null;
+      appState.analyzeView = 'details';
+      appState.detailsPane = 'overview';
+      appState.repoDetails = { full_name: 'octo/日本語-repo', private: true };
+      appState.repoLanguages = {};
+      appState.repoContributors = [];
+      appState.repoReleases = [];
+      appState.repoReleaseAssets = [];
+      appState.repoIssues = [];
+      appState.repoPullRequests = [];
+      appState.repoHealth = null;
+      const screen = new Screen();
+      screen.width = 100;
+      screen.height = 30;
+      screen._init();
+      renderAnalyze(screen, 0, 30);
+      const nameW = displayWidth('octo/日本語-repo');
+      assert.equal(nameW, 16);
+      // Badge ' [Private]' starts right after the name's last cell.
+      assert.equal(screen.charBuf[2][2 + nameW], ' ');
+      assert.equal(screen.charBuf[2][2 + nameW + 1], '[');
+    } finally {
+      Object.assign(appState, saved);
     }
   });
 

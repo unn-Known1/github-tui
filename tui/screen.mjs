@@ -3,6 +3,7 @@ const RESET = `${ESC}[0m`;
 
 import { NO_COLOR, FORCE_COLOR as _FORCE_COLOR_CFG } from './config.mjs';
 import { isAccessible } from './theme.mjs';
+import { isCombiningCodePoint, isWideCodePoint, isEmojiPresentationBase, charCellWidth } from './utils.mjs';
 
 // ── Terminal capability detection (done early, used by compileStyle) ──
 const TERM = process.env.TERM || '';
@@ -187,43 +188,22 @@ function compileStyle(s) {
   return parts.length > 0 ? parts.join('') : null;
 }
 
-// Unicode safe cell width — handles CJK wide characters and ESC sequences.
-// CJK Compatibility Ideographs, Hiragana, Katakana, Hangul, etc. occupy 2 cells.
-function isCombiningCodePoint(cp) {
-  return (cp >= 0x0300 && cp <= 0x036F) ||
-    (cp >= 0x1AB0 && cp <= 0x1AFF) ||
-    (cp >= 0x1DC0 && cp <= 0x1DFF) ||
-    (cp >= 0x20D0 && cp <= 0x20FF) ||
-    (cp >= 0xFE20 && cp <= 0xFE2F) || cp === 0x200D ||
-    (cp >= 0xFE00 && cp <= 0xFE0F);
-}
-
-function isWideCodePoint(cp) {
-  return (cp >= 0x1100 && cp <= 0x115F) || // Hangul Jamo
-    cp === 0x2329 || cp === 0x232A ||
-    (cp >= 0x2E80 && cp <= 0x303E) || // CJK Radicals, Kangxi, Ideographic
-    (cp >= 0x3040 && cp <= 0x33BF) || // Hiragana, Katakana, Bopomofo, Hangul
-    (cp >= 0x3400 && cp <= 0x4DBF) || // CJK Unified Ideographs Extension A
-    (cp >= 0x4E00 && cp <= 0xA4CF) || // CJK Unified, Yi
-    (cp >= 0xAC00 && cp <= 0xD7A3) || // Hangul Syllables
-    (cp >= 0xF900 && cp <= 0xFAFF) || // CJK Compatibility Ideographs
-    (cp >= 0xFE30 && cp <= 0xFE6F) || // CJK Compatibility Forms
-    (cp >= 0xFF01 && cp <= 0xFF60) || // Fullwidth Forms
-    (cp >= 0xFFE0 && cp <= 0xFFE6) ||
-    (cp >= 0x1F300 && cp <= 0x1FAFF) || // Emoji + pictographs (agree with utils.mjs isWide)
-    (cp >= 0x20000 && cp <= 0x2FFFD) || // CJK Unified Extension B-F
-    (cp >= 0x30000 && cp <= 0x3FFFD);
-}
+// Width helpers (isCombiningCodePoint / isWideCodePoint / charCellWidth) are
+// imported from utils.mjs — the single source of truth shared with truncate
+// and cursor math, so painting and measuring can never disagree on emoji.
 
 function sliceCells(s, width) {
   if (width <= 0) return '';
+  const chars = Array.from(String(s ?? ''));
   let out = '';
   let used = 0;
-  for (const ch of Array.from(String(s ?? ''))) {
-    const w = strWidth(ch);
+  let i = 0;
+  while (i < chars.length) {
+    const { width: w, units } = charCellWidth(chars, i);
     if (used + w > width) break;
-    out += ch;
+    out += chars.slice(i, i + units).join('');
     used += w;
+    i += units;
   }
   return out;
 }
@@ -266,7 +246,12 @@ function strWidth(s) {
         i++;
       }
     }
-    if (!isCombiningCodePoint(cp)) w += isWideCodePoint(cp) ? 2 : 1;
+    if (isCombiningCodePoint(cp)) continue;
+    // Text-presentation symbol + VS16 (U+FE0F) renders as one 2-cell emoji
+    // unit — mirrors charCellWidth() in utils.mjs for raw-string scanning.
+    let cw = isWideCodePoint(cp) ? 2 : 1;
+    if (cw === 1 && isEmojiPresentationBase(cp) && s[i + 1] === '\uFE0F') cw = 2;
+    w += cw;
   }
   return w;
 }
@@ -345,24 +330,26 @@ export class Screen {
   writeStr(x, y, str, style = null) {
     y = this.mapViewportY(y);
     if (y < 0 || y >= this.height) return;
-    const chars = Array.from(str);
+    const chars = Array.from(str ?? '');
     let cx = x;
     for (let i = 0; i < chars.length; i++) {
-      const ch = chars[i];
-      const cp = ch.codePointAt(0);
-      if (isCombiningCodePoint(cp)) continue;
-      const w = isWideCodePoint(cp) ? 2 : 1;
+      const { width: w, units } = charCellWidth(chars, i);
+      if (w === 0) continue; // combining mark / consumed VS16 — no cell
       if (cx < 0 || cx >= this.width) break;
-      this.charBuf[y][cx] = ch;
+      // A wide glyph with no room for its second cell would spill onto the
+      // next terminal row — leave the cleared space instead.
+      if (w === 2 && cx + 1 >= this.width) break;
+      this.charBuf[y][cx] = chars.slice(i, i + units).join('');
       this.styleBuf[y][cx] = style;
       // For wide characters, fill the next cell with a continuation marker
-      if (w === 2 && cx + 1 < this.width) {
+      if (w === 2) {
         // U9b: plain space under --accessible so screen-reader/copy buffers
         // don't collect invisible ZWSP bytes; ZWSP otherwise.
         this.charBuf[y][cx + 1] = isAccessible() ? ' ' : '\u200B'; // zero-width space as filler
         this.styleBuf[y][cx + 1] = style;
       }
       cx += w;
+      i += units - 1; // skip a consumed variation selector
     }
   }
 
@@ -371,19 +358,19 @@ export class Screen {
   writeStrNoStyle(x, y, str) {
     y = this.mapViewportY(y);
     if (y < 0 || y >= this.height) return;
-    const chars = Array.from(str);
+    const chars = Array.from(str ?? '');
     let cx = x;
     for (let i = 0; i < chars.length; i++) {
-      const ch = chars[i];
-      const cp = ch.codePointAt(0);
-      if (isCombiningCodePoint(cp)) continue;
-      const w = isWideCodePoint(cp) ? 2 : 1;
+      const { width: w, units } = charCellWidth(chars, i);
+      if (w === 0) continue;
       if (cx < 0 || cx >= this.width) break;
-      this.charBuf[y][cx] = ch;
-      if (w === 2 && cx + 1 < this.width) {
+      if (w === 2 && cx + 1 >= this.width) break;
+      this.charBuf[y][cx] = chars.slice(i, i + units).join('');
+      if (w === 2) {
         this.charBuf[y][cx + 1] = isAccessible() ? ' ' : '\u200B';
       }
       cx += w;
+      i += units - 1;
     }
   }
 

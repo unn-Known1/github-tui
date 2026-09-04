@@ -21,7 +21,17 @@ export function clamp(n, lo, hi) {
 // Terminal-cell width helpers. JavaScript string length counts UTF-16 code
 // units, not the cells a terminal paints. Keep these pure so every pane can
 // share the same behavior without depending on the renderer.
-function isCombining(cp) {
+//
+// The tables below are shared with screen.mjs (imported from here) so
+// measuring text (truncate, cursor math) and painting text (writeStr) can
+// never disagree — that disagreement is what draws emoji UNDER following
+// text. Rules:
+//   - East-Asian wide ranges + emoji pictographs → 2 cells.
+//   - Common status icons that modern terminals render as emoji
+//     (✅ ❌ ⚠️ ⏳ ⭐ ‼ ⁉ ⌚ ⌛ Ⓜ ❓) → 2 cells even without VS16.
+//   - A text-presentation symbol followed by U+FE0F (VS16, e.g. ©️ ◉️) →
+//     2 cells for the pair; the VS16 itself contributes 0.
+export function isCombiningCodePoint(cp) {
   return (cp >= 0x0300 && cp <= 0x036F) ||
     (cp >= 0x1AB0 && cp <= 0x1AFF) ||
     (cp >= 0x1DC0 && cp <= 0x1DFF) ||
@@ -30,23 +40,88 @@ function isCombining(cp) {
     (cp >= 0xFE00 && cp <= 0xFE0F);
 }
 
-function isWide(cp) {
+// Exported (as isWideCodePoint) for screen.mjs — the single source of truth
+// for cell widths.
+export function isWideCodePoint(cp) {
   return (cp >= 0x1100 && cp <= 0x115F) || cp === 0x2329 || cp === 0x232A ||
-    (cp >= 0x2E80 && cp <= 0x303E) || (cp >= 0x3040 && cp <= 0x33BF) ||
-    (cp >= 0x3400 && cp <= 0x4DBF) || (cp >= 0x4E00 && cp <= 0xA4CF) ||
-    (cp >= 0xAC00 && cp <= 0xD7A3) || (cp >= 0xF900 && cp <= 0xFAFF) ||
-    (cp >= 0xFE30 && cp <= 0xFE6F) || (cp >= 0xFF01 && cp <= 0xFF60) ||
-    (cp >= 0xFFE0 && cp <= 0xFFE6) || (cp >= 0x1F300 && cp <= 0x1FAFF) ||
+    (cp >= 0x203C && cp <= 0x203C) || // ‼
+    (cp >= 0x2049 && cp <= 0x2049) || // ⁉
+    (cp >= 0x231A && cp <= 0x231B) || // ⌚ ⌛
+    (cp >= 0x23E9 && cp <= 0x23EC) || // ⏩ ⏪ ⏫ ⏬
+    cp === 0x23F0 || cp === 0x23F3 || // ⏰ ⏳
+    cp === 0x24C2 || // Ⓜ
+    cp === 0x2705 || cp === 0x274C || // ✅ ❌
+    (cp >= 0x2753 && cp <= 0x2755) || // ❓ ❔ ❕
+    cp === 0x26A0 || // ⚠
+    cp === 0x2B50 || cp === 0x2B55 || // ⭐ ⭕
+    (cp >= 0x2E80 && cp <= 0x303E) ||
+    (cp >= 0x3040 && cp <= 0x33BF) ||
+    (cp >= 0x3400 && cp <= 0x4DBF) ||
+    (cp >= 0x4E00 && cp <= 0xA4CF) ||
+    (cp >= 0xAC00 && cp <= 0xD7A3) ||
+    (cp >= 0xF900 && cp <= 0xFAFF) ||
+    (cp >= 0xFE30 && cp <= 0xFE6F) ||
+    (cp >= 0xFF01 && cp <= 0xFF60) ||
+    (cp >= 0xFFE0 && cp <= 0xFFE6) ||
+    (cp >= 0x1F300 && cp <= 0x1FAFF) ||
     (cp >= 0x20000 && cp <= 0x3FFFD);
+}
+
+// Text-presentation symbols that switch to emoji (2-cell) presentation when
+// followed by U+FE0F. Subset of Unicode Emoji=Yes (text-default) code points.
+const VS16_RANGES = [
+  [0x00A9, 0x00A9], [0x00AE, 0x00AE], [0x203C, 0x203C], [0x2049, 0x2049],
+  [0x2122, 0x2122], [0x231A, 0x231B], [0x23E9, 0x23F3], [0x24C2, 0x24C2],
+  [0x25B6, 0x25B6], [0x25C0, 0x25C0], [0x25FB, 0x25FE],
+  [0x2600, 0x2604], [0x260E, 0x260E], [0x2611, 0x2611], [0x2614, 0x2615],
+  [0x2618, 0x2618], [0x261D, 0x261D], [0x2620, 0x2620], [0x2622, 0x2623],
+  [0x2626, 0x2626], [0x262A, 0x262A], [0x262E, 0x262F], [0x2638, 0x263A],
+  [0x2640, 0x2640], [0x2642, 0x2642], [0x2648, 0x2653], [0x265F, 0x265F],
+  [0x2660, 0x2660], [0x2663, 0x2663], [0x2665, 0x2666], [0x2668, 0x2668],
+  [0x267B, 0x267B], [0x267E, 0x267F], [0x2692, 0x2697], [0x2699, 0x2699],
+  [0x269B, 0x269C], [0x26A0, 0x26A1], [0x26A7, 0x26A7], [0x26AA, 0x26AB],
+  [0x26B0, 0x26B1], [0x26BD, 0x26BE], [0x26C4, 0x26C5], [0x26C8, 0x26C8],
+  [0x26CE, 0x26CF], [0x26D1, 0x26D1], [0x26D3, 0x26D4], [0x26E9, 0x26EA],
+  [0x26F0, 0x26F5], [0x26F7, 0x26FA], [0x26FD, 0x26FD], [0x2702, 0x2702],
+  [0x2705, 0x2705], [0x2708, 0x270D], [0x270F, 0x270F], [0x2712, 0x2712],
+  [0x2714, 0x2714], [0x2716, 0x2716], [0x271D, 0x271D], [0x2721, 0x2721],
+  [0x2728, 0x2728], [0x2733, 0x2734], [0x2744, 0x2744], [0x2747, 0x2747],
+  [0x274C, 0x274C], [0x274E, 0x274E], [0x2753, 0x2755], [0x2757, 0x2757],
+  [0x2763, 0x2764], [0x2795, 0x2797], [0x27A1, 0x27A1], [0x27B0, 0x27B0],
+  [0x27BF, 0x27BF], [0x2B1B, 0x2B1C], [0x2B50, 0x2B50], [0x2B55, 0x2B55],
+  [0x3030, 0x3030], [0x303D, 0x303D], [0x3297, 0x3297], [0x3299, 0x3299],
+];
+
+export function isEmojiPresentationBase(cp) {
+  for (let i = 0; i < VS16_RANGES.length; i++) {
+    if (cp >= VS16_RANGES[i][0] && cp <= VS16_RANGES[i][1]) return true;
+  }
+  return false;
+}
+
+const VS16 = '\uFE0F';
+
+// Width of chars[i] in cells, with VS16 lookahead. Returns { width, units }
+// where units is how many JS-string elements the cell(s) consume (a base +
+// its variation selector count as one 2-cell unit so truncation never splits
+// the pair). Exported for screen.mjs.
+export function charCellWidth(chars, i) {
+  const cp = chars[i].codePointAt(0);
+  if (isCombiningCodePoint(cp)) return { width: 0, units: 1 };
+  let width = isWideCodePoint(cp) ? 2 : 1;
+  let units = 1;
+  if (width === 1 && isEmojiPresentationBase(cp) && chars[i + 1] === VS16) {
+    width = 2;
+    units = 2;
+  }
+  return { width, units };
 }
 
 export function displayWidth(value) {
   const chars = Array.from(String(value ?? ''));
   let width = 0;
-  for (const ch of chars) {
-    const cp = ch.codePointAt(0);
-    if (isCombining(cp)) continue;
-    width += isWide(cp) ? 2 : 1;
+  for (let i = 0; i < chars.length; i++) {
+    width += charCellWidth(chars, i).width;
   }
   return width;
 }
@@ -56,10 +131,10 @@ function takeToWidth(chars, width) {
   let used = 0;
   let count = 0;
   while (count < chars.length) {
-    const w = displayWidth(chars[count]);
+    const { width: w, units } = charCellWidth(chars, count);
     if (used + w > width) break;
     used += w;
-    count++;
+    count += units;
   }
   // Always make progress for a single wide glyph in a one-cell viewport.
   if (count === 0 && chars.length > 0) count = 1;

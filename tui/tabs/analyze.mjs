@@ -10,7 +10,7 @@ import {
   getRepoCheckRuns, getRepoDependabotAlerts, getBranchProtection,
 } from '../github.mjs';
 import { startInput } from '../input.mjs';
-import { shortNum, truncate, openUrl, sectionHeader, formatBytes } from '../utils.mjs';
+import { shortNum, truncate, truncateToWidth, displayWidth, padRight, openUrl, sectionHeader, formatBytes, relTime, wrapText } from '../utils.mjs';
 import { color } from '../theme.mjs';
 import { loadForks, loadMoreForks, renderForks, toggleForkSort } from './forks.mjs';
 import * as files from './files.mjs';
@@ -57,6 +57,73 @@ function clearTextSelection() {
   appState.textSelectionMode = 'none';
   appState.textSelectStart = null;
   appState.textSelectEnd = null;
+}
+
+// ─── Overview pure helpers (exported for tests) ─────────────────────
+
+// Status badges for the Overview title row. Each badge is { label, role }
+// where role is a theme color role understood by color(). Order is stable:
+// visibility first, then lifecycle flags.
+export function repoStatusBadges(repo) {
+  if (!repo) return [];
+  const badges = [];
+  if (repo.private) badges.push({ label: 'Private', role: 'warning' });
+  else badges.push({ label: String(repo.visibility || 'Public'), role: 'success' });
+  if (repo.fork) badges.push({ label: 'Fork', role: 'fork' });
+  if (repo.archived) badges.push({ label: 'Archived', role: 'dim' });
+  if (repo.is_template) badges.push({ label: 'Template', role: 'accent' });
+  if (repo.disabled) badges.push({ label: 'Disabled', role: 'error' });
+  return badges;
+}
+
+// Short human age of the repo: '3y', '5mo', '12d', '4h', or 'N/A' when the
+// timestamp is missing / unparseable. `nowMs` is injectable for tests.
+export function repoAge(createdAt, nowMs) {
+  if (!createdAt) return 'N/A';
+  const ms = Date.parse(createdAt);
+  if (Number.isNaN(ms)) return 'N/A';
+  const now = typeof nowMs === 'number' ? nowMs : Date.now();
+  const days = Math.max(0, Math.floor((now - ms) / 86400000));
+  if (days >= 730) return Math.floor(days / 365) + 'y';
+  if (days >= 60) return Math.floor(days / 30) + 'mo';
+  if (days >= 2) return days + 'd';
+  const hours = Math.floor(Math.max(0, now - ms) / 3600000);
+  if (hours >= 2) return hours + 'h';
+  return 'today';
+}
+
+// GitHub reports repo.size in KiB — render via formatBytes for consistency
+// with the Files pane. Guards null / NaN.
+export function formatRepoSize(sizeKb) {
+  if (sizeKb == null || Number.isNaN(Number(sizeKb))) return 'N/A';
+  return formatBytes(Math.max(0, Number(sizeKb)) * 1024);
+}
+
+// '2024-01-01 (3d ago)' compound stamp; falls back to the raw value when
+// the date is missing or unparseable.
+export function dateWithRel(iso) {
+  if (!iso) return 'N/A';
+  const ms = Date.parse(iso);
+  if (Number.isNaN(ms)) return String(iso);
+  const rel = relTime(iso);
+  const day = new Date(ms).toISOString().split('T')[0];
+  return rel ? day + ' (' + rel + ' ago)' : day;
+}
+
+// Health components in stable display order with short labels for the
+// Overview HEALTH section. Nulls (no permission / not loaded) are kept so
+// the renderer can show '—' instead of pretending the signal is healthy.
+export const HEALTH_COMPONENTS = [
+  ['ci', 'CI'],
+  ['freshness', 'Fresh'],
+  ['issues', 'Issues'],
+  ['security', 'Sec'],
+  ['protection', 'Protect'],
+];
+
+export function healthComponents(health) {
+  const comps = (health && health.components) || {};
+  return HEALTH_COMPONENTS.map(([key, label]) => ({ key, label, value: comps[key] ?? null }));
 }
 
 // E13: single reset for ALL explore-detail fields. Used by both
@@ -115,9 +182,13 @@ export function resetDetailState() {
   appState.filesPath = '';
   appState.filesSelected = 0;
   appState.filesScroll = 0;
+  appState.filesFilter = '';
+  appState.filesSort = 'name';
+  appState.filesLastMod = {};
   appState.fileViewing = null;
   appState.fileText = '';
   appState.fileScroll = 0;
+  appState.fileBinary = false;
   appState.fileHistory = [];
   appState.fileHistoryPath = '';
   appState.fileHistorySelected = 0;
@@ -263,8 +334,22 @@ function renderRepoDetails(screen, y, maxH) {
   appState._overviewAssetBounds = null;
   appState._exploreStarBounds = null;
 
-  // Repo name.
-  screen.writeStr(2, y, repo.full_name, color('title') || { fg: 'white', bold: true });
+  // Repo name + status badges (visibility / fork / archived / template).
+  // Badges stop before the right-aligned health + star button.
+  const rightReserve = (appState.detailsPane === 'overview' && appState.token) ? 32 : 18;
+  let nameX = 2;
+  const nameMax = Math.max(8, W - rightReserve - 2);
+  const shownName = truncateToWidth(repo.full_name, nameMax, '');
+  screen.writeStr(nameX, y, shownName, color('title') || { fg: 'white', bold: true });
+  // Advance by CELLS, not UTF-16 units — CJK/emoji names are wider than
+  // .length reports, and badges would otherwise print over the name's tail.
+  nameX += displayWidth(shownName);
+  for (const badge of repoStatusBadges(repo)) {
+    const text = ' [' + badge.label + ']';
+    if (nameX + displayWidth(text) > W - rightReserve) break;
+    screen.writeStr(nameX, y, text, color(badge.role));
+    nameX += displayWidth(text);
+  }
   const healthText = appState.repoHealth?.score != null
     ? 'Health ' + appState.repoHealth.score + (appState.repoHealth.complete ? '/100' : '/100*')
     : null;
@@ -324,8 +409,8 @@ function renderRepoDetails(screen, y, maxH) {
   if (appState.detailsPane === 'security') { renderSecurityPane(screen, y + 3, maxH - 3); return; }
   if (appState.detailsPane === 'compare') { renderComparePane(screen, y + 3, maxH - 3); return; }
 
-  // Overview pane: 2-column layout.
-  const leftWidth = Math.min(48, Math.floor(W / 2));
+  // Overview pane: stat strip + 2-column layout.
+  const leftWidth = Math.min(52, Math.floor(W / 2));
   // E14: honest overview counts. Issues/PRs load with per_page=100, so
   // list lengths cap at 100 — prefer the PR-excluded enrichment count
   // (trueIssueCount) over the capped length, and append '+' when the
@@ -334,33 +419,116 @@ function renderRepoDetails(screen, y, maxH) {
   const trueCount = trueIssueCount(repo);
   const issuesDisplay = String(trueCount ?? appState.repoIssues.length ?? 0) + (appState.repoIssuesHasMore ? '+' : '');
   const prsDisplay = String(appState.repoPullRequests.length || 0) + (appState.repoPullRequestsHasMore ? '+' : '');
-  const details = [
-    ['Description:', repo.description || 'N/A'],
-    ['Language:',    repo.language || 'N/A'],
-    ['Stars:',       shortNum(repo.stargazers_count || 0)],
-    ['Forks:',       shortNum(repo.forks_count || 0)],
-    ['Open Issues:', issuesDisplay],
-    ['Open PRs:',    prsDisplay],
-    ['Watchers:',    shortNum(repo.watchers_count || 0)],
-    ['Size:',        Math.round((repo.size || 0) / 1024) + ' MB'],
-    ['License:',     (repo.license && repo.license.name) || 'N/A'],
-    ['Default:',     repo.default_branch || 'main'],
-    ['Created:',     new Date(repo.created_at).toISOString().split('T')[0]],
-    ['Updated:',     new Date(repo.updated_at).toISOString().split('T')[0]],
-    ['URL:',         repo.html_url],
-  ];
-  const rows = Math.min(details.length, maxH - 4);
-  for (let i = 0; i < rows; i++) {
-    const [k, v] = details[i];
-    screen.writeStr(2, y + 3 + i, k, { dim: true });
-    const maxW = (k === 'URL:') ? W - 4 : leftWidth - 14;
-    screen.writeStr(18, y + 3 + i, truncate(String(v), maxW));
-  }
 
-  // Right column: languages, contributors, releases.
+  // Stat strip: one glanceable line of headline counts + push recency.
+  const stripParts = [
+    { text: '★ ' + shortNum(repo.stargazers_count || 0), style: color('star') },
+    { text: 'Y ' + shortNum(repo.forks_count || 0), style: color('fork') },
+    { text: '◉ ' + issuesDisplay + ' issues', style: color('issue') },
+    { text: '⇄ ' + prsDisplay + ' PRs', style: color('pr') },
+    { text: 'pushed ' + (relTime(repo.pushed_at) ? relTime(repo.pushed_at) + ' ago' : '—'), style: color('dim') },
+  ];
+  let stripX = 2;
+  const stripY = y + 3;
+  for (let si = 0; si < stripParts.length; si++) {
+    const part = stripParts[si];
+    if (stripX >= W - 2) break;
+    screen.writeStr(stripX, stripY, truncateToWidth(part.text, Math.max(4, W - 2 - stripX), ''), part.style);
+    stripX += displayWidth(part.text);
+    if (si < stripParts.length - 1 && stripX + 3 < W) {
+      screen.writeStr(stripX, stripY, ' │ ', color('dim'));
+      stripX += 3;
+    }
+  }
+  screen.writeStr(2, y + 4, '─'.repeat(Math.max(0, Math.min(leftWidth, W) - 2)), { dim: true });
+
+  // Left column: ABOUT (description, topics, homepage) + DETAILS rows.
+  let ly = y + 5;
+  const leftEnd = y + maxH - 2; // reserve the last line for footer hints
+  const valX = 18;
+  const valW = Math.max(8, leftWidth - (valX - 2) - 2);
+  const writeDetailRow = (label, value, style) => {
+    if (ly >= leftEnd) return;
+    screen.writeStr(2, ly, label, { dim: true });
+    screen.writeStr(valX, ly, truncate(String(value ?? 'N/A'), valW), style || null);
+    ly++;
+  };
+
+  if (ly < leftEnd) { sectionHeader(screen, 2, ly++, 'ABOUT'); }
+  const descLines = wrapText(repo.description || 'No description', Math.max(10, leftWidth - 2)).slice(0, 2);
+  for (const dl of descLines) {
+    if (ly >= leftEnd) break;
+    screen.writeStr(2, ly++, dl || '');
+  }
+  // Topics as chips (accent on subtle bg), clipped to one row.
+  const topics = Array.isArray(repo.topics) ? repo.topics.filter(Boolean) : [];
+  if (topics.length > 0 && ly < leftEnd) {
+    let tx = 2;
+    const chipStyle = color('chipDismissible');
+    for (const topic of topics) {
+      const chip = '#' + topic + ' ';
+      // Cell-based fit/advance so CJK/emoji topics can't run under the next chip.
+      if (tx + displayWidth(chip) > leftWidth) break;
+      screen.writeStr(tx, ly, chip, chipStyle);
+      tx += displayWidth(chip);
+    }
+    ly++;
+  }
+  if (repo.homepage) {
+    if (ly < leftEnd) {
+      screen.writeStr(2, ly, 'Homepage:', { dim: true });
+      screen.writeStr(valX, ly, truncate(String(repo.homepage), valW), color('accent'));
+      ly++;
+    }
+  }
+  if (ly < leftEnd) { sectionHeader(screen, 2, ly++, 'DETAILS'); }
+  const ownerLabel = repo.owner
+    ? repo.owner.login + (repo.owner.type && repo.owner.type !== 'User' ? ' (' + repo.owner.type + ')' : '')
+    : 'N/A';
+  writeDetailRow('Owner:', ownerLabel);
+  writeDetailRow('Visibility:', repo.private ? 'Private' : String(repo.visibility || 'Public'));
+  writeDetailRow('Language:', repo.language || 'N/A');
+  writeDetailRow('License:', (repo.license && (repo.license.spdx_id !== 'NOASSERTION' ? (repo.license.spdx_id || repo.license.name) : repo.license.name)) || 'None');
+  writeDetailRow('Watchers:', shortNum(repo.subscribers_count ?? repo.watchers_count ?? 0));
+  writeDetailRow('Size:', formatRepoSize(repo.size));
+  writeDetailRow('Age:', repoAge(repo.created_at));
+  writeDetailRow('Default:', repo.default_branch || 'main');
+  writeDetailRow('Created:', dateWithRel(repo.created_at));
+  writeDetailRow('Updated:', dateWithRel(repo.updated_at));
+  writeDetailRow('Pushed:', dateWithRel(repo.pushed_at));
+  if (ly < leftEnd) {
+    screen.writeStr(2, ly, 'URL:', { dim: true });
+    screen.writeStr(valX, ly, truncate(String(repo.html_url || ''), Math.max(8, W - valX - 2)), color('accent'));
+    ly++;
+  }
+  const leftUsedEnd = ly;
+
+  // Right column: health, languages, contributors, releases.
   const rightX = leftWidth + 6;
-  if (rightX + 20 < W) {
+  const wide = rightX + 20 < W;
+  let rightUsedEnd = leftUsedEnd; // narrow terminals: footer follows the left column
+  if (wide) {
     let ry = y + 3;
+    if (appState.repoHealth && appState.repoHealth.score != null && ry < y + maxH - 2) {
+      sectionHeader(screen, rightX, ry++, 'HEALTH');
+      const barW = Math.min(12, Math.max(6, W - rightX - 26));
+      for (const comp of healthComponents(appState.repoHealth)) {
+        if (ry >= y + maxH - 1) break;
+        screen.writeStr(rightX, ry, comp.label.padEnd(8), { dim: true });
+        if (comp.value == null) {
+          screen.writeStr(rightX + 8, ry, '—', { dim: true });
+        } else {
+          const filled = Math.round((comp.value / 100) * barW);
+          const bar = '█'.repeat(filled) + '░'.repeat(Math.max(0, barW - filled));
+          const barStyle = comp.value >= 70 ? { fg: 'green' }
+            : comp.value >= 40 ? { fg: 'yellow' } : { fg: 'red' };
+          screen.writeStr(rightX + 8, ry, bar, barStyle);
+          screen.writeStr(rightX + 9 + barW, ry, String(comp.value), barStyle);
+        }
+        ry++;
+      }
+      ry++;
+    }
     if (appState.repoLanguages && Object.keys(appState.repoLanguages).length > 0) {
       sectionHeader(screen, rightX, ry++, 'LANGUAGES');
       const total = Object.values(appState.repoLanguages).reduce((a, b) => a + b, 0);
@@ -371,7 +539,7 @@ function renderRepoDetails(screen, y, maxH) {
         const pct = total ? bytes / total : 0;
         const filled = Math.max(1, Math.round(pct * barWidth));
         const bar = '█'.repeat(filled) + '░'.repeat(Math.max(0, barWidth - filled));
-        screen.writeStr(rightX, ry, truncate(lang, 12).padEnd(13));
+        screen.writeStr(rightX, ry, padRight(truncate(lang, 12), 13));
         screen.writeStr(rightX + 13, ry, bar, { fg: 'cyan' });
         screen.writeStr(rightX + 14 + barWidth, ry, (pct * 100).toFixed(1) + '%', { dim: true });
         ry++;
@@ -411,13 +579,23 @@ function renderRepoDetails(screen, y, maxH) {
       sectionHeader(screen, rightX, ry++, 'RELEASES');
       for (const rel of appState.repoReleases.slice(0, 3)) {
         if (ry >= y + maxH - 1) break;
-        const tag = truncate(rel.tag_name || rel.name || '?', 18);
+        const tag = truncate(rel.tag_name || rel.name || '?', 16);
+        const flag = rel.draft ? ' (draft)' : rel.prerelease ? ' (pre)' : '';
         const when = rel.published_at ? new Date(rel.published_at).toLocaleDateString() : '';
-        screen.writeStr(rightX, ry, '▶ ' + tag);
-        screen.writeStr(rightX + 22, ry, when, { dim: true });
+        screen.writeStr(rightX, ry, '▶ ' + tag, flag ? color('warning') : null);
+        screen.writeStr(rightX + 21, ry, truncateToWidth(flag, 8, ''), color('warning'));
+        screen.writeStr(rightX + 30, ry, when, { dim: true });
         ry++;
       }
     }
+    rightUsedEnd = ry;
+  }
+
+  // Footer action hints (only when neither column ran into the bottom).
+  const footerY = Math.max(leftUsedEnd, rightUsedEnd) + 1;
+  if (footerY < y + maxH) {
+    const hints = '[o] Browser  [y] Copy URL  [s] Star  [b] Bookmark  [F] Files  [R] README  [A] Packages  [Esc] Back';
+    screen.writeStr(2, footerY, truncateToWidth(hints, W - 4, ''), { dim: true });
   }
 }
 
@@ -657,9 +835,13 @@ export const keys = {
   'B': () => { if (isFilesPane()) files.keys.B(); },
   'H': () => { if (isFilesPane()) files.keys.H(); },
   'Y': () => { if (isFilesPane()) files.keys.Y(); },
+  '/': () => { if (isFilesPane()) files.keys['/'](); },
+  't': () => { if (isFilesPane()) files.keys.t(); },
+  'e': () => { if (isFilesPane()) files.keys.e(); },
+  'c': () => { if (isFilesPane()) files.keys.c(); },
   'g': () => { jumpTop(); },
   'n': () => { if (appState.analyzeView === 'forks') toggleForkSort('name'); },
-  'p': () => { if (appState.analyzeView === 'forks') toggleForkSort('pushed'); },
+  'p': () => { if (isFilesPane()) files.keys.p(); else if (appState.analyzeView === 'forks') toggleForkSort('pushed'); },
   'T': () => {
     if (appState.analyzeView === 'details') {
       if (appState.detailsPane === 'traffic') {

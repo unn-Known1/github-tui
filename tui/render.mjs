@@ -300,8 +300,9 @@ export function collapsibleHeader(screen, x, y, section, label, hint) {
   const W = screen.width;
   const text = arrow + ' ' + label;
   screen.writeStr(x, y, text, { fg: 'cyan', bold: true });
-  // Underline decoration after the label
-  const lineStart = x + text.length + 1;
+  // Underline decoration after the label — cell-based so custom section
+  // titles with CJK/emoji don't get overdrawn by the rule.
+  const lineStart = x + displayWidth(text) + 1;
   const lineEnd = hint ? Math.min(W - hint.length - 4, W - 4) : W - 4;
   if (lineStart < lineEnd) {
     screen.writeStr(lineStart, y, '─'.repeat(lineEnd - lineStart), { fg: 'cyan', dim: true });

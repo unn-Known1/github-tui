@@ -169,8 +169,12 @@ export function resetAccountState() {
   appState.filesEntries = [];
   appState.filesBranches = [];
   appState.filesPath = '';
+  appState.filesFilter = '';
+  appState.filesSort = 'name';
+  appState.filesLastMod = {};
   appState.fileViewing = null;
   appState.fileText = '';
+  appState.fileBinary = false;
   appState.fileHistory = [];
   appState.fileHistoryPath = '';
   appState.fileHistorySelected = 0;
@@ -385,9 +389,13 @@ export const appState = {
   filesEntries: [],
   filesSelected: 0,
   filesScroll: 0,
+  filesFilter: '',
+  filesSort: 'name', // 'name' | 'size' | 'ext'
+  filesLastMod: {}, // lastModKey(ref, path) → { sha, date, author, subject, ts } | { failed, ts }
   fileViewing: null,
   fileText: '',
   fileScroll: 0,
+  fileBinary: false,
   fileHistory: [],
   fileHistoryPath: '',
   fileHistorySelected: 0,

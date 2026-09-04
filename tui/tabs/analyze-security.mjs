@@ -7,7 +7,7 @@ import {
   getSecretScanningAlerts, getCodeScanningAlerts,
   getGlobalSecurityAdvisories, getBranchProtection, getDependencyGraphSBOM,
 } from '../github.mjs';
-import { truncate, sectionHeader, relTime, openUrl } from '../utils.mjs';
+import { truncate, sectionHeader, relTime, openUrl, displayWidth } from '../utils.mjs';
 import { color } from '../theme.mjs';
 import { scrollIndicators, loadingIndicator } from '../render.mjs';
 
@@ -247,8 +247,8 @@ function renderDependabotPane(screen, y, maxH, W) {
     screen.writeStr(4, row, sevIcon(sev), sel ? color('selection') : null);
     screen.writeStr(7, row, truncate(pkg, 18), sel ? color('selection') : color('repoName'));
     screen.writeStr(27, row, summary, sel ? color('selection') : color('dim'));
-    if (cvssStr && 27 + summary.length + 2 < W) {
-      screen.writeStr(27 + summary.length + 2, row, cvssStr, sel ? color('selection') : { fg: 'yellow' });
+    if (cvssStr && 27 + displayWidth(summary) + 2 < W) {
+      screen.writeStr(27 + displayWidth(summary) + 2, row, cvssStr, sel ? color('selection') : { fg: 'yellow' });
     }
   }
   scrollIndicators(screen, y, y + rows - 1, appState.securityAlertScroll, alerts.length);
@@ -383,8 +383,8 @@ function renderBranchProtectionPane(screen, y, maxH, W) {
     if (y >= startY + maxH - 1) break;
     screen.writeStr(2, y, label + ':', { dim: true });
     screen.writeStr(30, y, value);
-    if (detail && 30 + value.length + 2 < W) {
-      screen.writeStr(30 + value.length + 2, y, detail, { dim: true });
+    if (detail && 30 + displayWidth(value) + 2 < W) {
+      screen.writeStr(30 + displayWidth(value) + 2, y, detail, { dim: true });
     }
     y++;
   }

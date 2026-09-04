@@ -22,7 +22,9 @@ import {
 import {
   formatBytes, relTime, writeFileSafe, safeCwdJoin, runCommand, runCommandCapture,
   ghCloneUrl, copyToClipboard, getClipboardTempFilePath, dirExists, wrapTextWithMap, wrapText, truncateToWidth, displayWidth,
+  openUrl,
 } from '../utils.mjs';
+import { startInput, registerInputHandler } from '../input.mjs';
 import { color } from '../theme.mjs';
 import { join, resolve } from 'path';
 import { detectLanguage, tokenizeLine, parseBlamePorcelain } from '../recommended-features.mjs';
@@ -30,6 +32,211 @@ import { detectLanguage, tokenizeLine, parseBlamePorcelain } from '../recommende
 // Limit how big a single file we'll fetch into memory (the API caps at 1MB).
 const MAX_VIEW_BYTES = 1_000_000;
 const MAX_BULK_FILES = 500;
+
+// ─── Tree sort / filter / meta (pure helpers — exported for tests) ───
+
+export const FILES_SORTS = [
+  { id: 'name', label: 'Name' },
+  { id: 'size', label: 'Size' },
+  { id: 'ext',  label: 'Type' },
+];
+
+function extOf(name) {
+  const base = String(name || '').toLowerCase();
+  const dot = base.lastIndexOf('.');
+  return dot > 0 ? base.slice(dot + 1) : '';
+}
+
+// Sort a contents-list without mutating the input. `sort` is one of
+// 'name' (dirs-first, alpha), 'size' (dirs alpha, files largest-first),
+// 'ext' (dirs alpha, files by extension then name).
+export function sortFilesEntries(entries, sort) {
+  const list = Array.isArray(entries) ? entries.slice() : [];
+  const mode = sort || 'name';
+  const byName = (a, b) => String(a.name || '').localeCompare(String(b.name || ''));
+  if (mode === 'size') {
+    list.sort((a, b) => {
+      if (a.type !== b.type) return a.type === 'dir' ? -1 : 1;
+      if (a.type === 'dir') return byName(a, b);
+      const sa = a.size || 0, sb = b.size || 0;
+      if (sa !== sb) return sb - sa;
+      return byName(a, b);
+    });
+    return list;
+  }
+  if (mode === 'ext') {
+    list.sort((a, b) => {
+      if (a.type !== b.type) return a.type === 'dir' ? -1 : 1;
+      if (a.type === 'dir') return byName(a, b);
+      const ea = extOf(a.name), eb = extOf(b.name);
+      if (ea !== eb) return ea.localeCompare(eb);
+      return byName(a, b);
+    });
+    return list;
+  }
+  // Default: directories first, alpha within each group.
+  list.sort((a, b) => {
+    if (a.type !== b.type) return a.type === 'dir' ? -1 : 1;
+    return byName(a, b);
+  });
+  return list;
+}
+
+// Case-insensitive substring filter on entry name. Empty query returns
+// the input unchanged (same reference) so callers can skip re-render work.
+export function filterFilesEntries(entries, query) {
+  if (!Array.isArray(entries)) return [];
+  const q = String(query || '').trim().toLowerCase();
+  if (!q) return entries;
+  return entries.filter(e => String(e.name || '').toLowerCase().includes(q));
+}
+
+// Heuristic binary guard — GitHub serves raw bytes as UTF-8 text, so a NUL
+// byte in the head of the payload is the reliable binary signal.
+export function isProbablyBinary(text) {
+  if (typeof text !== 'string' || text.length === 0) return false;
+  return text.slice(0, 8000).includes('\0');
+}
+
+// Viewer meta line: byte size, logical line count, detected language.
+export function getFileMeta(path, text) {
+  const str = typeof text === 'string' ? text : String(text || '');
+  let bytes = 0;
+  try { bytes = Buffer.byteLength(str); } catch { bytes = str.length; }
+  const lines = str.length === 0 ? 0 : str.split(/\r?\n/).length;
+  return { bytes, lines, language: detectLanguage(path || '') };
+}
+
+// Browser URLs for the current tree / file / commit. webHost override keeps
+// GitHub Enterprise setups working (hosts come from getGitHubHosts()).
+export function buildBlobUrl(owner, name, ref, path, webHost) {
+  const host = String(webHost || getGitHubHosts().webHost || 'github.com').replace(/^https?:\/\//, '').replace(/\/$/, '');
+  const r = ref || 'main';
+  if (!path) return 'https://' + host + '/' + owner + '/' + name + '/tree/' + encodeRepoPath(r);
+  return 'https://' + host + '/' + owner + '/' + name + '/blob/' + encodeRepoPath(r) + '/' + encodeRepoPath(path);
+}
+
+export function buildTreeUrl(owner, name, ref, dirPath, webHost) {
+  const host = String(webHost || getGitHubHosts().webHost || 'github.com').replace(/^https?:\/\//, '').replace(/\/$/, '');
+  const r = ref || 'main';
+  if (!dirPath) return 'https://' + host + '/' + owner + '/' + name + '/tree/' + encodeRepoPath(r);
+  return 'https://' + host + '/' + owner + '/' + name + '/tree/' + encodeRepoPath(r) + '/' + encodeRepoPath(dirPath);
+}
+
+export function buildCommitUrl(owner, name, sha, webHost) {
+  const host = String(webHost || getGitHubHosts().webHost || 'github.com').replace(/^https?:\/\//, '').replace(/\/$/, '');
+  return 'https://' + host + '/' + owner + '/' + name + '/commit/' + encodeURIComponent(sha || '');
+}
+
+// ─── Last-modified enrichment (pure cache helpers exported for tests) ───
+// The /contents API returns no timestamps, so the newest commit touching
+// each path is fetched lazily (per_page=1) and cached per branch+path with
+// a TTL — the same scroll-idle pattern repos.mjs uses for issue counts.
+
+const LASTMOD_TTL = 5 * 60 * 1000;  // 5 min
+const LASTMOD_CAP = 30;             // entries enriched per directory view
+const LASTMOD_CONCURRENCY = 3;
+
+export function lastModKey(ref, path) {
+  return String(ref || '') + '\n' + String(path || '');
+}
+
+export function getLastMod(ref, path) {
+  const cache = appState.filesLastMod || {};
+  return cache[lastModKey(ref, path)] || null;
+}
+
+export function setLastMod(ref, path, val) {
+  if (!appState.filesLastMod) appState.filesLastMod = {};
+  appState.filesLastMod[lastModKey(ref, path)] = val;
+}
+
+// Display text for a cache entry: '…' while the fetch is pending (no entry
+// yet), '—' when the lookup failed, otherwise a short relative time.
+export function lastModText(entry) {
+  if (!entry) return '…';
+  if (entry.failed || !entry.date) return '—';
+  return relTime(entry.date) || '—';
+}
+
+function pickLastModCommit(commits) {
+  const c = Array.isArray(commits) ? commits[0] : null;
+  if (!c) return null;
+  return {
+    sha: c.sha || '',
+    date: c.commit?.author?.date || c.commit?.committer?.date || null,
+    author: c.author?.login || c.commit?.author?.name || c.commit?.committer?.name || '?',
+    subject: String(c.commit?.message || '').split(/\r?\n/)[0] || '(no message)',
+  };
+}
+
+// Enrich the visible directory rows with their newest commit. Never throws
+// and never clobbers newer navigation — stale or aborted results are dropped.
+export async function enrichLastModified() {
+  const [owner, name] = repoOwnerName();
+  if (!owner || appState.fileViewing) return;
+  const ref = appState.filesRef;
+  const now = Date.now();
+  const targets = getFilteredEntries().slice(0, LASTMOD_CAP).filter(e => {
+    if (!e || !e.path || e.type === 'up') return false;
+    const c = getLastMod(ref, e.path);
+    return !c || (now - c.ts > LASTMOD_TTL);
+  });
+  if (targets.length === 0) return;
+  const gen = startAsync('files-lastmod');
+  try {
+    const queue = targets.slice();
+    const worker = async () => {
+      while (queue.length > 0) {
+        if (isStale(gen) || gen.signal.aborted) return;
+        const e = queue.shift();
+        if (!e || !e.path) continue;
+        try {
+          const commits = await getFileCommits(appState.token, owner, name, e.path, 1, gen.signal);
+          if (isStale(gen) || gen.signal.aborted) return;
+          const picked = pickLastModCommit(commits);
+          setLastMod(ref, e.path, picked ? { ...picked, ts: Date.now() } : { failed: true, ts: Date.now() });
+        } catch {
+          if (isStale(gen)) return;
+          setLastMod(ref, e.path, { failed: true, ts: Date.now() });
+        }
+      }
+    };
+    const workers = Array.from({ length: Math.min(LASTMOD_CONCURRENCY, Math.max(1, queue.length)) }, worker);
+    await Promise.all(workers);
+  } catch { /* enrichment is best-effort — the tree stays usable without it */ }
+  if (!isStale(gen)) render();
+}
+
+// Single-path variant for the file viewer footer (no cap, no tree needed).
+export async function ensureFileLastMod(path) {
+  const [owner, name] = repoOwnerName();
+  if (!owner || !path) return;
+  const ref = appState.filesRef;
+  const c = getLastMod(ref, path);
+  if (c && Date.now() - c.ts <= LASTMOD_TTL) return;
+  const gen = startAsync('files-lastmod-file');
+  try {
+    const commits = await getFileCommits(appState.token, owner, name, path, 1, gen.signal);
+    if (isStale(gen) || gen.signal.aborted) return;
+    const picked = pickLastModCommit(commits);
+    setLastMod(ref, path, picked ? { ...picked, ts: Date.now() } : { failed: true, ts: Date.now() });
+  } catch {
+    if (!isStale(gen)) setLastMod(ref, path, { failed: true, ts: Date.now() });
+    return;
+  }
+  if (!isStale(gen)) render();
+}
+
+// One-line viewer summary: 'Last change 3d ago · abc1234 by author — subject'.
+export function lastChangeLine(ref, path, maxW) {
+  const lm = getLastMod(ref, path);
+  if (!lm || lm.failed || !lm.date) return null;
+  const sha = String(lm.sha || '').slice(0, 7);
+  const line = 'Last change ' + (relTime(lm.date) || '?') + ' ago · ' + sha +
+    ' by ' + (lm.author || '?') + ' — ' + (lm.subject || '');
+  return truncateToWidth(line, Math.max(10, maxW || 60), '');
+}
 
 // wrap a destructive I/O op behind state.confirm() so pressing `Z`,
 // `G`, `C`, or `S` in the files pane never dumps a zipball / clones over
@@ -50,16 +257,35 @@ function repoOwnerName() {
   return r.full_name.split('/');
 }
 
+export function getFilesSort() {
+  const s = appState.filesSort;
+  return FILES_SORTS.some(o => o.id === s) ? s : 'name';
+}
+
+export function getFilesFilter() {
+  return typeof appState.filesFilter === 'string' ? appState.filesFilter : '';
+}
+
+// Visible (filter-applied, sort-applied) tree entries. Sort is applied at
+// load / cycle time to appState.filesEntries; the filter is applied lazily
+// here so typing never refetches.
+export function getFilteredEntries() {
+  return filterFilesEntries(appState.filesEntries || [], getFilesFilter());
+}
+
+// Full row list including the synthetic '..' row when off-root. All tree
+// navigation (selection, up/down, drill-in) goes through this so filtered
+// views stay consistent.
+export function getVisibleRows() {
+  const rows = [];
+  if (appState.filesPath) rows.push({ name: '..', type: 'up' });
+  for (const e of getFilteredEntries()) rows.push(e);
+  return rows;
+}
+
 export function getSelectedEntry() {
-  const entries = appState.filesEntries || [];
-  const hasUp = !!appState.filesPath;
-  if (hasUp) {
-    if (appState.filesSelected === 0) {
-      return { name: '..', type: 'up' };
-    }
-    return entries[appState.filesSelected - 1];
-  }
-  return entries[appState.filesSelected];
+  const rows = getVisibleRows();
+  return rows[appState.filesSelected] || null;
 }
 
 export async function openFilesPane() {
@@ -76,6 +302,7 @@ export async function openFilesPane() {
   appState.fileViewing = null;
   appState.fileText = '';
   appState.fileScroll = 0;
+  appState.fileBinary = false;
   appState.fileHistoryMode = false;
   appState.fileBlameMode = false;
   appState.fileHistory = [];
@@ -83,6 +310,9 @@ export async function openFilesPane() {
   appState.filesBranches = [];
   appState.filesBranchPicker = false;
   appState.filesBranchCursor = 0;
+  appState.filesFilter = '';
+  if (!FILES_SORTS.some(o => o.id === appState.filesSort)) appState.filesSort = 'name';
+  appState.filesLastMod = {};
   // Clear any stale text selection from a previous pane.
   appState.textSelectionMode = 'none';
   appState.textSelectStart = null;
@@ -101,15 +331,14 @@ export async function loadTree() {
       appState.token, owner, name, appState.filesPath, appState.filesRef, gen.signal);
     if (isStale(gen)) return;
     const arr = Array.isArray(list) ? list : [list];
-    // Sort: directories first, then files; alpha within each group.
-    arr.sort((a, b) => {
-      if (a.type !== b.type) return a.type === 'dir' ? -1 : 1;
-      return a.name.localeCompare(b.name);
-    });
-    appState.filesEntries = arr;
-    appState.filesSelected = 0;
+    appState.filesEntries = sortFilesEntries(arr, getFilesSort());
+    // Clamp selection into the (possibly filtered) visible rows instead of
+    // resetting to 0, so refreshes keep the user's place.
+    const rows = getVisibleRows().length;
+    appState.filesSelected = Math.max(0, Math.min(appState.filesSelected || 0, Math.max(0, rows - 1)));
     appState.filesScroll = 0;
     appState.fileViewing = null;
+    appState.fileBinary = false;
   } catch (e) {
     if (!isStale(gen)) showMessage('Failed to load: ' + e.message, 'error');
     appState.filesEntries = [];
@@ -117,7 +346,16 @@ export async function loadTree() {
     // always clear loading flag regardless of how we exit the try.
     finishLoading(gen);
   }
-  if (!isStale(gen)) render();
+  if (isStale(gen)) return;
+  render();
+  // Lazily fill the MODIFIED column (best-effort, never blocks the tree).
+  enrichLastModified().catch(() => {});
+}
+
+function resetTreeCursor() {
+  appState.filesSelected = 0;
+  appState.filesScroll = 0;
+  appState.filesFilter = '';
 }
 
 export async function drillInto() {
@@ -127,6 +365,7 @@ export async function drillInto() {
     await goUp();
   } else if (ent.type === 'dir') {
     appState.filesPath = ent.path;
+    resetTreeCursor();
     await loadTree();
   } else if (ent.type === 'file') {
     await viewFile(ent);
@@ -194,11 +433,13 @@ export function closeFileHistory() {
 
 export async function goUp() {
   if (appState.fileHistoryMode || appState.fileBlameMode) { closeFileHistory(); return true; }
+  if (getFilesFilter()) { clearFilesFilter(); return true; }
   if (appState.fileViewing) {
     // Leaving file viewer back to tree.
     appState.fileViewing = null;
     appState.fileText = '';
     appState.fileScroll = 0;
+    appState.fileBinary = false;
     // Clear text selection when leaving the file viewer.
     appState.textSelectionMode = 'none';
     appState.textSelectStart = null;
@@ -210,6 +451,7 @@ export async function goUp() {
   const parts = appState.filesPath.split('/');
   parts.pop();
   appState.filesPath = parts.join('/');
+  resetTreeCursor();
   await loadTree();
   return true;
 }
@@ -237,6 +479,12 @@ export async function viewFile(ent) {
     appState.fileViewing = targetPath;
     appState.fileText = typeof text === 'string' ? text : String(text);
     appState.fileScroll = 0;
+    appState.fileBinary = isProbablyBinary(appState.fileText);
+    if (appState.fileBinary) {
+      showMessage('Binary file — preview hidden. Use [s] to save it instead.', 'warning');
+    }
+    // Prime the viewer's "last change" footer line.
+    ensureFileLastMod(targetPath).catch(() => {});
   } catch (e) {
     if (!isStale(gen)) showMessage('Failed to view: ' + e.message, 'error');
   } finally {
@@ -257,8 +505,10 @@ export async function openFilePath(path) {
     appState.detailsPane = 'files';
     appState.filesPath = dir;
     appState.fileViewing = null;
+    appState.fileBinary = false;
+    appState.filesFilter = '';
     await loadTree();
-    const entries = appState.filesEntries || [];
+    const entries = getFilteredEntries();
     const idx = entries.findIndex(e => e.name === base);
     if (idx < 0) { showMessage('File not found: ' + clean, 'warning'); return; }
     appState.filesSelected = (appState.filesPath ? 1 : 0) + idx;
@@ -300,9 +550,163 @@ export async function pickBranch() {
   appState.filesBranchPicker = false;
   appState.filesPath = '';
   appState.fileViewing = null;
+  appState.fileBinary = false;
+  appState.filesLastMod = {};
+  resetTreeCursor();
   await loadTree();
   showMessage('Switched to branch ' + b.name, 'success');
 }
+
+// ─── Tree filter / sort ───────────────────────────────────────────
+
+export function promptFilesFilter() {
+  if (appState.fileViewing || appState.fileHistoryMode || appState.fileBlameMode) {
+    showMessage('Close the file viewer first to filter the tree', 'warning');
+    return;
+  }
+  startInput('Filter files: ', 'files-filter', false, getFilesFilter());
+}
+
+export function clearFilesFilter(silent) {
+  if (!getFilesFilter()) { if (!silent) render(); return; }
+  appState.filesFilter = '';
+  appState.filesSelected = 0;
+  appState.filesScroll = 0;
+  if (!silent) {
+    showMessage('Filter cleared', 'info');
+    render();
+  } else render();
+}
+
+export function applyFilesSort() {
+  appState.filesEntries = sortFilesEntries(appState.filesEntries || [], getFilesSort());
+  const rows = getVisibleRows().length;
+  appState.filesSelected = Math.max(0, Math.min(appState.filesSelected || 0, Math.max(0, rows - 1)));
+  appState.filesScroll = 0;
+}
+
+export function cycleFilesSort() {
+  if (appState.fileViewing) { showMessage('Close the file viewer first to re-sort', 'warning'); return; }
+  const ids = FILES_SORTS.map(o => o.id);
+  const cur = ids.indexOf(getFilesSort());
+  appState.filesSort = ids[(cur + 1) % ids.length];
+  applyFilesSort();
+  const label = FILES_SORTS.find(o => o.id === appState.filesSort).label;
+  showMessage('Sort: ' + label, 'info');
+  render();
+}
+
+// ─── Go to path ───────────────────────────────────────────────────
+
+export function promptGoToPath() {
+  const initial = appState.fileViewing || appState.filesPath || '';
+  startInput('Open path: ', 'files-goto', false, initial);
+}
+
+// ─── Refresh (preserves pane, filter, and selection) ──────────────
+
+export async function refreshFiles() {
+  const [owner, name] = repoOwnerName();
+  if (!owner) { showMessage('Open a repo on Explore first', 'warning'); return; }
+  if (appState.fileViewing) {
+    const target = appState.fileViewing;
+    const keepScroll = appState.fileScroll || 0;
+    const gen = startAsync('files-view');
+    beginLoading(gen);
+    render();
+    try {
+      const text = await getRepoFile(appState.token, owner, name, target, appState.filesRef, gen.signal);
+      if (isStale(gen)) return;
+      appState.fileText = typeof text === 'string' ? text : String(text);
+      appState.fileBinary = isProbablyBinary(appState.fileText);
+      appState.fileScroll = Math.max(0, keepScroll);
+      showMessage('File refreshed', 'success');
+      ensureFileLastMod(target).catch(() => {});
+    } catch (e) {
+      if (!isStale(gen)) showMessage('Refresh failed: ' + e.message, 'error');
+    } finally { finishLoading(gen); }
+    if (!isStale(gen)) render();
+    return;
+  }
+  const keepSelected = getSelectedEntry();
+  const keepName = keepSelected && keepSelected.type !== 'up' ? keepSelected.name : null;
+  await loadTree();
+  if (keepName) {
+    const rows = getVisibleRows();
+    const idx = rows.findIndex(r => r.name === keepName);
+    if (idx >= 0) appState.filesSelected = idx;
+    render();
+  }
+  showMessage('Files refreshed', 'success');
+}
+
+// ─── Clipboard / browser ──────────────────────────────────────────
+
+function currentPathForShare() {
+  if (appState.fileViewing) return { path: appState.fileViewing, kind: 'file' };
+  const ent = getSelectedEntry();
+  if (!ent || ent.type === 'up') return null;
+  return { path: ent.path, kind: ent.type };
+}
+
+// Copy the repo-relative path (e.g. `src/index.mjs`) of the viewed or
+// highlighted file / directory.
+export function copyFilePath() {
+  const cur = currentPathForShare();
+  const fallbackDir = !cur && appState.filesPath ? appState.filesPath : null;
+  const path = cur ? cur.path : fallbackDir;
+  if (!path) { showMessage('Select a file first', 'warning'); return; }
+  if (copyToClipboard(path)) {
+    const tmpFile = getClipboardTempFilePath();
+    showMessage(tmpFile ? 'Path copied (saved to ' + tmpFile + ')' : 'Path copied: ' + path, 'success');
+  } else showMessage('Clipboard copy failed', 'error');
+}
+
+// Open the viewed/selected file (blob), the current directory (tree), or —
+// in history mode — the selected commit in the browser.
+export async function openFileInBrowser() {
+  const [owner, name] = repoOwnerName();
+  if (!owner) return;
+  if (appState.fileHistoryMode) { openHistoryCommitInBrowser(); return; }
+  let url;
+  if (appState.fileViewing) {
+    url = buildBlobUrl(owner, name, appState.filesRef, appState.fileViewing);
+  } else {
+    const ent = getSelectedEntry();
+    if (ent && ent.type === 'file') url = buildBlobUrl(owner, name, appState.filesRef, ent.path);
+    else if (ent && ent.type === 'dir') url = buildTreeUrl(owner, name, appState.filesRef, ent.path);
+    else url = buildTreeUrl(owner, name, appState.filesRef, appState.filesPath);
+  }
+  const res = await openUrl(url);
+  if (res.ok) showMessage('Opened in browser', 'success');
+  else showMessage(res.error || 'Open failed', 'error');
+}
+
+export async function openHistoryCommitInBrowser() {
+  const [owner, name] = repoOwnerName();
+  const commit = (appState.fileHistory || [])[appState.fileHistorySelected];
+  if (!owner || !commit || !commit.sha) { showMessage('Select a commit first', 'warning'); return; }
+  const res = await openUrl(buildCommitUrl(owner, name, commit.sha));
+  if (res.ok) showMessage('Opened commit in browser', 'success');
+  else showMessage(res.error || 'Open failed', 'error');
+}
+
+registerInputHandler('files-filter', (value) => {
+  appState.filesFilter = (value || '').trim();
+  appState.filesSelected = 0;
+  appState.filesScroll = 0;
+  const matches = Math.max(0, getVisibleRows().length - (appState.filesPath ? 1 : 0));
+  showMessage(appState.filesFilter
+    ? 'Filter: "' + appState.filesFilter + '" (' + matches + ' match' + (matches === 1 ? '' : 'es') + ')'
+    : 'Filter cleared', 'info');
+  render();
+});
+
+registerInputHandler('files-goto', (value) => {
+  const v = (value || '').trim();
+  if (!v) { render(); return; }
+  openFilePath(v);
+});
 
 // ─── Disk actions ─────────────────────────────────────────────────
 
@@ -577,19 +981,33 @@ export function renderFilesPane(screen, y, maxH) {
   renderBreadcrumb(screen, y, owner, name);
   screen.hline(y + 1, '─');
 
-  const entries = appState.filesEntries || [];
+  const allEntries = getVisibleRows();
+  const totalEntries = appState.filesEntries || [];
   const headerY = y + 2;
-  screen.writeStr(4, headerY, ' Name', color('header'));
-  const dirs = entries.filter(e => e.type === 'dir').length;
-  const files = entries.filter(e => e.type === 'file').length;
+  const filter = getFilesFilter();
+  const sortLabel = (FILES_SORTS.find(o => o.id === getFilesSort()) || FILES_SORTS[0]).label;
+  if (filter) {
+    const matchCount = allEntries.filter(e => e.type !== 'up').length;
+    screen.writeStr(4, headerY, ' Filter "' + truncateToWidth(filter, 24, '') + '" · ' + matchCount + ' match' + (matchCount === 1 ? '' : 'es') + ' · [c] clear', color('accent'));
+  } else {
+    screen.writeStr(4, headerY, ' Name', color('header'));
+  }
+  const dirs = totalEntries.filter(e => e.type === 'dir').length;
+  const files = totalEntries.filter(e => e.type === 'file').length;
   if (W > 40) screen.writeStr(W - 30, headerY, dirs + ' dir(s)  ' + files + ' file(s)', color('dim'));
-  if (W > 40) screen.writeStr(W - 18, headerY, 'Size', color('header'));
+  const showMod = W > 70;
+  if (showMod) screen.writeStr(W - 34, headerY, 'Modified', color('header'));
+  if (W > 52) screen.writeStr(W - 18, headerY, 'Size', color('header'));
 
-  const rows = Math.max(1, maxH - 5);
+  const rows = Math.max(1, maxH - 6);
   const start = appState.filesScroll || 0;
-  // include a synthetic ".." entry when not at root
-  const upRow = appState.filesPath ? [{ name: '..', type: 'up' }] : [];
-  const allEntries = [...upRow, ...entries];
+
+  if (allEntries.length === 0) {
+    screen.writeStr(4, headerY + 1, filter ? 'No matches for "' + truncateToWidth(filter, W - 24, '') + '"' : 'Empty directory', color('dim'));
+    screen.writeStr(4, headerY + 2, filter ? '[c] Clear filter   [Esc] Back' : '[Esc] Back', color('dim'));
+    if (appState.filesBranchPicker) renderBranchPicker(screen);
+    return;
+  }
 
   for (let i = 0; i < rows && start + i < allEntries.length; i++) {
     const ent = allEntries[start + i];
@@ -611,8 +1029,11 @@ export function renderFilesPane(screen, y, maxH) {
     screen.writeStr(4, row, icon, c);
 
     const nameStyle = sel ? color('selection') : null;
-    screen.writeStr(7, row, truncateToWidth(ent.name, W - 36, ''), nameStyle);
+    screen.writeStr(7, row, truncateToWidth(ent.name, showMod ? W - 48 : W - 36, ''), nameStyle);
 
+    if (showMod && ent.type !== 'up') {
+      screen.writeStr(W - 34, row, lastModText(getLastMod(appState.filesRef, ent.path)), color('dim'));
+    }
     if (ent.type === 'file') {
       screen.writeStr(W - 22, row, formatBytes(ent.size || 0), color('dim'));
     } else if (ent.type === 'dir') {
@@ -623,8 +1044,13 @@ export function renderFilesPane(screen, y, maxH) {
   // Footer hint (grouped by category).
   const footerY = headerY + 1 + Math.min(rows, allEntries.length) + 1;
   if (footerY < y + maxH) {
-    const hints = '[Enter] Open  Save: [s/S]  Download: [Z/C/G]  [B] Branch  [y] URL  [Esc] Back';
-    screen.writeStr(4, footerY, hints, color('dim'));
+    const hints = '[Enter] Open  [/] Filter  [t] Sort:' + sortLabel + '  [e] Go to  [o] Browser  [p/y/Y] Copy';
+    screen.writeStr(4, footerY, truncateToWidth(hints, W - 6, ''), color('dim'));
+  }
+  const footerY2 = footerY + 1;
+  if (footerY2 < y + maxH) {
+    const hints2 = 'Save: [s/S]  Get: [Z/C/G]  [B] Branch  [H/b] History  [r] Refresh  [Esc] Back';
+    screen.writeStr(4, footerY2, truncateToWidth(hints2, W - 6, ''), color('dim'));
   }
 
   if (appState.filesBranchPicker) renderBranchPicker(screen);
@@ -632,10 +1058,19 @@ export function renderFilesPane(screen, y, maxH) {
 
 function renderFileViewer(screen, y, maxH) {
   const W = screen.width;
-  screen.writeStr(4, y, appState.fileViewing, color('title'));
-  screen.writeStr(W - 12, y, '[' +
-    formatBytes(Buffer.byteLength(appState.fileText || '')) + ']', color('dim'));
+  screen.writeStr(4, y, truncateToWidth(appState.fileViewing || '', Math.max(10, W - 34), ''), color('title'));
+  const meta = getFileMeta(appState.fileViewing, appState.fileText);
+  const metaText = '[' + formatBytes(meta.bytes) + ' · ' + meta.lines + ' ln · ' + meta.language + ']';
+  screen.writeStr(Math.max(6, W - metaText.length - 2), y, metaText, color('dim'));
   screen.hline(y + 1, '─', color('dim'));
+
+  if (appState.fileBinary) {
+    screen.writeStr(4, y + 3, 'Binary file — preview hidden (' + formatBytes(meta.bytes) + ')', color('warning'));
+    const binChange = lastChangeLine(appState.filesRef, appState.fileViewing, W - 6);
+    if (binChange) screen.writeStr(4, y + 4, binChange, color('dim'));
+    screen.writeStr(4, y + (binChange ? 5 : 4), '[s] Save to disk   [y] Copy raw URL   [o] Open in browser   [Esc] Back', color('dim'));
+    return;
+  }
 
   const text = appState.fileText || '';
   const logicalLines = text.split(/\r?\n/);
@@ -717,7 +1152,11 @@ function renderFileViewer(screen, y, maxH) {
     }
     hintParts.push('[Esc] Back');
     const hints = hintParts.join('  ');
-    screen.writeStr(4, footerY, hints, color('dim'));
+    screen.writeStr(4, footerY, truncateToWidth(hints, W - 6, ''), color('dim'));
+    const changeLine = lastChangeLine(appState.filesRef, appState.fileViewing, W - 6);
+    if (changeLine && footerY + 1 < y + maxH) {
+      screen.writeStr(4, footerY + 1, changeLine, color('dim'));
+    }
   }
 }
 
@@ -766,7 +1205,7 @@ function renderFileHistory(screen, y, maxH) {
     screen.writeStr(34, row, truncateToWidth(subject, Math.max(10, W - 50), ''), sel ? color('selection') : null);
     screen.writeStr(Math.max(36, W - 12), row, relTime(date), sel ? color('selection') : color('dim'));
   }
-  screen.writeStr(2, y + 2 + Math.min(rows, history.length), '[Enter] open commit   [Esc] back', color('dim'));
+  screen.writeStr(2, y + 2 + Math.min(rows, history.length), '[Enter] copy URL   [o] browser   [Esc] back', color('dim'));
 }
 
 function renderFileBlame(screen, y, maxH) {
@@ -980,7 +1419,7 @@ export function down(screen) {
       Math.max(0, visualRows - 1), appState.fileScroll + 1);
     render(); return;
   }
-  const len = (appState.filesEntries || []).length + (appState.filesPath ? 1 : 0);
+  const len = getVisibleRows().length;
   appState.filesSelected = Math.min(len - 1, appState.filesSelected + 1);
   const visible = Math.max(1, (screen ? screen.height : 24) - 12);
   if (appState.filesSelected >= appState.filesScroll + visible)
@@ -1005,7 +1444,7 @@ export function jumpBottom() {
     const visualRows = wrapText(appState.fileText || '', innerW).length;
     appState.fileScroll = Math.max(0, visualRows - 1);
   } else {
-    const len = (appState.filesEntries || []).length + (appState.filesPath ? 1 : 0);
+    const len = getVisibleRows().length;
     appState.filesSelected = Math.max(0, len - 1);
   }
   render();
@@ -1035,6 +1474,7 @@ export async function backOrLeave() {
   if (_backInProgress) return true;
   if (appState.fileHistoryMode || appState.fileBlameMode) { closeFileHistory(); return true; }
   if (appState.filesBranchPicker) { appState.filesBranchPicker = false; render(); return true; }
+  if (getFilesFilter()) { clearFilesFilter(); return true; }
   if (appState.fileViewing) {
     _backInProgress = true;
     try { await goUp(); } finally { _backInProgress = false; }
@@ -1057,6 +1497,13 @@ export const keys = {
   'C': () => cloneIntoCwd(),
   'G': () => ghCloneIntoCwd(),
   'B': () => openBranchPicker(),
+  '/': () => promptFilesFilter(),
+  't': () => cycleFilesSort(),
+  'e': () => promptGoToPath(),
+  'p': () => copyFilePath(),
+  'y': () => copyRawUrl(),
+  'o': () => openFileInBrowser(),
+  'c': () => clearFilesFilter(),
   'Y': () => {
     if (appState.fileViewing) {
       if (copyToClipboard(appState.fileText)) {

@@ -11,7 +11,7 @@ import {
   dispatchWorkflow, rerunWorkflow, cancelWorkflowRun,
 } from '../github.mjs';
 import { validateWorkflowInputs, buildFailureQueue } from '../recommended-features.mjs';
-import { openUrl, relTime, truncate } from '../utils.mjs';
+import { openUrl, relTime, truncate, displayWidth } from '../utils.mjs';
 import { color } from '../theme.mjs';
 import { emptyState, loadingIndicator, scrollIndicators, collapsibleHeader } from '../render.mjs';
 import { startInput, registerInputHandler } from '../input.mjs';
@@ -697,8 +697,10 @@ function renderRunList(screen, y, h, W) {
           screen.writeStr(6, curY, '  ');
           screen.writeStr(8, curY, ji.ch, ji.style);
           screen.writeStr(10, curY, jobName, color('repoName') || { fg: 'white' });
-          if (jobDur && 10 + jobName.length + 2 < W) {
-            screen.writeStr(10 + jobName.length + 2, curY, jobDur, { dim: true });
+          // Workflow/job names are user content — measure cells so CJK/emoji
+          // names can't slide under the duration.
+          if (jobDur && 10 + displayWidth(jobName) + 2 < W) {
+            screen.writeStr(10 + displayWidth(jobName) + 2, curY, jobDur, { dim: true });
           }
           curY++;
           drawn++;

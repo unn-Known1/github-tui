@@ -9,7 +9,7 @@ import {
   getUserIssues, getUserPullRequests, searchRepositories,
   getUserFollowers, getNotifications,
 } from '../github.mjs';
-import { relTime, eventGlyph, greeting, shortNum, truncate, openUrl } from '../utils.mjs';
+import { relTime, eventGlyph, greeting, shortNum, truncate, openUrl, displayWidth } from '../utils.mjs';
 import { color } from '../theme.mjs';
 import { emptyState, collapsibleHeader, loadingIndicator, getScreen, getStatCardLayout, scrollIndicators } from '../render.mjs';
 import { loadRepoDetails } from './analyze.mjs';
@@ -697,14 +697,16 @@ export function renderDashboard(screen, y, h) {
   screen.writeStr(2, y, heading, color('title') || { fg: 'white', bold: true });
 
   // Local repo context badge (D12a: '· repo: owner/repo' prefix, matching inbox).
+  // Display names may hold CJK/emoji — anchor followers by cells, not units.
+  const headingEnd = 2 + displayWidth(heading) + 2;
   if (appState.localRepo && appState.localRepoFilter) {
     const ctxBadge = '· repo: ' + appState.localRepo.owner + '/' + appState.localRepo.repo;
-    screen.writeStr(2 + heading.length + 2, y, ctxBadge, { fg: 'cyan', dim: true });
+    screen.writeStr(headingEnd, y, ctxBadge, { fg: 'cyan', dim: true });
   } else if (appState.localRepo && !appState.localRepoFilter) {
     // D11 local hint: advertise the scope key when a local repo is detected
     // but the filter is off.
     const scopeHint = '[l] scope to ' + appState.localRepo.owner + '/' + appState.localRepo.repo;
-    screen.writeStr(2 + heading.length + 2, y, scopeHint, { dim: true });
+    screen.writeStr(headingEnd, y, scopeHint, { dim: true });
   }
 
   const unread = appState.notifications.filter(n => n.unread).length;

@@ -8,7 +8,7 @@ import {
   closeIssue, reopenIssue, mergePullRequest, updateIssue,
 } from '../github.mjs';
 import { startInput, registerInputHandler } from '../input.mjs';
-import { truncate, relTime, copyToClipboard } from '../utils.mjs';
+import { truncate, relTime, copyToClipboard, displayWidth } from '../utils.mjs';
 import { color } from '../theme.mjs';
 import { showError } from '../error-recovery.mjs';
 
@@ -400,7 +400,9 @@ export function renderDetail(screen) {
       const lbText = ' ' + lb.name + ' ';
       const bgColor = hexToNamedColor(lb.color);
       screen.writeStr(lx, by + 2, lbText, { bg: bgColor, fg: 'white' });
-      lx += lbText.length + 1;
+      // Label names are user content — advance by cells, not UTF-16 units,
+      // so CJK/emoji labels can't slide under the next label.
+      lx += displayWidth(lbText) + 1;
       if (lx > bx + boxW - 6) break;
     }
   }
