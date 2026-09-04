@@ -25,7 +25,7 @@ A fast, zero-dependency terminal user interface for GitHub — six tabs, a comma
 - ★ **Star anywhere** — `s` toggles a GitHub star on the highlighted repo (search results / details / forks / your repos).
 - 📋 **OSC-52 clipboard** — `y` copies the current URL; works over SSH and inside tmux.
 - 📉 **Live rate-limit indicator** — top-right of the screen; full breakdown (remaining/limit/reset minutes + **token scopes**) on the Settings tab.
-- 💾 **ETag caching** — repeated GETs return 304 and don't cost any rate-limit budget. Disk-backed with LRU eviction, survives restarts.
+- 💾 **ETag caching** — repeated GETs return 304 (saves bandwidth; GitHub still counts each request against quota). Disk-backed with LRU eviction, survives restarts.
 - 🛡️ **Offline mode** — shows cached data with `⚠ OFFLINE` banner when network is unavailable.
 - 📡 **Last-synced timestamps** — every tab shows when data was last refreshed.
 - 📦 **Cache stats** — header shows cache size in KB; Settings → System shows full breakdown.
@@ -363,7 +363,7 @@ Every tab module exports `render(screen, y, h)`, an optional `keys` map for tab-
 - **Pure business logic.** `repos-logic.mjs` contains testable functions decoupled from global state — `sortRepos`, `applyAllFilters`, `floatPinsToTop` accept parameters, not globals.
 - **Stale-async guard.** Every long-running fetch grabs a generation number from `startAsync()`. If the user navigates away, `isStale(gen)` returns true and results are discarded. No "snap-back" to old state.
 - **Bounded concurrency.** Fork ahead/behind compares run with a 5-worker pool. Folder-save uses a 4-worker pool. Dashboard widgets and repo details enrichment fetch in parallel with per-call fault tolerance.
-- **ETag cache.** Every GET response with an `ETag` header is cached; subsequent identical GETs send `If-None-Match` and a 304 returns the cached body for free (no rate-limit cost).
+- **ETag cache.** Every GET response with an `ETag` header is cached; subsequent identical GETs send `If-None-Match` and a 304 returns the cached body (saves bandwidth, though GitHub still counts the request against quota).
 - **Streaming downloads.** Zipballs never buffer in memory — they pipe straight to disk via Node's `https`.
 - **CWD safety.** Every disk write goes through `safeCwdJoin` which refuses any path that would escape `process.cwd()`. Clones refuse to overwrite an existing directory.
 - **Diff-based renderer.** `tui/screen.mjs` uses buffer swapping (zero allocation after warm-up) and only emits cursor moves + characters that actually changed. CJK/wide character support for proper alignment.

@@ -382,10 +382,15 @@ function renderHeader(W) {
   let rateTxt = null, rateStyle = null;
   if (hasRate) {
     const r = lastRateLimit.remaining, lim = lastRateLimit.limit;
-    const pct = lim > 0 ? r / lim : 0;
+    const remainPct = lim > 0 ? r / lim : 0;
+    // Bar visualizes *consumed* quota (used = 1 - remaining), so a fresh
+    // token (e.g. 4925/5000) renders nearly empty `░░░░░░░░░░` instead of a
+    // misleadingly full `██████████`. Colors still key off remaining budget:
+    // empty + green = healthy, full + red = exhausted.
+    const usedPct = lim > 0 ? Math.min(1, Math.max(0, 1 - r / lim)) : 0;
     rateStyle = r === 0 ? { fg: 'red', bold: true }
-      : pct < 0.1 ? { fg: 'yellow', bold: true }
-      : pct < 0.3 ? { fg: 'yellow' }
+      : remainPct < 0.1 ? { fg: 'yellow', bold: true }
+      : remainPct < 0.3 ? { fg: 'yellow' }
       : { fg: 'green' };
     if (showRateFull) {
       const barWidth = 10;
@@ -393,9 +398,10 @@ function renderHeader(W) {
       // in --accessible mode it's a plain `[######....]` bracketed bar.
       let bar;
       if (a11y) {
-        bar = '[' + '#'.repeat(Math.round(pct * barWidth)) + '.'.repeat(barWidth - Math.round(pct * barWidth)) + ']';
+        const filled = Math.round(usedPct * barWidth);
+        bar = '[' + '#'.repeat(filled) + '.'.repeat(barWidth - filled) + ']';
       } else {
-        const filled = Math.round(pct * barWidth);
+        const filled = Math.round(usedPct * barWidth);
         bar = '█'.repeat(filled) + '░'.repeat(barWidth - filled);
       }
       rateTxt = 'API ' + bar + ' ' + r + '/' + lim;

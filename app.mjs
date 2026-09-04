@@ -19,7 +19,7 @@ import { handleKey, registerCoreActions } from './tui/keys.mjs';
 import { registerInputHandler } from './tui/input.mjs';
 import { loadUserData } from './tui/tabs/repos.mjs';
 import { loadBookmarks, loadSavedSearches, loadPins, loadInboxFilters, loadRepoPrefs, saveRepoPrefs } from './tui/store.mjs';
-import { getRateLimit, lastRateLimit, getUserRepositories, getNotifications, getWorkflowRuns } from './tui/github.mjs';
+import { getRateLimit, resyncRateLimit, getUserRepositories, getNotifications, getWorkflowRuns } from './tui/github.mjs';
 import { exportPortableConfig, importPortableConfig } from './tui/portability.mjs';
 
 import { readFileSync, appendFileSync, writeFileSync } from 'fs';
@@ -81,17 +81,19 @@ function startAutoRefresh() {
 // Export for settings to restart after interval change.
 globalThis._startAutoRefresh = startAutoRefresh;
 
-// import lastRateLimit once at module load instead of doing a
-// dynamic import on every 60s poll.
+// Poll the core budget every 60s as a backstop (per-request headers in
+// github.mjs keep the counter live between polls).
 async function refreshRateLimit() {
   if (!appState.token) return;
   try {
     const data = await getRateLimit(appState.token);
-    if (data && data.resources && data.resources.core) {
-      const core = data.resources.core;
-      lastRateLimit.remaining = core.remaining;
-      lastRateLimit.limit = core.limit;
-      lastRateLimit.reset = core.reset;
+    const core = data?.resources?.core || data?.rate || null;
+    // Authoritative resync: the `/rate_limit` body is ground truth for the
+    // current window, so the 60s poll corrects any drift or pinning of the
+    // live header mirror — in both directions. Per-request headers between
+    // polls stay monotonic (see updateRateLimit()).
+    if (core) {
+      resyncRateLimit(core.limit, core.remaining, core.reset);
       render();
     }
   } catch (e) { debugAsync('rate-limit refresh error:', e.message); }

@@ -32,6 +32,66 @@ export class GitHubApiError extends Error {
 export const lastRateLimit = { remaining: null, limit: null, reset: null };
 export const lastScopes = { scopes: [], accepted: [] };
 
+// Monotonic rate-limit mirror. The app fires many requests in parallel
+// (dashboard widgets, background pagination, auto-refresh), so responses
+// routinely arrive out of order: a stale response carrying an older, HIGHER
+// `remaining` must never push the displayed counter back up (4923 → 4924),
+// and the 60s `/rate_limit` poll must not jitter it either. Rules:
+//   - stale window (incoming reset < stored reset) → ignore entirely;
+//   - new window (reset moved forward), changed limit, or first baseline
+//     → accept wholesale (a fresh window legitimately restores remaining);
+//   - same window → `remaining` only moves down (take the minimum).
+// Returns lastRateLimit for convenience. All inputs are validated so a
+// malformed value can never poison the counter with NaN.
+export function updateRateLimit(limit, remaining, reset) {
+  const limOk = Number.isFinite(limit) && limit > 0;
+  const remOk = Number.isFinite(remaining);
+  const resetOk = Number.isFinite(reset) && reset > 0;
+  if (!limOk && !remOk && !resetOk) return lastRateLimit;
+  const storedReset = lastRateLimit.reset;
+  // Late arrival from a previous window — its low `remaining` belongs to an
+  // expired budget and must not drag the fresh window's counter down.
+  if (resetOk && Number.isFinite(storedReset) && reset < storedReset) return lastRateLimit;
+  const effectiveLimit = limOk ? limit : lastRateLimit.limit;
+  const clampRemaining = (v) => Number.isFinite(effectiveLimit) && effectiveLimit > 0
+    ? Math.min(Math.max(v, 0), effectiveLimit)
+    : Math.max(v, 0);
+  const newWindow = resetOk && Number.isFinite(storedReset) && reset > storedReset;
+  const limitChanged = limOk && Number.isFinite(lastRateLimit.limit) && limit !== lastRateLimit.limit;
+  if (newWindow || limitChanged || lastRateLimit.remaining === null || lastRateLimit.remaining === undefined) {
+    if (limOk) lastRateLimit.limit = limit;
+    if (remOk) lastRateLimit.remaining = clampRemaining(remaining);
+    if (resetOk) lastRateLimit.reset = reset;
+    return lastRateLimit;
+  }
+  if (remOk) {
+    const clamped = clampRemaining(remaining);
+    if (!Number.isFinite(lastRateLimit.remaining) || clamped < lastRateLimit.remaining) {
+      lastRateLimit.remaining = clamped;
+    }
+  }
+  if (limOk && !Number.isFinite(lastRateLimit.limit)) lastRateLimit.limit = limit;
+  if (resetOk && !Number.isFinite(lastRateLimit.reset)) lastRateLimit.reset = reset;
+  return lastRateLimit;
+}
+
+// Authoritative resync from the `/rate_limit` endpoint body (ground truth
+// for the current window). Unlike updateRateLimit() — which only lets the
+// counter move DOWN between polls so out-of-order responses can't jitter
+// it — this overwrites all three fields, so a counter that drifted or got
+// pinned (stale cache, bucket flap, missed headers) self-corrects on the
+// next 60s poll, in BOTH directions. Only the rate-limit poll may call
+// this; per-request headers must keep using updateRateLimit(). All inputs
+// are validated; a malformed payload leaves the counter untouched.
+export function resyncRateLimit(limit, remaining, reset) {
+  if (!Number.isFinite(limit) || limit <= 0) return lastRateLimit;
+  if (!Number.isFinite(remaining)) return lastRateLimit;
+  lastRateLimit.limit = limit;
+  lastRateLimit.remaining = Math.min(Math.max(remaining, 0), limit);
+  if (Number.isFinite(reset) && reset > 0) lastRateLimit.reset = reset;
+  return lastRateLimit;
+}
+
 // ── Offline detection ──
 export const offlineState = { isOffline: false, lastOnline: null };
 
@@ -266,11 +326,16 @@ export function request(path, opts) {
   const timeoutMs = o.timeoutMs || 15000;
   const raw = !!o.raw;
   const bodyStr = body == null ? null : JSON.stringify(body);
+  // force: skip every cache short-circuit and go to the wire (no
+  // If-None-Match). Used by the rate-limit poll: `/rate_limit` is free, and
+  // a forced wire request both returns ground truth and proves the network
+  // is back, clearing a latched offline flag that cached GETs never would.
+  const force = !!o.force;
 
   const cacheKey = cacheKeyFor(method, path, accept, raw, token);
 
   // Offline mode: return cached data for GETs when offline.
-  if (method === 'GET' && offlineState.isOffline) {
+  if (method === 'GET' && offlineState.isOffline && !force) {
     const cached = etagCache.get(cacheKey);
     if (cached) {
       cached.lastAccess = Date.now();
@@ -282,7 +347,7 @@ export function request(path, opts) {
   }
 
   // Rate-limit-conservative mode: when budget is low, try cache before hitting the wire.
-  if (method === 'GET' && lastRateLimit.remaining !== null && lastRateLimit.remaining < LOW_RATE_WARN) {
+  if (method === 'GET' && !force && lastRateLimit.remaining !== null && lastRateLimit.remaining < LOW_RATE_WARN) {
     const cached = etagCache.get(cacheKey);
     if (cached && Date.now() - cached.ts < ETAG_TTL) {
       cached.lastAccess = Date.now();
@@ -316,6 +381,9 @@ export function request(path, opts) {
 
     const options = buildOptions(path, token, method, bodyStr, accept, raw);
     if (accept) options.headers['Accept'] = accept;
+    // Forced requests always fetch fresh: no conditional request, so the
+    // server must answer 200 with current data (and fresh rate headers).
+    if (force) delete options.headers['If-None-Match'];
 
     // Honor an external AbortSignal — when fired, kill the socket immediately
     // and reject so the caller's rate-limit budget isn't consumed by a no-op
@@ -336,12 +404,27 @@ export function request(path, opts) {
     }
 
     req = https.request(options, (res) => {
-      const rr = res.headers['x-ratelimit-remaining'];
-      const rl = res.headers['x-ratelimit-limit'];
-      const rs = res.headers['x-ratelimit-reset'];
-      if (rr !== undefined) lastRateLimit.remaining = parseInt(rr, 10);
-      if (rl !== undefined) lastRateLimit.limit = parseInt(rl, 10);
-      if (rs !== undefined) lastRateLimit.reset = parseInt(rs, 10);
+      // Mirror the core rate-limit budget into lastRateLimit for the header
+      // counter. Two guards matter:
+      // 1. `x-ratelimit-resource` tells which bucket these headers belong to.
+      //    Search/code-search endpoints carry tiny limits (e.g. 30/min) — adopting
+      //    those would make the `API n/5000` indicator flicker to `n/30` after
+      //    every search. Only `core` (or responses without the header, e.g.
+      //    older GHES) update the counter.
+      // 2. Updates go through updateRateLimit(): parallel responses arrive out
+      //    of order, so a stale higher `remaining` must never push the counter
+      //    back up, and malformed headers must never poison it with NaN.
+      const resource = res.headers['x-ratelimit-resource'];
+      if (resource === undefined || resource === 'core') {
+        const rlParsed = res.headers['x-ratelimit-limit'] !== undefined
+          ? parseInt(res.headers['x-ratelimit-limit'], 10) : NaN;
+        const rrParsed = res.headers['x-ratelimit-remaining'] !== undefined
+          ? parseInt(res.headers['x-ratelimit-remaining'], 10) : NaN;
+        const rsParsed = res.headers['x-ratelimit-reset'] !== undefined
+          ? parseInt(res.headers['x-ratelimit-reset'], 10) : NaN;
+        // Monotonic: out-of-order responses can't push the counter back up.
+        updateRateLimit(rlParsed, rrParsed, rsParsed);
+      }
       const sc = res.headers['x-oauth-scopes'];
       const ac = res.headers['x-accepted-oauth-scopes'];
       if (sc !== undefined) lastScopes.scopes = sc.split(',').map(s => s.trim()).filter(Boolean);
@@ -775,8 +858,11 @@ export const updateIssue = (token, owner, repo, number, patch) =>
   request('/repos/' + owner + '/' + repo + '/issues/' + number, { token, method: 'PATCH', body: patch || {} });
 
 // ─── Rate Limit ────────────────────────────────────────────────────
+// force: always hit the wire — `/rate_limit` costs no quota, and a forced
+// request doubles as an offline-recovery probe (cached GETs can never clear
+// a latched offline flag or refresh ground truth).
 export const getRateLimit = (token) =>
-  request('/rate_limit', { token });
+  request('/rate_limit', { token, force: true });
 
 // ─── Traffic ────────────────────────────────────────────────────────
 export const getRepoTrafficViews = (token, owner, repo, signal) =>
