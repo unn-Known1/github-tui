@@ -617,8 +617,8 @@ export const unsubscribeNotification = (token, threadId) =>
   });
 
 // ─── Activity, trending, starred ────────────────────────────────────
-export const getUserEvents = (token, username, perPage, signal) =>
-  request('/users/' + username + '/events?per_page=' + (perPage||15), { token, signal });
+export const getUserEvents = (token, username, perPage, signal, page) =>
+  request('/users/' + username + '/events?per_page=' + (perPage||15) + '&page=' + (page||1), { token, signal });
 export const getTrendingRepos = async (token, days, perPage, signal) => {
   const d = days || 7;
   const pp = perPage || 5;

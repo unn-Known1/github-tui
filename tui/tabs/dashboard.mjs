@@ -57,7 +57,7 @@ export async function loadDashboardWidgets(force = false) {
   try {
     const days = appState.trendingPeriod || 7;
     const results = await Promise.allSettled([
-      getUserEvents(appState.token, username, 100, gen.signal),
+      loadContributionEvents(appState.token, username, gen.signal),
       getTrendingRepos(appState.token, days, 30, gen.signal),
       getStarredRepos(appState.token, 1, 100, gen.signal),
       getUserIssues(appState.token, 1, 10, gen.signal),
@@ -224,12 +224,37 @@ async function loadDashboardStarredPages(gen) {
   }
 }
 
+// Fetch enough of the public events feed to fill the CONTRIB_DAYS heatmap
+// window. A single page (100 events) covers only ~7 days for active users,
+// leaving older cells permanently at zero. Pages are newest-first, so stop
+// early once the oldest event predates the window or a short page arrives.
+// Capped at 3 pages (300 events — the API maximum) to bound quota cost.
+// Exported for tests (injectable fetch fn defaults to getUserEvents).
+export async function loadContributionEvents(token, username, signal, fetchPage = getUserEvents) {
+  const perPage = 100;
+  const maxPages = 3;
+  // Heatmap grid reaches back (CONTRIB_WEEKS-1)*7 + weekday days ≈ 99–105.
+  const cutoffMs = Date.now() - (CONTRIB_DAYS + 1) * 86400000;
+  const all = [];
+  for (let page = 1; page <= maxPages; page++) {
+    const items = await fetchPage(token, username, perPage, signal, page);
+    if (!Array.isArray(items) || items.length === 0) break;
+    all.push(...items);
+    if (items.length < perPage) break; // last page
+    const oldest = items[items.length - 1];
+    const oldestMs = oldest && oldest.created_at ? Date.parse(oldest.created_at) : NaN;
+    if (!Number.isFinite(oldestMs) || oldestMs < cutoffMs) break;
+  }
+  return all;
+}
+
 // ─── Heatmap builder ──────────────────────────────────────────────────
 // UTC-normalised so the grid agrees with buildStarHistory (which already
 // uses UTC midnight) regardless of the viewer's local timezone. Returns
 // totals + streak metadata so the header can be honest about what the
-// REST public-events feed actually contains (max ~100 events, no private
-// contributions — GraphQL contributionCalendar would be needed for those).
+// REST public-events feed actually contains (max ~300 events over ~90 days,
+// no private contributions — GraphQL contributionCalendar would be needed
+// for those).
 export const CONTRIB_WEEKS = 15;
 export const CONTRIB_DAYS = CONTRIB_WEEKS * 7; // 105
 export function contribDayKey(ms) {
