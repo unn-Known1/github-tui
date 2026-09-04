@@ -13,7 +13,6 @@ export function relTime(iso) {
   return `${Math.floor(d / 86400 / 365)}y`;
 }
 
-// Clamp number into [lo, hi].
 export function clamp(n, lo, hi) {
   return Math.max(lo, Math.min(hi, n));
 }
@@ -241,7 +240,6 @@ export function wrapText(text, width) {
   return wrapTextWithMap(text, width).lines;
 }
 
-// Pad-right to width (no truncation).
 export function padRight(s, n) {
   const str = String(s ?? '');
   const missing = Math.max(0, n - displayWidth(str));
@@ -400,12 +398,10 @@ function _tryNativeClipboardSync(str) {
   }
 }
 
-// Return the path of the last temp-file fallback, or null.
 export function getClipboardTempFilePath() {
   return globalThis._lastClipboardTempFile || null;
 }
 
-// Return which method was last used to copy text, or null.
 export function getLastClipboardMethod() {
   return globalThis._lastClipboardMethod || null;
 }

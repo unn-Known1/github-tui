@@ -159,7 +159,6 @@ async function runCliCommand(args) {
 }
 
 async function main() {
-  // CLI flags.
   if (process.argv.includes('--version') || process.argv.includes('-v')) {
     console.log('github-tui ' + pkg.version);
     process.exit(0);
@@ -205,7 +204,6 @@ async function main() {
     }
   });
 
-  // Hide cursor; enable mouse; enable bracketed paste.
   process.stdout.write('\x1b[?25l');
   if (!process.argv.includes('--no-mouse')) enableMouse();
   enableBracketedPaste();
@@ -226,7 +224,6 @@ async function main() {
   loadCollapsed();
   loadSession();
 
-  // Restore repo preferences.
   const repoPrefs = loadRepoPrefs();
   if (repoPrefs.repoSort) appState.repoSort = repoPrefs.repoSort;
   if (repoPrefs.repoTypeFilter) appState.repoTypeFilter = repoPrefs.repoTypeFilter;
@@ -234,7 +231,6 @@ async function main() {
   if (repoPrefs.repoStaleOnly != null) appState.repoStaleOnly = repoPrefs.repoStaleOnly;
   if (repoPrefs.repoDensity) appState.repoDensity = repoPrefs.repoDensity;
 
-  // Initialize screen + register palette actions.
   const screen = initScreen();
   registerCoreActions();
 
@@ -316,7 +312,6 @@ if (process.platform === 'win32') {
   // welcome check works for authenticated and logged-out users alike.
   const onboarding = await import('./tui/tabs/onboarding.mjs');
 
-  // Auto-load if we already have a saved token.
   if (appState.token) {
     await loadUserData();
     refreshRateLimit();
@@ -334,7 +329,6 @@ if (process.platform === 'win32') {
       }
     } catch {}
 
-    // Refresh rate limit every 60 seconds.
     rateLimitInterval = setInterval(refreshRateLimit, 60000);
 
     // Auto-refresh: silently refetch data at a configurable interval.

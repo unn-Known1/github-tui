@@ -26,7 +26,6 @@ export function saveBookmarks(list) {
 
 export function addBookmark(repo, tags = []) {
   const list = loadBookmarks();
-  // Dedup by full_name.
   if (list.some(b => b.full_name === repo.full_name)) return { added: false, list };
   list.unshift({
     id: `bm_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,

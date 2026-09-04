@@ -16,10 +16,8 @@ export function calculateViewport(totalItems, selectedItem, scrollOffset, viewpo
 
   const maxScroll = Math.max(0, totalItems - Math.floor(viewportHeight / itemHeight));
 
-  // Clamp scroll offset
   let scroll = Math.max(0, Math.min(scrollOffset, maxScroll));
 
-  // Ensure selected item is visible
   const selectedRow = Math.floor(selectedItem / itemHeight);
   if (selectedRow < scroll) {
     scroll = selectedRow;
@@ -27,12 +25,10 @@ export function calculateViewport(totalItems, selectedItem, scrollOffset, viewpo
     scroll = selectedRow - Math.floor(viewportHeight / itemHeight) + 1;
   }
 
-  // Calculate visible range with overscan
   const startItem = Math.max(0, Math.floor(scroll) - overscan);
   const visibleItems = Math.ceil(viewportHeight / itemHeight) + overscan * 2;
   const endItem = Math.min(totalItems, startItem + visibleItems);
 
-  // Calculate Y offset for the first visible item
   const offsetY = (startItem - scroll) * itemHeight;
 
   return {
@@ -114,11 +110,9 @@ export function handleWheel(up, state, totalItems, viewportHeight, itemHeight = 
 
   if (up) {
     scroll = Math.max(0, scroll - scrollAmount);
-    // Keep selected item in view
     if (selected < scroll) selected = scroll;
   } else {
     scroll = Math.min(maxScroll, scroll + scrollAmount);
-    // Keep selected item in view
     if (selected >= scroll + maxVisible) selected = scroll + maxVisible - 1;
   }
 

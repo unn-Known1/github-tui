@@ -581,7 +581,6 @@ function renderFooterInput(screen, statusY, W) {
 function renderFooter(W, H) {
   const sepY = H - FOOTER_HEIGHT;
   const statusY = sepY + 1;
-  // Separator
   screen.hline(sepY, '─', { dim: true });
 
   const statusStyle = color('statusBar');
@@ -879,7 +878,6 @@ function renderBookmarksOverlay(screen) {
   }
   screen.box(x, y, boxW, boxH, 'Bookmarks (' + bm.length + ')');
 
-  // Empty state
   if (bm.length === 0) {
     screen.writeStr(x + 2, y + 2, '★', { fg: 'cyan' });
     screen.writeStr(x + 2, y + 3, 'No bookmarks yet', color('emptyTitle') || { fg: 'white', bold: true });
@@ -888,7 +886,6 @@ function renderBookmarksOverlay(screen) {
     return;
   }
 
-  // Column headers
   screen.writeStr(x + 2, y + 1, 'REPO', color('header'));
   if (boxW > 50) screen.writeStr(x + boxW - 28, y + 1, 'TAGS / URL', color('header'));
 
@@ -908,13 +905,11 @@ function renderBookmarksOverlay(screen) {
     screen.writeStr(x + 1, row, prefix, sel ? color('selection') : null);
     screen.writeStr(x + 3, row, name, sel ? color('selection') : (color('repoName') || { fg: 'white' }));
 
-    // Stars
       const stars = b.stars ? '★ ' + b.stars : '';
     if (stars) {
       screen.writeStr(x + 3 + name.length + 1, row, stars, sel ? color('selection') : { fg: 'yellow', dim: true });
     }
 
-    // Tags or URL snippet on the right
     if (boxW > 50) {
       const tagsStr = (b.tags && b.tags.length > 0) ? b.tags.slice(0, 2).join(',') : '';
       const urlSnippet = b.url ? truncate(b.url.replace(/^https?:\/\//, ''), 24) : '';
@@ -924,11 +919,9 @@ function renderBookmarksOverlay(screen) {
     }
   }
 
-  // Scroll indicator
   scrollIndicators(screen, y + 2, y + 2 + Math.min(maxVisible, bm.length) - 1,
     appState.bookmarksScroll, bm.length);
 
-  // Footer with count & hints
   const footY = y + boxH - 2;
   const range = (start + 1) + '-' + Math.min(start + maxVisible, bm.length) + ' of ' + bm.length;
   screen.writeStr(x + 2, footY, range, color('dim'));

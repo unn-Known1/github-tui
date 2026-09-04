@@ -105,7 +105,6 @@ function idx256Bg(n) {
   return ansi >= 8 ? `${ESC}[10${ansi - 8}m` : `${ESC}[4${ansi}m`;
 }
 
-// Map a 256-color index to the nearest 16-color ANSI index (0-15).
 function idx256ToAnsi16(n) {
   // Standard 16-color palette as RGB (approximate)
   const palette16 = [
@@ -390,7 +389,6 @@ export class Screen {
     }
   }
 
-  // Fill a rectangle with a character and style.
   fillRect(x, y, w, h, ch, style = null) {
     for (let yy = y; yy < y + h; yy++) {
       if (yy < 0 || yy >= this.height) continue;
@@ -437,7 +435,6 @@ export class Screen {
   // Background fills the box, title centered on the top.
   card(x, y, w, h, title = '', fillStyle = null, borderStyle = null) {
     if (h < 2 || w < 4 || y < 0 || y >= this.height) return;
-    // Background fill
     if (fillStyle) {
       this.fillRect(x + 1, y + 1, w - 2, h - 2, ' ', fillStyle);
     }

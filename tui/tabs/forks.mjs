@@ -150,7 +150,6 @@ export function renderForks(screen, y, maxH) {
   const sortDir = appState.forkSort.asc ? ' ↑' : ' ↓';
   screen.writeStr(4, y + 2, 'Sort: ' + sortInfo.label + sortDir, color('accent'));
 
-  // Responsive column positions.
   const nameCol = 4;
   const starsCol = Math.max(30, Math.floor(W * 0.35));
   const forksCol = starsCol + 10;
@@ -184,7 +183,6 @@ export function renderForks(screen, y, maxH) {
     const row = headerY + 1 + i;
     const sel = start + i === appState.selectedFork;
 
-    // Selection highlight.
     if (sel) {
       for (let x = 0; x < W; x++) screen.styleBuf[row][x] = color('selection');
     }

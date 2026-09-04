@@ -10,7 +10,6 @@ const undoStack = [];
 const redoStack = [];
 const MAX_UNDO = 20;
 
-// Register an undoable action.
 export function pushUndo(entry) {
   // entry: { type, label, data, undo: async fn, redo: async fn }
   undoStack.push(entry);
@@ -18,7 +17,6 @@ export function pushUndo(entry) {
   redoStack.length = 0; // clear redo on new action
 }
 
-// Undo the last action.
 export async function undo() {
   if (undoStack.length === 0) {
     showMessage('Nothing to undo', 'info');
@@ -39,7 +37,6 @@ export async function undo() {
   }
 }
 
-// Redo the last undone action.
 export async function redo() {
   if (redoStack.length === 0) {
     showMessage('Nothing to redo', 'info');
@@ -73,7 +70,6 @@ export function getUndoInfo() {
 
 // ── Convenience functions for common destructive actions ──
 
-// Bookmark removal with undo.
 export async function undoableRemoveBookmark(fullName, bookmarkData) {
   try {
     removeBookmark(fullName);
@@ -93,7 +89,6 @@ export async function undoableRemoveBookmark(fullName, bookmarkData) {
   }
 }
 
-// Star removal with undo.
 export async function undoableUnstar(token, owner, name, repoData) {
   try {
     await unstarRepo(token, owner, name);
@@ -116,7 +111,6 @@ export async function undoableUnstar(token, owner, name, repoData) {
   }
 }
 
-// Unsubscribe with undo.
 export async function undoableUnsubscribe(token, owner, name) {
   try {
     await deleteSubscription(token, owner, name);
@@ -136,7 +130,6 @@ export async function undoableUnsubscribe(token, owner, name) {
   }
 }
 
-// Issue/PR close with undo.
 export async function undoableCloseIssue(token, owner, name, issueNumber, type = 'issues') {
   try {
     await closeIssue(token, owner, name, issueNumber, type);

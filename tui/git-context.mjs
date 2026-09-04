@@ -30,7 +30,6 @@ export function detectLocalRepo() {
 
     if (!url) return null;
 
-    // Clean up trailing slash if any
     const cleanUrl = url.replace(/\/$/, '');
 
     // Handle both SSH and HTTPS formats: github.com:owner/repo.git or github.com/owner/repo

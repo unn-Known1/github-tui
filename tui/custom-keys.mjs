@@ -42,7 +42,6 @@ function loadBindings() {
     if (!Array.isArray(raw)) {
       _bindings = [];
     } else {
-      // Validate and filter entries, warning about invalid ones.
       const valid = [];
       for (let i = 0; i < raw.length; i++) {
         const err = validateBinding(raw[i], i);
@@ -97,7 +96,6 @@ function resolvePlaceholders(cmd) {
     resolved = resolved.replace(/\{repo\}/g, shellEscape(appState.localRepo.repo || ''));
   }
 
-  // Clean up any remaining unreplaced placeholders
   resolved = resolved.replace(/\{[a-zA-Z]+\}/g, "''");
 
   return resolved;

@@ -45,7 +45,6 @@ export const KEYBINDINGS_FILE = join(CONFIG_DIR, 'keybindings.json');
 export let tokenStorageBackend = detectBackend() || 'plaintext';
 
 export function loadToken() {
-  // 1. Try OS keychain first
   const secure = loadTokenSecure();
   if (secure) {
     tokenStorageBackend = detectBackend() || 'plaintext';
@@ -77,7 +76,6 @@ export function loadToken() {
 export function saveToken(token) {
   if (!token) return removeToken();
 
-  // 1. Try OS keychain first
   const saved = saveTokenSecure(token);
   if (saved) {
     tokenStorageBackend = detectBackend() || 'plaintext';

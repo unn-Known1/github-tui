@@ -370,14 +370,12 @@ export async function toggleRunDetail() {
   if (!run) return;
   const runId = run.id;
 
-  // Toggle collapse
   if (appState.actionsExpandedRun === runId) {
     appState.actionsExpandedRun = null;
     render();
     return;
   }
 
-  // Expand — load jobs if not cached
   appState.actionsExpandedRun = runId;
   if (!appState.actionsJobs[runId]) {
     const repo = activeRepo();
@@ -391,7 +389,6 @@ export async function toggleRunDetail() {
       if (isStale(gen)) return;
       const jobs = result && result.jobs ? result.jobs : [];
       appState.actionsJobs[runId] = jobs;
-      // Cache steps for each job
       for (const job of jobs) {
         appState.actionsJobSteps[job.id] = job.steps || [];
       }
@@ -630,7 +627,6 @@ function renderRunList(screen, y, h, W) {
     return;
   }
 
-  // Header
   screen.writeStr(2, y, '', { dim: true });
   screen.writeStr(5, y, 'WORKFLOW', { fg: 'cyan', bold: true });
   screen.writeStr(38, y, 'BRANCH', { fg: 'cyan', bold: true });
@@ -650,7 +646,6 @@ function renderRunList(screen, y, h, W) {
     const sel = idx === appState.actionsSelected;
     const isExpanded = appState.actionsExpandedRun === run.id;
 
-    // Run row
     if (curY >= y + maxVisible) break;
     const row = curY;
     if (sel) {
@@ -675,7 +670,6 @@ function renderRunList(screen, y, h, W) {
     curY++;
     drawn++;
 
-    // Expanded: show jobs
     if (isExpanded) {
       const jobs = appState.actionsJobs[run.id] || [];
       if (jobs.length === 0 && appState.actionsLoading) {
@@ -705,7 +699,6 @@ function renderRunList(screen, y, h, W) {
           curY++;
           drawn++;
 
-          // Show steps
           const steps = appState.actionsJobSteps[job.id] || [];
           for (const step of steps) {
             if (curY >= y + maxVisible) break;
@@ -724,7 +717,6 @@ function renderRunList(screen, y, h, W) {
 
   scrollIndicators(screen, y, y + maxVisible - 1, appState.actionsScroll, runs.length);
 
-  // Status bar hint
   const hintY = y + Math.min(maxVisible, drawn);
   if (hintY < y + h - 1) {
     screen.hline(hintY, '─', { dim: true });

@@ -348,7 +348,6 @@ export function renderDetail(screen) {
   const H = screen.height;
   const data = appState.detailData;
 
-  // Backdrop.
   const backdropStyle = color('modalBackdrop');
   for (let yy = 0; yy < H; yy++) {
     for (let xx = 0; xx < W; xx++) screen.styleBuf[yy][xx] = backdropStyle;
@@ -393,7 +392,6 @@ export function renderDetail(screen) {
   screen.writeStr(innerX + data.state.length + 2, by + 1, hdrText);
   screen.writeStr(bx + boxW - authorBlock.length - 3, by + 1, authorBlock, color('dim'));
 
-  // Labels
   if (data.labels && data.labels.length > 0) {
     let lx = innerX;
     for (const lb of data.labels.slice(0, 6)) {
@@ -407,7 +405,6 @@ export function renderDetail(screen) {
     }
   }
 
-  // Pane tabs
   const tabs = [
     ['body', 'Body'],
     ['comments', 'Comments (' + appState.detailComments.length + ')'],
@@ -447,7 +444,6 @@ export function renderDetail(screen) {
 
   screen.hline(tabY + 1, '─', color('dim'));
 
-  // Content area
   const contentY = tabY + 2;
   const contentH = boxH - 6;
   const scroll = appState.detailScroll;
@@ -466,12 +462,10 @@ export function renderDetail(screen) {
     }
   }
 
-  // Reaction picker overlay
   if (appState.detailReactionPicker) {
     renderReactionPicker(screen, bx, by + boxH - 5, boxW);
   }
 
-  // Scroll indicator
   const hintParts = ['[↑↓] scroll', '[Esc] close', '[c] comment', '[r] react'];
   if (appState.detailType === 'pull_request') hintParts.push('[C] checkout');
   screen.writeStr(bx + 2, by + boxH - 1, hintParts.join('  '), color('dim'));
@@ -623,7 +617,6 @@ function renderFiles(screen, x, y, w, h, scroll) {
 function renderDiffView(screen, x, y, w, h) {
   const file = appState.detailDiffFile;
   const diff = appState.detailDiffContent;
-  // Header
   screen.writeStr(x, y, (file && file.filename) || 'Diff', color('title'));
   screen.writeStr(x, y + 1, '[Esc] back to files', color('dim'));
   screen.hline(y + 2, '─', color('dim'));
@@ -789,7 +782,6 @@ export function enter() {
     viewFileDiff(appState.detailFileCursor);
     return;
   }
-  // Cycle tabs
   const tabs = ['body', 'comments'];
   if (appState.detailType === 'pull_request') {
     tabs.push('reviews');

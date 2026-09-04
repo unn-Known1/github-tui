@@ -195,7 +195,6 @@ export function render(screen) {
   const H = screen.height;
   const q = (appState.helpQuery || '').trim();
 
-  // Modal backdrop: dim the entire screen.
   const backdropStyle = color('modalBackdrop');
   for (let yy = 0; yy < H; yy++) {
     for (let xx = 0; xx < W; xx++) {
@@ -208,29 +207,24 @@ export function render(screen) {
   const x0 = Math.floor((W - boxW) / 2);
   const y0 = Math.floor((H - boxH) / 2);
 
-  // Clear the box area.
   for (let yy = y0; yy < y0 + boxH; yy++) {
     for (let xx = x0; xx < x0 + boxW; xx++) {
       screen.setCell(xx, yy, ' ', null);
     }
   }
 
-  // Box border.
   screen.box(x0, y0, boxW, boxH, 'Help · Keyboard Shortcuts', { fg: 'cyan', bold: true });
 
-  // Search bar.
   const searchY = y0 + 1;
   screen.writeStr(x0 + 2, searchY, '/', { fg: 'cyan' });
   const queryStr = q || 'Type to filter (Esc to close, ↑↓ to scroll)...';
   screen.writeStr(x0 + 4, searchY, truncate(queryStr, boxW - 8),
     q ? { fg: 'cyan', bold: true } : { dim: true });
   if (q) {
-    // Show a small "x" to clear.
     screen.writeStr(x0 + boxW - 4, searchY, '✕', { fg: 'gray' });
   }
   screen.hline(searchY + 1, '─', { dim: true });
 
-  // Build the lines to render. Filter by query.
   const lines = getHelpLines(q);
 
   // Pad to boxH-3 to allow for footer.
@@ -255,7 +249,6 @@ export function render(screen) {
     }
   }
 
-  // Scroll indicator.
   const footY = y0 + boxH - 2;
   if (lines.length > maxLines) {
     const s = (scrollOffset + 1) + '-' + Math.min(scrollOffset + maxLines, lines.length) +
@@ -264,7 +257,6 @@ export function render(screen) {
   } else {
     screen.writeStr(x0 + 2, footY, lines.length + ' shortcuts · ' + CATEGORIES.length + ' categories', { dim: true });
   }
-  // Footer hint pinned to right.
   const hint = '↑↓ scroll   / search   Esc close';
   screen.writeStr(x0 + boxW - hint.length - 2, footY, hint, { dim: true });
 }
@@ -273,12 +265,10 @@ export function getHelpLines(q) {
   const lines = [];
   const query = (q || '').trim();
 
-  // Map tab index to category id.
   const TAB_CATS = ['dashboard', 'repos', 'analyze', 'actions', 'inbox', 'settings'];
   const currentCat = TAB_CATS[tabState.current] || 'global';
 
   if (!query) {
-    // Show current tab's shortcuts first, then global, then others.
     const current = CATEGORIES.find(c => c.id === currentCat);
     const globalCat = CATEGORIES.find(c => c.id === 'global');
     const others = CATEGORIES.filter(c => c.id !== currentCat && c.id !== 'global');

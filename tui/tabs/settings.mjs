@@ -283,7 +283,6 @@ export function renderSettings(screen, y, h) {
     const GAP       = 2;   // space between chips
     const maxRight  = leftMaxW - 2;
 
-    // Label on first row
     screen.writeStr(LABEL_X, row, 'Themes:', { dim: true });
 
     const themes = listThemes();
@@ -304,9 +303,7 @@ export function renderSettings(screen, y, h) {
         cx = CHIP_X;
       }
 
-      // Draw swatch block
       screen.writeStr(cx, row, '█', { fg: accent });
-      // Draw chip label
       screen.writeStr(cx + SWATCH_W, row, chipText, accentStyle);
 
       themeChips.push({ theme: t, x1: cx, x2: cx + chipW, y: row });
@@ -418,7 +415,6 @@ export function renderSettings(screen, y, h) {
     }
   }
 
-  // Maker profile credit at the bottom
   const creditY = y + h - 1;
   if (creditY > row) {
     screen.writeStr(2, creditY, 'Maker: ', { fg: 'cyan', bold: true });
@@ -449,7 +445,6 @@ function renderSystemLines(screen, y, W, screenW) {
 }
 
 function buildSystemLines(screenW) {
-  // Determine storage label and color
   const backend = tokenStorageBackend || 'plaintext';
   const storageLabel =
     backend === 'macos-keychain'      ? 'macOS Keychain' :
@@ -480,7 +475,6 @@ function buildSystemLines(screenW) {
   if (lastScopes.scopes && lastScopes.scopes.length) {
     lines.push(['Scopes', lastScopes.scopes.join(', '), { dim: true }]);
   }
-  // Cache stats
   const cs = getCacheStats();
   if (cs.entries > 0) {
     const age = cs.oldestTs ? Math.max(0, Math.floor((Date.now() - cs.oldestTs) / 60000)) + 'm oldest' : 'unknown age';
@@ -610,17 +604,14 @@ export function enter() {
   const isLoggedIn = !!appState.token;
   switch (appState.settingsCursor) {
     case 0:
-      // Login with GitHub CLI
       if (!isLoggedIn) loginWithGh();
       else showMessage('Already logged in', 'info');
       break;
     case 1:
-      // Login with PAT
       if (!isLoggedIn) startInput('PAT token: ', 'login', true);
       else showMessage('Already logged in', 'info');
       break;
     case 2:
-      // Logout
       if (isLoggedIn) confirm('Log out of GitHub?', handleLogout, 'Log Out');
       else showMessage('Not logged in', 'warning');
       break;
@@ -665,7 +656,6 @@ export function enter() {
           showMessage('Auto-refresh: every ' + labels[nextIdx], 'success');
         }
       }
-      // Restart the interval
       if (globalThis._startAutoRefresh) globalThis._startAutoRefresh();
       break;
     }

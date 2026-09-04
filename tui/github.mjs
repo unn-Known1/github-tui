@@ -167,7 +167,6 @@ function saveEtagCache() {
   } catch { /* non-fatal */ }
 }
 
-// Periodic cache flush — every 60s if dirty.
 function scheduleCacheFlush() {
   if (_cacheFlushTimer) return;
   _cacheFlushTimer = setInterval(() => {
@@ -245,7 +244,6 @@ loadEtagCache();
 loadLastSynced();
 scheduleCacheFlush();
 
-// Save on exit.
 process.on('exit', () => {
   if (_cacheDirty) saveEtagCache();
   if (_syncedDirty) saveLastSynced();

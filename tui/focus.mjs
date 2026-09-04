@@ -103,12 +103,10 @@ export function getFocusState() {
   return { ..._focusState };
 }
 
-// Move focus to next zone (Tab).
 export function focusNext() {
   const zones = FOCUS_ZONES[_focusState.tab] || [];
   if (zones.length === 0) return;
 
-  // Find next focusable zone
   let next = _focusState.zoneIndex + 1;
   for (let i = 0; i < zones.length; i++) {
     const idx = (next + i) % zones.length;
@@ -121,12 +119,10 @@ export function focusNext() {
   }
 }
 
-// Move focus to previous zone (Shift+Tab).
 export function focusPrev() {
   const zones = FOCUS_ZONES[_focusState.tab] || [];
   if (zones.length === 0) return;
 
-  // Find previous focusable zone
   let prev = _focusState.zoneIndex - 1;
   for (let i = 0; i < zones.length; i++) {
     const idx = (prev - i + zones.length) % zones.length;
@@ -139,7 +135,6 @@ export function focusPrev() {
   }
 }
 
-// Reset focus when switching tabs.
 export function resetFocus(tabIndex) {
   _focusState.tab = tabIndex;
   _focusState.zoneIndex = tabIndex === 0 ? -1 : 0;
@@ -149,12 +144,10 @@ export function resetFocus(tabIndex) {
   }
 }
 
-// Check if a specific zone is currently focused.
 export function isFocused(tabIndex, zoneId) {
   return _focusState.tab === tabIndex && getFocusZone()?.id === zoneId;
 }
 
-// Get the selection state for the focused zone.
 export function getFocusedSelection() {
   const zone = getFocusZone();
   if (!zone) return null;

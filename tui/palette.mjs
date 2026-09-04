@@ -133,7 +133,6 @@ export function handleKey(key) {
 export function renderPalette(screen) {
   const W = screen.width, H = screen.height;
 
-  // Modal backdrop: dim everything.
   const backdropStyle = color('modalBackdrop');
   for (let yy = 0; yy < H; yy++) {
     for (let xx = 0; xx < W; xx++) {
@@ -146,13 +145,11 @@ export function renderPalette(screen) {
   const x = Math.floor((W - boxW) / 2);
   const y = Math.floor((H - boxH) / 2);
 
-  // Clear the box area.
   for (let yy = y; yy < y + boxH; yy++) {
     for (let xx = x; xx < x + boxW; xx++) screen.setCell(xx, yy, ' ', null);
   }
   screen.box(x, y, boxW, boxH, 'Command Palette');
 
-  // Query line with input box styling.
   const q = appState.paletteQuery;
   const inputStyle = color('inputBox');
   screen.writeStr(x + 2, y + 1, '>', { fg: 'cyan', bold: true });
@@ -193,7 +190,6 @@ export function renderPalette(screen) {
     }
   }
 
-  // Scroll indicator + footer hints on the same bottom row.
   if (list.length > maxVisible) {
     const s = (scrollOff + 1) + '-' + Math.min(scrollOff + maxVisible, list.length) +
       ' of ' + list.length;

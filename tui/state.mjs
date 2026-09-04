@@ -804,7 +804,6 @@ export function upsertEntity(repo, opts = {}) {
     starredAt: opts.starredAt !== undefined ? opts.starredAt : (cur.starredAt || null),
   };
   appState.entityCache[full] = next;
-  // Keep appState.starred synced.
   if (Array.isArray(appState.starred)) {
     const idx = appState.starred.findIndex(s => s.full_name === full);
     if (next.isStarred && idx === -1) {
@@ -1141,7 +1140,6 @@ export function loadSession() {
   } catch {}
 }
 
-// Auto-save on normal exit.
 process.on('exit', saveSession);
 
 // Debounced session save — called during normal operation so crashes lose less state.

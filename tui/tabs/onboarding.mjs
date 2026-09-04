@@ -312,7 +312,6 @@ export function renderOnboarding(screen, opts = {}) {
   const H = screen.height;
   const welcomeMode = opts.welcomeMode || appState.showWelcome;
 
-  // Dim backdrop.
   const backdropStyle = color('modalBackdrop');
   for (let yy = 0; yy < H; yy++) {
     for (let xx = 0; xx < W; xx++) screen.styleBuf[yy][xx] = backdropStyle;
@@ -343,7 +342,6 @@ export function renderOnboarding(screen, opts = {}) {
   screen.writeStr(x0 + 3, iconY, iconText, { fg: 'cyan', bold: true });
   screen.writeStr(x0 + 7, iconY, step.title, color('title') || { fg: 'white', bold: true });
 
-  // Body.
   const body = Array.isArray(step.body) ? step.body : step.body.split('\n');
   let bodyY = y0 + 4;
   const innerW = boxW - 6;

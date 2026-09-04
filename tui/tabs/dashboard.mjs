@@ -45,7 +45,6 @@ export async function loadDashboardWidgets(force = false) {
   beginLoading(gen);
   const username = appState.user.login;
 
-  // Mark individual widgets as loading.
   setWidgetLoading('events', true, gen);
   setWidgetLoading('trending', true, gen);
   setWidgetLoading('starred', true, gen);
@@ -692,7 +691,6 @@ export function renderDashboard(screen, y, h) {
     return;
   }
 
-  // Greeting row.
   const heading = greeting() + ', ' + (user.name || user.login);
   screen.writeStr(2, y, heading, color('title') || { fg: 'white', bold: true });
 
@@ -840,7 +838,6 @@ export function renderDashboard(screen, y, h) {
     }
     ly++;
 
-    // Show recent followers if available
     if (appState.userFollowers.length > 0 && ly < y + h - 2) {
       screen.writeStr(leftX, ly, 'Recent followers:', { dim: true });
       ly++;
@@ -969,7 +966,6 @@ export function renderDashboard(screen, y, h) {
     return color('heatmapHigh');
   };
 
-        // heatmap char gradients differ in --accessible mode.
         const heatChars = appState.accessible
           ? [' ', '.', 'o', 'O', '#']
           : [' ', '░', '▒', '▓', '█'];
@@ -1984,7 +1980,6 @@ export function openDashboardItem() {
   if (zone === 'issues') {
     const issue = getDashboardIssues()[appState.dashboardIssueSelected];
     if (!issue) return;
-    // Extract owner/repo from issue.repository_url or html_url
     let owner, repo;
     if (issue.repository_url) {
       const parts = issue.repository_url.split('/');

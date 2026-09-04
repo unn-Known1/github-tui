@@ -305,7 +305,6 @@ export function handleKey(key) {
     if (appState.confirmAction) { dismissConfirm(); return; }
     if (appState.inputMode === 'input') { import('./input.mjs').then(m => m.cancelInput()).catch(() => {}); return; }
     if (appState.showDetail) { detail.handleBack(); return; }
-    // Clear text selection if one is active.
     if (appState.textSelectionMode !== 'none') {
       appState.textSelectionMode = 'none';
       appState.textSelectStart = null;

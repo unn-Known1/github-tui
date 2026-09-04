@@ -4,7 +4,6 @@
 
 import { appState, render, showMessage } from './state.mjs';
 
-// Bracketed paste mode — enables proper paste handling.
 export function enableBracketedPaste() {
   process.stdout.write('\x1b[?2004h');
 }
@@ -13,7 +12,6 @@ export function disableBracketedPaste() {
   process.stdout.write('\x1b[?2004l');
 }
 
-// Paste state tracking.
 let _pasting = false;
 let _pasteBuffer = '';
 

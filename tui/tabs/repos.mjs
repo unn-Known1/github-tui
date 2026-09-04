@@ -433,7 +433,6 @@ export function renderRepos(screen, y, h) {
   repos = floatPinsToTop(repos);
   appState._filteredReposCount = repos.length;
 
-  // Aggregate stats.
   const totalStars = appState.repos.reduce((a, r) => a + (r.stargazers_count || 0), 0);
   const totalForks = appState.repos.reduce((a, r) => a + (r.forks_count || 0), 0);
   const totalIssues = appState.repos.reduce((a, r) => a + (trueIssueCount(r) != null ? trueIssueCount(r) : (r.open_issues_count || 0)), 0);
@@ -520,7 +519,6 @@ export function renderRepos(screen, y, h) {
     return;
   }
 
-  // Responsive column positions based on terminal width.
   const bp = getBreakpoint(W);
   const badgeW = 2;
   const nameCol = 2 + badgeW + 1;
@@ -550,7 +548,6 @@ export function renderRepos(screen, y, h) {
     headerY = y + 5;
   }
 
-  // Column headers.
   screen.writeStr(nameCol, headerY, 'REPO', { fg: 'cyan', bold: true });
   screen.writeStr(langCol, headerY, 'LANG', { fg: 'cyan', bold: true });
   screen.writeStr(starsCol, headerY, 'STARS', { fg: 'cyan', bold: true });
@@ -575,7 +572,6 @@ export function renderRepos(screen, y, h) {
   }
   const maxRows = Math.max(1, Math.floor((h - 10) / rowH));
 
-  // Render loop: emit headers as we cross section boundaries.
   let curY = headerY + 2;
   let drawn = 0;
   for (let i = start; i < repos.length && drawn < maxRows; i++) {

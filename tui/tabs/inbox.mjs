@@ -375,7 +375,6 @@ export function renderInbox(screen, y, h) {
 
   screen.writeStr(2, y, 'NOTIFICATIONS', color('title') || { fg: 'white', bold: true });
 
-  // Filter chip
   const filterChip = ' ' + appState.inboxFilter.toUpperCase() + ' ';
   screen.writeStr(18, y, filterChip, { bg: 'cyan', fg: 'darkGray', bold: true });
 

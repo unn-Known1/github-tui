@@ -910,7 +910,6 @@ function dispatchDashboardClick(sx, sy) {
   const splitX = Math.floor(W / 2);
   const rightX = splitX + 2;
 
-  // Check if click is in the stat-card area.
   if (sy >= cardY && sy < cardY + cardRows * (cardH + 1)) {
     const row = Math.floor((sy - cardY) / (cardH + 1));
     const col = Math.floor((sx - startX) / (cardW + gap));
@@ -1019,7 +1018,6 @@ function dispatchDashboardClick(sx, sy) {
     }
   }
 
-  // Left column — check top-repo click.
   if (sx < splitX && sy >= bodyY) {
     const th = appState._sectionHeaders['dashboard:topRepos'];
     if (th && th.y > 0 && sy > th.y) {
@@ -1387,7 +1385,6 @@ function scrollDown(sx, sy) {
 
 // ── Settings tab ─────────────────────────────────────────────
 function dispatchSettingsClick(sx, sy) {
-  // Click on URL link → open in browser.
   const urlBounds = appState._settingsUrlBounds;
   if (urlBounds && sx >= urlBounds.x && sx < urlBounds.x + urlBounds.w && sy === urlBounds.y) {
     import('../utils.mjs').then(m => m.openUrl(urlBounds.url)).then(r => {
@@ -1398,7 +1395,6 @@ function dispatchSettingsClick(sx, sy) {
     return;
   }
 
-  // Click on theme chip → apply theme.
   const chips = appState._themeChips;
   if (chips) {
     for (const chip of chips) {

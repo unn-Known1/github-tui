@@ -12,18 +12,15 @@ export function calculateColumns(terminalWidth, columns) {
 
   let widths = columns.map(col => Math.floor((availableWidth * (col.ratio || 1)) / totalRatio));
 
-  // Apply min/max constraints
   for (let i = 0; i < columns.length; i++) {
     const col = columns[i];
     if (col.min && widths[i] < col.min) widths[i] = col.min;
     if (col.max && widths[i] > col.max) widths[i] = col.max;
   }
 
-  // Distribute remaining space
   const totalUsed = widths.reduce((sum, w) => sum + w, 0);
   const remaining = availableWidth - totalUsed;
   if (remaining > 0) {
-    // Add to the last column
     widths[widths.length - 1] += remaining;
   }
 

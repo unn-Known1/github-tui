@@ -51,7 +51,6 @@ const RECOVERY_PATTERNS = [
 export function showError(message, context, options = {}) {
   const { retry, duration } = options;
 
-  // Find matching recovery pattern
   let recoveryHint = '';
   for (const p of RECOVERY_PATTERNS) {
     if (p.pattern.test(message)) {
@@ -60,14 +59,12 @@ export function showError(message, context, options = {}) {
     }
   }
 
-  // Build the full message
   const prefix = context ? context + ': ' : '';
   let fullMessage = prefix + message;
   if (recoveryHint) {
     fullMessage += ' — ' + recoveryHint;
   }
 
-  // Show with retry hint if available
   const displayDuration = duration || (retry ? 8000 : 3000);
   showMessage(fullMessage, 'error', displayDuration);
   // surface the retry handler so the footer can render "[r] to retry"
