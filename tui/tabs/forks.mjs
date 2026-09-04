@@ -10,6 +10,9 @@ import { loadingIndicator, scrollIndicators } from '../render.mjs';
 const FORKS_PER_PAGE = 30;
 const COMPARE_CONCURRENCY = 5;
 
+export const COMPARE_TTL_MS = 10 * 60 * 1000;
+export const _compareCache = new Map(); // key: upstreamFull + '|' + forkFull + '|' + base -> {ahead, behind, ts}
+
 export const FORK_SORT_OPTIONS = [
   { field: 'pushed', label: 'Last Push', key: 'p' },
   { field: 'stars',  label: 'Stars',   key: 's' },
@@ -43,22 +46,38 @@ export function toggleForkSort(field) {
 async function runCompares(owner, name, defaultBranch, range, gen) {
   let cursor = range.from;
   let completed = 0;
+  const upstreamFull = owner + '/' + name;
   const worker = async () => {
     while (true) {
       const i = cursor++;
       if (i >= range.to) return;
       if (isStale(gen)) { finishLoading(gen); return; }
-      const forkOwner = appState.forks[i] && appState.forks[i].owner && appState.forks[i].owner.login;
-      if (!forkOwner) { completed++; continue; }
+      const fork = appState.forks[i];
+      const forkOwner = fork && fork.owner && fork.owner.login;
+      const forkBranch = (fork && fork.default_branch) || defaultBranch;
+      if (!forkOwner) {
+        if (fork) fork._aheadBehind = { ahead: 0, behind: 0, ok: false };
+        completed++; continue;
+      }
+      const forkFull = (fork && fork.full_name) || (forkOwner + '/' + name);
+      const cacheKey = upstreamFull + '|' + forkFull + '|' + defaultBranch + '|' + forkBranch;
+      const cached = _compareCache.get(cacheKey);
+      if (cached && (Date.now() - cached.ts) < COMPARE_TTL_MS) {
+        appState.forks[i]._aheadBehind = { ahead: cached.ahead, behind: cached.behind, ok: true };
+        completed++;
+        if (completed % 5 === 0 && !isStale(gen)) render();
+        continue;
+      }
       try {
         const compare = await getCompare(
-          appState.token, owner, name, defaultBranch, forkOwner + ':' + defaultBranch);
+          appState.token, owner, name, defaultBranch, forkOwner + ':' + forkBranch);
         if (isStale(gen)) { finishLoading(gen); return; }
-        appState.forks[i]._aheadBehind = compare
-          ? { ahead: compare.ahead_by || 0, behind: compare.behind_by || 0 }
-          : { ahead: 0, behind: 0 };
+        const ahead = compare ? (compare.ahead_by || 0) : 0;
+        const behind = compare ? (compare.behind_by || 0) : 0;
+        appState.forks[i]._aheadBehind = { ahead, behind, ok: true };
+        _compareCache.set(cacheKey, { ahead, behind, ts: Date.now() });
       } catch (e) {
-        appState.forks[i]._aheadBehind = { ahead: 0, behind: 0 };
+        appState.forks[i]._aheadBehind = { ahead: 0, behind: 0, ok: false };
       }
       completed++;
       if (completed % 5 === 0 && !isStale(gen)) render();
@@ -180,10 +199,14 @@ export function renderForks(screen, y, maxH) {
       screen.writeStr(pushedCol, row, new Date(fork.pushed_at).toISOString().split('T')[0], statStyle);
     }
     if (fork._aheadBehind && aheadCol + 8 < W) {
-      const ahead = '+' + fork._aheadBehind.ahead;
-      const behind = fork._aheadBehind.behind > 0 ? ' -' + fork._aheadBehind.behind : '';
-      screen.writeStr(aheadCol, row, ahead, color('success'));
-      if (behind) screen.writeStr(aheadCol + ahead.length, row, behind, color('error'));
+      if (fork._aheadBehind.ok === false) {
+        screen.writeStr(aheadCol, row, '?', color('dim'));
+      } else {
+        const ahead = '+' + fork._aheadBehind.ahead;
+        const behind = fork._aheadBehind.behind > 0 ? ' -' + fork._aheadBehind.behind : '';
+        screen.writeStr(aheadCol, row, ahead, color('success'));
+        if (behind) screen.writeStr(aheadCol + ahead.length, row, behind, color('error'));
+      }
     }
   }
 
@@ -194,10 +217,8 @@ export function renderForks(screen, y, maxH) {
     const more = appState.forksHasMore ? '  [Space] Load more' : '';
     const range = (start + 1) + '-' + Math.min(start + maxRows, forks.length) +
       ' of ' + forks.length;
-    screen.writeStr(4, infoY, range + more, color('dim'));
+    const failed = forks.some(f => f._aheadBehind && f._aheadBehind.ok === false)
+      ? '   ? compare failed — re-enter to retry' : '';
+    screen.writeStr(4, infoY, range + more + failed, color('dim'));
   }
 }
-
-export const keys = {
-  'p': () => toggleForkSort('pushed'),
-};

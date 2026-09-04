@@ -6,7 +6,7 @@ import {
   getRepoTrafficPopularPaths, getRepoTrafficPopularReferrers,
 } from '../github.mjs';
 import { truncate, sectionHeader } from '../utils.mjs';
-import { loadingIndicator } from '../render.mjs';
+import { loadingIndicator, scrollIndicators } from '../render.mjs';
 
 export async function loadTraffic() {
   const repo = appState.repoDetails;
@@ -41,6 +41,8 @@ export async function loadTraffic() {
 
 export function renderTrafficPane(screen, y, maxH) {
   const W = screen.width;
+  const y0 = y;
+  const start = appState.detailsScroll || 0;
   const views = appState.repoTraffic;
   const clones = appState.repoTrafficClones;
   sectionHeader(screen, 2, y, '📊 TRAFFIC');
@@ -83,13 +85,16 @@ export function renderTrafficPane(screen, y, maxH) {
   y++;
 
   // Popular paths
-  const paths = appState.repoTrafficPopularPaths;
+  const paths = appState.repoTrafficPopularPaths || [];
+  const referrers = appState.repoTrafficPopularReferrers || [];
+  const pathOff = Math.min(start, paths.length);
+  const refOff = start >= paths.length ? Math.min(start - paths.length, referrers.length) : 0;
   if (paths.length > 0) {
     sectionHeader(screen, 2, y, 'Popular Paths');
     y++;
-    const y0 = y;
-    for (const p of paths.slice(0, 5)) {
-      if (y >= y0 + maxH - 1) break;
+    const y0p = y;
+    for (const p of paths.slice(pathOff, pathOff + 5)) {
+      if (y >= y0p + maxH - 1) break;
       screen.writeStr(4, y, truncate(p.path || '', 30));
       screen.writeStr(36, y, String(p.count || 0), { dim: true });
       screen.writeStr(44, y, String(p.uniques || 0) + ' unique', { dim: true });
@@ -99,12 +104,11 @@ export function renderTrafficPane(screen, y, maxH) {
   }
 
   // Popular referrers
-  const referrers = appState.repoTrafficPopularReferrers;
   if (referrers.length > 0) {
     sectionHeader(screen, 2, y, 'Popular Referrers');
     y++;
     const y1 = y;
-    for (const r of referrers.slice(0, 5)) {
+    for (const r of referrers.slice(refOff, refOff + 5)) {
       if (y >= y1 + maxH - 1) break;
       screen.writeStr(4, y, truncate(r.referrer || '', 30));
       screen.writeStr(36, y, String(r.count || 0), { dim: true });
@@ -112,4 +116,5 @@ export function renderTrafficPane(screen, y, maxH) {
       y++;
     }
   }
+  scrollIndicators(screen, y0, y0 + maxH - 1, start, paths.length + referrers.length);
 }

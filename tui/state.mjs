@@ -134,6 +134,9 @@ export function resetAccountState() {
   appState.repoReleaseAssets = [];
   appState.repoIssues = [];
   appState.repoPullRequests = [];
+  appState.repoIssuesFilter = 'open';
+  appState.repoPRsFilter = 'open';
+  appState.exploreLandingScroll = 0;
   appState.repoTraffic = null;
   appState.repoTrafficClones = null;
   appState.repoTrafficPopularPaths = [];
@@ -431,6 +434,11 @@ export const appState = {
   repoPullRequestsPage: 1,
   repoPullRequestsHasMore: false,
   issueStateFilter: 'open', // 'open' | 'closed' | 'all' — used by Issues/PRs panes
+  // Per-pane state filters (E4): tracked separately so switching panes refetches when stale.
+  repoIssuesFilter: 'open', // last filter value the Issues list was loaded under
+  repoPRsFilter: 'open', // last filter value the PRs list was loaded under
+  // Scroll offset for the Explore landing list (E8) so trailing items stay reachable.
+  exploreLandingScroll: 0,
   repoTraffic: null,
   repoTrafficClones: null,
   repoTrafficPopularPaths: [],

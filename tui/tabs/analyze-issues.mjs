@@ -27,6 +27,7 @@ export function cycleIssueStateFilter() {
       appState.repoIssues = Array.isArray(issues) ? issues.filter(i => !i.pull_request) : [];
       appState.repoIssuesPage = 1;
       appState.repoIssuesHasMore = Array.isArray(issues) && issues.length >= 100;
+      appState.repoIssuesFilter = appState.issueStateFilter;
       appState.detailsScroll = 0;
       finishLoading(gen);
       render();
@@ -40,6 +41,7 @@ export function cycleIssueStateFilter() {
       appState.repoPullRequests = Array.isArray(prs) ? prs : [];
       appState.repoPullRequestsPage = 1;
       appState.repoPullRequestsHasMore = Array.isArray(prs) && prs.length >= 100;
+      appState.repoPRsFilter = appState.issueStateFilter;
       appState.detailsScroll = 0;
       finishLoading(gen);
       render();
@@ -70,10 +72,12 @@ export async function loadMoreIssues() {
       appState.repoIssues = [...appState.repoIssues, ...items.filter(i => !i.pull_request)];
       appState.repoIssuesPage = page;
       appState.repoIssuesHasMore = items.length >= 100;
+      appState.repoIssuesFilter = appState.issueStateFilter;
     } else {
       appState.repoPullRequests = [...appState.repoPullRequests, ...items];
       appState.repoPullRequestsPage = page;
       appState.repoPullRequestsHasMore = items.length >= 100;
+      appState.repoPRsFilter = appState.issueStateFilter;
     }
     showMessage(items.length ? 'Loaded more ' + (isIssues ? 'issues' : 'pull requests') : 'All items loaded', 'info');
   } catch (e) {

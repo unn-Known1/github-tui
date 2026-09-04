@@ -6,6 +6,19 @@ import { startInput, registerInputHandler } from '../input.mjs';
 import { truncateToWidth } from '../utils.mjs';
 import { color } from '../theme.mjs';
 
+// NOTE: branch-picker reuse (Files pane picker for base/head) is scoped as
+// a follow-up; compare stays on free-text refs for now (E12).
+export function compareStatusStyle(status) {
+  switch (status) {
+    case 'added': return 'success';
+    case 'removed': return 'error';
+    case 'modified': return 'warning';
+    case 'renamed':
+    case 'copied': return 'info';
+    default: return null;
+  }
+}
+
 export function startCompare() {
   if (!appState.repoDetails) { showMessage('Open a repository first', 'warning'); return; }
   startInput('Compare refs (base...head): ', 'compare-refs');
@@ -21,6 +34,7 @@ registerInputHandler('compare-refs', async (value) => {
 });
 
 export async function loadCompare(base, head) {
+  if (!base || !head) { showMessage('Use base...head, for example main...feature', 'warning'); return; }
   const repo = appState.repoDetails;
   if (!repo) return;
   const [owner, name] = repo.full_name.split('/');
@@ -48,7 +62,7 @@ export function renderComparePane(screen, y, maxH) {
   screen.writeStr(2, y, 'COMPARE ' + appState.compareBase + ' ← ' + appState.compareHead, color('title'));
   screen.hline(y + 1, '─', color('dim'));
   if (appState.loading && !data) { screen.writeStr(2, y + 3, 'Loading comparison…', color('dim')); return; }
-  if (!data) { screen.writeStr(2, y + 3, 'No comparison loaded. Press [D] to choose refs.', color('dim')); return; }
+  if (!data) { screen.writeStr(2, y + 3, 'No comparison loaded. Press [D] to choose refs (e.g. main...feature).', color('dim')); return; }
   const summary = 'Ahead: ' + (data.ahead_by ?? '?') + '   Behind: ' + (data.behind_by ?? '?') +
     '   Commits: ' + (data.total_commits ?? data.commits?.length ?? '?') +
     '   Files: ' + (data.files?.length ?? '?');
@@ -56,19 +70,20 @@ export function renderComparePane(screen, y, maxH) {
   const lines = [];
   for (const c of (data.commits || [])) {
     const subject = c.commit?.message?.split(/\r?\n/)[0] || '(no message)';
-    lines.push((c.sha || '').slice(0, 8) + ' ' + subject);
+    lines.push({ text: (c.sha || '').slice(0, 8) + ' ' + subject, status: null });
   }
   for (const file of (data.files || [])) {
-    lines.push((file.status || 'changed') + ' ' + file.filename +
-      '  +' + (file.additions || 0) + ' -' + (file.deletions || 0));
+    lines.push({ text: (file.status || 'changed') + ' ' + file.filename +
+      '  +' + (file.additions || 0) + ' -' + (file.deletions || 0), status: file.status });
   }
   const rows = Math.max(1, maxH - 5);
   const start = Math.max(0, Math.min(appState.detailsScroll || 0, Math.max(0, lines.length - rows)));
   appState.detailsScroll = start;
   for (let i = 0; i < rows && start + i < lines.length; i++) {
     const line = lines[start + i];
-    screen.writeStr(2, y + 4 + i, truncateToWidth(line, screen.width - 4, ''),
-      line.startsWith('removed') ? color('error') : line.startsWith('added') ? color('success') : null);
+    const styleKey = compareStatusStyle(line.status);
+    screen.writeStr(2, y + 4 + i, truncateToWidth(line.text, screen.width - 4, ''),
+      styleKey ? color(styleKey) : null);
   }
   screen.writeStr(2, y + 4 + Math.min(rows, lines.length), '[D] Compare again  [↑↓] scroll  [Esc] back', color('dim'));
 }

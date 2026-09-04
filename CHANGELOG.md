@@ -19,6 +19,12 @@ All notable changes to this project will be documented in this file.
 - Personalization: SECURITY/MY WORK sections when data exists; `dashboard.json` hidden-widget prefs + quick-actions hint bar under stat cards (`[r]`/`[t]`/`[/]`/`[l]`/`[Tab]`).
 - Verification: dashboard tests expanded (17 pass); full suite 278 / 278 pass.
 
+### Explore
+- Fixed: details footer no longer advertises the removed `[M]iles`/`[L]abels` panes; now shows `[D]iff` for the Compare pane.
+- Changed: help overlay EXPLORE section documents forks `p`/`s`/`n` sort, `D` compare, and `T`/`K`/`S` panes.
+- Changed: per-pane Issues/PRs filters (`repoIssuesFilter`/`repoPRsFilter`) plus `exploreLandingScroll`, all reset on account switch.
+- Verification: new `tests/explore.test.mjs` covers forks sort, filter labels, landing caps/merge order, and state defaults.
+
 ## [0.7.1] - 2026-09-02
 
 ### Added

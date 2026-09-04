@@ -615,7 +615,7 @@ function statusLine() {
       if (v === 'results') return ' [↑↓jk] Nav' + sep + '[Enter] View' + sep + '[Space] More' + sep + '[Esc] Back';
       if (v === 'details') {
         if (appState.detailsPane === 'security') return ' [1-6] Security panes' + sep + '[s] severity' + sep + '[f] state' + sep + '[Enter] Open' + sep + '[Esc] Back';
-        return ' [O]v [i]ssues [P]Rs [R]eadme [F]iles [A] Packages [T]raffic [M]iles [L]abels [K]hecks [S]ecurity';
+        return ' [O]v [i]ssues [P]Rs [R]eadme [F]iles [A] Packages [T]raffic [K]hecks [S]ecurity [D]iff';
       }
       if (v === 'forks')   return ' [↑↓jk] Nav' + sep + '[Space] More' + sep + '[p/s/n] Sort' + sep + '[Esc] Back';
       return '';

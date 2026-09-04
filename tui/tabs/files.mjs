@@ -245,6 +245,30 @@ export async function viewFile(ent) {
   if (!isStale(gen)) render();
 }
 
+export async function openFilePath(path) {
+  try {
+    if (!path || typeof path !== 'string' || !path.trim()) { showMessage('Invalid file path', 'warning'); return; }
+    const clean = path.trim().replace(/^\.\/+/, '').replace(/^\/+/, '');
+    if (!clean) { showMessage('Invalid file path', 'warning'); return; }
+    const parts = clean.split('/').filter(Boolean);
+    const base = parts.pop();
+    const dir = parts.join('/');
+    if (!base) { showMessage('Invalid file path: ' + path, 'warning'); return; }
+    appState.detailsPane = 'files';
+    appState.filesPath = dir;
+    appState.fileViewing = null;
+    await loadTree();
+    const entries = appState.filesEntries || [];
+    const idx = entries.findIndex(e => e.name === base);
+    if (idx < 0) { showMessage('File not found: ' + clean, 'warning'); return; }
+    appState.filesSelected = (appState.filesPath ? 1 : 0) + idx;
+    // Reuse the same opener Enter uses.
+    await drillInto();
+  } catch (e) {
+    showMessage((e && e.message) || 'Failed to open file path', 'warning');
+  }
+}
+
 export async function openBranchPicker() {
   const [owner, name] = repoOwnerName();
   if (!owner) return;

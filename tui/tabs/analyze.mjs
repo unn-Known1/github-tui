@@ -59,15 +59,23 @@ function clearTextSelection() {
   appState.textSelectEnd = null;
 }
 
-export async function loadRepoDetails(owner, name) {
-  const gen = startAsync('analyze-details');
-  beginLoading(gen);
+// E13: single reset for ALL explore-detail fields. Used by both
+// loadRepoDetails (fresh load) and handleBack (details→results) so the two
+// call sites can't drift again. Keeps issueStateFilter persistent by design
+// (global filter outlives any one repo); per-pane repoIssuesFilter /
+// repoPRsFilter are synced to the global value here and refreshed to the
+// load-time value in loadRepoDetails (E4). Keeps repoMilestones/Labels
+// resets (harmless; panes removed in v0.7.1). Exported for tests.
+export function resetDetailState() {
   appState.detailsPane = 'overview';
-  clearTextSelection();
   appState.detailsScroll = 0;
+  clearTextSelection();
+  appState.repoDetails = null;
   appState.repoLanguages = null;
   appState.repoContributors = [];
   appState.repoReleases = [];
+  appState.repoReleaseAssets = [];
+  appState.selectedAsset = 0;
   appState.repoIssues = [];
   appState.repoIssuesPage = 1;
   appState.repoIssuesHasMore = false;
@@ -75,9 +83,10 @@ export async function loadRepoDetails(owner, name) {
   appState.repoPullRequestsPage = 1;
   appState.repoPullRequestsHasMore = false;
   appState._readmeText = null;
-  appState.repoReleaseAssets = [];
   appState.repoTraffic = null;
   appState.repoTrafficClones = null;
+  appState.repoTrafficPopularPaths = [];
+  appState.repoTrafficPopularReferrers = [];
   appState.repoMilestones = [];
   appState.repoMilestonesPage = 1;
   appState.repoMilestonesHasMore = false;
@@ -97,6 +106,79 @@ export async function loadRepoDetails(owner, name) {
   appState.securityAdvisories = [];
   appState.branchProtection = null;
   appState.dependencyPackages = [];
+  appState.compareData = null;
+  appState.compareBase = '';
+  appState.compareHead = '';
+  appState.repoHealth = null;
+  appState.filesEntries = [];
+  appState.filesBranches = [];
+  appState.filesPath = '';
+  appState.filesSelected = 0;
+  appState.filesScroll = 0;
+  appState.fileViewing = null;
+  appState.fileText = '';
+  appState.fileScroll = 0;
+  appState.fileHistory = [];
+  appState.fileHistoryPath = '';
+  appState.fileHistorySelected = 0;
+  appState.fileHistoryMode = false;
+  appState.fileBlame = [];
+  appState.fileBlameMode = false;
+  appState.filesBranchPicker = false;
+  appState.filesBranchCursor = 0;
+  // Per-pane filter stamps (E4): kept in sync with the global filter when no
+  // data is loaded; defaults live in state.mjs.
+  appState.repoIssuesFilter = appState.issueStateFilter;
+  appState.repoPRsFilter = appState.issueStateFilter;
+}
+
+// E4: self-contained per-pane refetch for stale-filter pane switches. When
+// the user switches to a pane whose stored filter predates the global
+// issueStateFilter we refetch page 1 of that pane here. Stale-guarded,
+// updates the stored filter stamp, resets scroll, toasts on error.
+async function refetchPane(pane) {
+  const repo = appState.repoDetails;
+  if (!repo || !repo.full_name) return;
+  const parts = repo.full_name.split('/');
+  const owner = parts[0];
+  const name = parts[1];
+  if (!owner || !name) return;
+  const gen = startAsync('analyze-issues');
+  beginLoading(gen);
+  render();
+  try {
+    if (pane === 'issues') {
+      const issues = await getRepositoryIssues(appState.token, owner, name, 1, 100, appState.issueStateFilter, gen.signal);
+      if (isStale(gen, 'analyze-issues')) { finishLoading(gen); return; }
+      appState.repoIssues = Array.isArray(issues) ? issues.filter(i => !i.pull_request) : [];
+      appState.repoIssuesPage = 1;
+      appState.repoIssuesHasMore = Array.isArray(issues) && issues.length >= 100;
+      appState.repoIssuesFilter = appState.issueStateFilter;
+      appState.detailsScroll = 0;
+    } else {
+      const prs = await getRepositoryPullRequests(appState.token, owner, name, 1, 100, appState.issueStateFilter, gen.signal);
+      if (isStale(gen, 'analyze-issues')) { finishLoading(gen); return; }
+      appState.repoPullRequests = Array.isArray(prs) ? prs : [];
+      appState.repoPullRequestsPage = 1;
+      appState.repoPullRequestsHasMore = Array.isArray(prs) && prs.length >= 100;
+      appState.repoPRsFilter = appState.issueStateFilter;
+      appState.detailsScroll = 0;
+    }
+  } catch (e) {
+    if (!isStale(gen, 'analyze-issues')) showMessage(e.message || ('Failed to reload ' + pane), 'error');
+  } finally {
+    finishLoading(gen);
+    if (!isStale(gen, 'analyze-issues')) render();
+  }
+}
+
+export async function loadRepoDetails(owner, name) {
+  const gen = startAsync('analyze-details');
+  beginLoading(gen);
+  resetDetailState();
+  appState.detailsPane = 'overview';
+  appState.detailsScroll = 0;
+  clearTextSelection();
   render();
   try {
     const details = await getRepositoryDetails(appState.token, owner, name, gen.signal);
@@ -126,6 +208,10 @@ export async function loadRepoDetails(owner, name) {
     appState.repoPullRequests = Array.isArray(prs) ? prs : [];
     appState.repoPullRequestsPage = 1;
     appState.repoPullRequestsHasMore = Array.isArray(prs) && prs.length >= 100;
+    // E4: stamp which filter value each pane was loaded under so pane
+    // switches can detect a stale inactive pane.
+    appState.repoIssuesFilter = issueState;
+    appState.repoPRsFilter = issueState;
     const ageDays = details.updated_at ? Math.max(0, Math.floor((Date.now() - Date.parse(details.updated_at)) / 86400000)) : null;
     appState.repoHealth = calculateRepoHealth({
       ciSuccessRate: null,
@@ -214,9 +300,14 @@ function renderRepoDetails(screen, y, maxH) {
     ['compare',   'Compare',                                     'D'],
   ];
   let px = 2;
+  // E3: compact pane tabs on narrow terminals — 10 full chips need ~130 cols
+  // and clip Compare/Security on 80-col screens. Below 100 cols render
+  // single-letter chips without counts (keys still match); wide keeps
+  // full `[k] label` chips. Selection style, spacing, and hline unchanged.
+  const narrowPanes = W < 100;
   for (const [id, label, k] of panes) {
     const sel = appState.detailsPane === id;
-    const text = '[' + k + '] ' + label;
+    const text = narrowPanes ? '[' + k + ']' : '[' + k + '] ' + label;
     const style = sel ? { bg: 'cyan', fg: 'darkGray', bold: true } : { dim: true };
     screen.writeStr(px, y + 1, text, style);
     px += text.length + 2;
@@ -235,14 +326,21 @@ function renderRepoDetails(screen, y, maxH) {
 
   // Overview pane: 2-column layout.
   const leftWidth = Math.min(48, Math.floor(W / 2));
+  // E14: honest overview counts. Issues/PRs load with per_page=100, so
+  // list lengths cap at 100 — prefer the PR-excluded enrichment count
+  // (trueIssueCount) over the capped length, and append '+' when the
+  // hasMore flag shows the list was truncated at the 100-cap.
+  // open_issues_count includes open PRs — prefer the enrichment pass.
+  const trueCount = trueIssueCount(repo);
+  const issuesDisplay = String(trueCount ?? appState.repoIssues.length ?? 0) + (appState.repoIssuesHasMore ? '+' : '');
+  const prsDisplay = String(appState.repoPullRequests.length || 0) + (appState.repoPullRequestsHasMore ? '+' : '');
   const details = [
     ['Description:', repo.description || 'N/A'],
     ['Language:',    repo.language || 'N/A'],
     ['Stars:',       shortNum(repo.stargazers_count || 0)],
     ['Forks:',       shortNum(repo.forks_count || 0)],
-    // open_issues_count includes open PRs — prefer the enrichment pass.
-    ['Open Issues:', String(appState.repoIssues.length || (trueIssueCount(repo) ?? repo.open_issues_count) || 0)],
-    ['Open PRs:',    String(appState.repoPullRequests.length || 0)],
+    ['Open Issues:', issuesDisplay],
+    ['Open PRs:',    prsDisplay],
     ['Watchers:',    shortNum(repo.watchers_count || 0)],
     ['Size:',        Math.round((repo.size || 0) / 1024) + ' MB'],
     ['License:',     (repo.license && repo.license.name) || 'N/A'],
@@ -366,29 +464,10 @@ export function handleBack() {
       render();
       return;
     }
-    // Reset all detail-related state to avoid stale data flash
-    appState.repoDetails = null;
-    appState._readmeText = null;
-    appState.repoLanguages = null;
-    appState.repoContributors = [];
-    appState.repoReleases = [];
-    appState.repoReleaseAssets = [];
-    appState.repoIssues = [];
-    appState.repoPullRequests = [];
-    appState.repoTraffic = null;
-    appState.repoTrafficClones = null;
-    appState.repoTrafficPopularPaths = [];
-    appState.repoTrafficPopularReferrers = [];
-    appState.repoMilestones = [];
-    appState.repoLabels = [];
-    appState.repoCheckRuns = [];
-    appState.repoCheckSuites = [];
-    appState.repoDependabotAlerts = [];
-    appState.secretScanningAlerts = [];
-    appState.codeScanningAlerts = [];
-    appState.securityAdvisories = [];
-    appState.branchProtection = null;
-    appState.dependencyPackages = [];
+    // Reset all detail-related state to avoid stale data flash (E13).
+    // resetDetailState covers compare/health/selectedAsset/detailsPane/
+    // security cursor + Files viewer state that the old inline list missed.
+    resetDetailState();
     appState.analyzeView = 'results';
     render();
   } else if (v === 'results') {
@@ -481,6 +560,13 @@ export const keys = {
       appState.detailsPane = next;
       appState.detailsScroll = 0;
       if (next !== 'issues' && next !== 'prs') clearTextSelection();
+      // E4: the inactive pane may predate the shared filter — refetch when
+      // its stored stamp mismatches the global filter.
+      if (next === 'issues' && (appState.repoIssuesFilter || appState.issueStateFilter) !== appState.issueStateFilter) {
+        render();
+        refetchPane('issues');
+        return;
+      }
       render();
     } else {
       startSearchInputFor('repos');
@@ -492,6 +578,12 @@ export const keys = {
       appState.detailsPane = next;
       appState.detailsScroll = 0;
       if (next !== 'issues' && next !== 'prs') clearTextSelection();
+      // E4: same stale-filter guard as 'i' but for the PRs pane.
+      if (next === 'prs' && (appState.repoPRsFilter || appState.issueStateFilter) !== appState.issueStateFilter) {
+        render();
+        refetchPane('prs');
+        return;
+      }
       render();
     }
   },
@@ -567,6 +659,7 @@ export const keys = {
   'Y': () => { if (isFilesPane()) files.keys.Y(); },
   'g': () => { jumpTop(); },
   'n': () => { if (appState.analyzeView === 'forks') toggleForkSort('name'); },
+  'p': () => { if (appState.analyzeView === 'forks') toggleForkSort('pushed'); },
   'T': () => {
     if (appState.analyzeView === 'details') {
       if (appState.detailsPane === 'traffic') {
@@ -671,6 +764,11 @@ export function down(screen) {
     else if (appState.detailsPane === 'packages') listLen = appState.repoReleaseAssets.length;
     else if (appState.detailsPane === 'readme')
       listLen = (appState._readmeText || '').split(/\r?\n/).length;
+    // E10: make Checks/Traffic panes scrollable via detailsScroll. Checks
+    // rows = runs + suites; Traffic rows = popular paths + referrers. When
+    // both are empty listLen is 0 and the clamp below keeps scroll at 0.
+    else if (appState.detailsPane === 'checks') listLen = appState.repoCheckRuns.length + appState.repoCheckSuites.length;
+    else if (appState.detailsPane === 'traffic') listLen = (appState.repoTrafficPopularPaths || []).length + (appState.repoTrafficPopularReferrers || []).length;
     else listLen = 0;
     appState.detailsScroll = Math.min(Math.max(0, listLen - 1), appState.detailsScroll + 1);
     if (appState.detailsPane === 'packages') appState.selectedAsset = appState.detailsScroll;
@@ -735,8 +833,11 @@ export function down(screen) {
   }
 }
 export function exploreEnter() {
-  const items = appState._exploreVisibleItems || getExploreLanding();
-  const item = items[appState.exploreSel];
+  // exploreSel is absolute over the full landing (renderExploreLanding keeps
+  // _exploreVisibleItems as the scrolled window with _exploreBounds.startIdx).
+  const all = getExploreLanding();
+  const visible = appState._exploreVisibleItems || all;
+  const item = all[appState.exploreSel] || visible[appState.exploreSel];
   if (!item) return;
   if (item.kind === 'trending' || item.kind === 'recent') {
     const repo = item.repo;
@@ -765,11 +866,34 @@ export function enter() {
       }
     } else if (type === 'code') {
       const item = appState.codeSearchResults[appState.codeSelectedRepo];
-      if (item && item.html_url) {
-        openUrl(item.html_url).then(res => {
-          if (res.ok) showMessage('Opened in browser', 'success');
-          else showMessage(res.error || 'Open failed', 'error');
-        });
+      if (item) {
+        // E15 MVP: in-TUI drill-in — open the containing repo's Files pane
+        // at the result path. `o` (browser) is handled separately in keys.mjs.
+        const full = item.repository && item.repository.full_name;
+        const path = item.path;
+        if (full && path) {
+          const parts = full.split('/');
+          const owner = parts[0];
+          const name = parts[1];
+          showMessage('Opening ' + full + ' → ' + path, 'info');
+          Promise.resolve().then(async () => {
+            try {
+              await loadRepoDetails(owner, name);
+              if (typeof files.openFilePath === 'function') {
+                await files.openFilePath(path).catch(() => {});
+              } else {
+                await files.openFilesPane();
+              }
+            } catch (e) {
+              showMessage((e && e.message) || 'Failed to open file', 'error');
+            }
+          });
+        } else if (item.html_url) {
+          openUrl(item.html_url).then(res => {
+            if (res.ok) showMessage('Opened in browser', 'success');
+            else showMessage(res.error || 'Open failed', 'error');
+          });
+        }
       }
     } else if (type === 'user-repos') {
       const repo = appState.userRepos[appState.userReposSelected];

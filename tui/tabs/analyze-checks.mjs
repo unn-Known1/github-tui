@@ -3,7 +3,7 @@
 import { appState, render, startAsync, isStale, showMessage, beginLoading, finishLoading } from '../state.mjs';
 import { getRepoCheckRuns, getRepoCheckSuites } from '../github.mjs';
 import { truncate, sectionHeader } from '../utils.mjs';
-import { loadingIndicator } from '../render.mjs';
+import { loadingIndicator, scrollIndicators } from '../render.mjs';
 
 export async function loadChecks() {
   const repo = appState.repoDetails;
@@ -31,6 +31,7 @@ export async function loadChecks() {
 
 export function renderChecksPane(screen, y, maxH) {
   const W = screen.width;
+  const y0 = y;
   const runs = appState.repoCheckRuns;
   const suites = appState.repoCheckSuites;
   sectionHeader(screen, 2, y, '✅ CHECKS/CI (' + runs.length + ' runs, ' + suites.length + ' suites)');
@@ -60,8 +61,11 @@ export function renderChecksPane(screen, y, maxH) {
 
   // List check runs
   const yR = y;
-  for (const run of runs) {
-    if (y >= yR + maxH - 1) break;
+  const start = appState.detailsScroll || 0;
+  const rows = Math.max(1, y0 + maxH - yR - 2);
+  for (let i = 0; i < rows && start + i < runs.length; i++) {
+    const run = runs[start + i];
+    if (y >= yR + rows) break;
     const icon = run.status !== 'completed' ? '⏳'
       : run.conclusion === 'success' ? '✅'
       : run.conclusion === 'failure' ? '❌'
@@ -75,5 +79,11 @@ export function renderChecksPane(screen, y, maxH) {
       screen.writeStr(37, y, status, { dim: true });
     }
     y++;
+  }
+  scrollIndicators(screen, yR, yR + rows - 1, start, runs.length);
+  if (runs.length > rows) {
+    screen.writeStr(2, yR + rows,
+      (start + 1) + '-' + Math.min(start + rows, runs.length) + ' of ' + runs.length +
+      '   [↑↓] scroll', { dim: true });
   }
 }

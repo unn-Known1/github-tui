@@ -47,12 +47,12 @@ export function loadExploreTrending() {
   const gen = startAsync('analyze-explore-trending');
   const days = appState.trendingPeriod || 7;
   const since = new Date(Date.now() - days * 86400000).toISOString().split('T')[0];
-  searchRepositories(appState.token, 'created:>' + since, 1, 10, gen.signal)
+  searchRepositories(appState.token, 'created:>' + since + ' stars:>5', 1, 30, gen.signal)
     .then(list => {
       if (isStale(gen, 'analyze-explore-trending')) return;
       if (Array.isArray(list) && list.length > 0) {
         appState.trending = list;
-        appState.trendingHasMore = list.length >= 10;
+        appState.trendingHasMore = list.length >= 30;
       }
       render();
     })
@@ -60,21 +60,23 @@ export function loadExploreTrending() {
 }
 
 export function exploreUp() {
-  const items = appState._exploreVisibleItems || getExploreLanding();
-  if (items.length === 0) return;
-  appState.exploreSel = Math.max(0, appState.exploreSel - 1);
+  const len = getExploreLanding().length;
+  if (len === 0) return;
+  appState.exploreSel = Math.max(0, (appState.exploreSel || 0) - 1);
+  if (appState.exploreSel < (appState.exploreLandingScroll || 0)) appState.exploreLandingScroll = appState.exploreSel;
   render();
 }
 
 export function exploreDown() {
-  const items = appState._exploreVisibleItems || getExploreLanding();
-  if (items.length === 0) return;
-  appState.exploreSel = Math.min(items.length - 1, appState.exploreSel + 1);
+  const len = getExploreLanding().length;
+  if (len === 0) return;
+  appState.exploreSel = Math.min(len - 1, (appState.exploreSel || 0) + 1);
   render();
 }
 
 export function getExploreSelectionLabel() {
-  const item = (appState._exploreVisibleItems || getExploreLanding())[appState.exploreSel];
+  const all = getExploreLanding();
+  const item = all[appState.exploreSel] || (appState._exploreVisibleItems || [])[appState.exploreSel];
   if (!item) return 'Nothing selected';
   return item.kind === 'saved' ? 'Saved search — Enter runs it' :
     item.kind === 'trending' ? 'Trending repo — Enter opens it' :
@@ -83,7 +85,7 @@ export function getExploreSelectionLabel() {
 
 export async function submitSearch(value) {
   const query = (value || '').trim();
-  if (!query) return;
+  if (!query) { showMessage('Type a query first — e.g. language:rust stars:>1000', 'warning'); return; }
   const gen = startAsync('analyze-search-repos');
   beginLoading(gen);
   appState.searchQuery = query;
@@ -111,7 +113,7 @@ registerInputHandler('search', submitSearch);
 
 export async function submitUserSearch(value) {
   const query = (value || '').trim();
-  if (!query) return;
+  if (!query) { showMessage('Type a query first — e.g. torvalds location:finland', 'warning'); return; }
   const gen = startAsync('analyze-search-users');
   beginLoading(gen);
   appState.searchQuery = query;
@@ -136,7 +138,7 @@ export async function submitUserSearch(value) {
 
 export async function submitCodeSearch(value) {
   const query = (value || '').trim();
-  if (!query) return;
+  if (!query) { showMessage('Type a query first — e.g. repo:facebook/react hooks', 'warning'); return; }
   const gen = startAsync('analyze-search-code');
   beginLoading(gen);
   appState.searchQuery = query;
@@ -282,80 +284,27 @@ export async function loadMoreSearchResults() {
   if (!isStale(gen, scope)) render();
 }
 
+// PageUp scrolls the viewport up within the already-loaded list, mirroring
+// the append-model used by PageDown/Space (which append pages). It never
+// replaces the list, so PgUp→PgDn cannot duplicate rows.
 export function pageUp() {
-  if (appState.analyzeView === 'results') {
-    const type = appState.searchType || 'repos';
-    if (type === 'users' && appState.userSearchPage > 1) {
-      const page = appState.userSearchPage - 1;
-      const gen = startAsync('analyze-search-users');
-      beginLoading(gen);
-      render();
-      searchUsers(appState.token, appState.searchQuery, page, USER_SEARCH_PER_PAGE, gen.signal).then(more => {
-        if (isStale(gen, 'analyze-search-users')) { finishLoading(gen); return; }
-        if (Array.isArray(more)) {
-          appState.userSearchResults = more;
-          appState.userSearchPage = page;
-          appState.userSearchHasMore = more.length >= USER_SEARCH_PER_PAGE;
-          appState.userSelectedRepo = 0;
-          appState.userSearchScroll = 0;
-        }
-        finishLoading(gen);
-        render();
-      }).catch(e => { if (!isStale(gen, 'analyze-search-users')) showMessage(e.message || 'Page up failed', 'error'); finishLoading(gen); render(); });
-    } else if (type === 'code' && appState.codeSearchPage > 1) {
-      const page = appState.codeSearchPage - 1;
-      const gen = startAsync('analyze-search-code');
-      beginLoading(gen);
-      render();
-      searchCode(appState.token, appState.searchQuery, page, CODE_SEARCH_PER_PAGE, gen.signal).then(more => {
-        if (isStale(gen, 'analyze-search-code')) { finishLoading(gen); return; }
-        if (Array.isArray(more)) {
-          appState.codeSearchResults = more;
-          appState.codeSearchPage = page;
-          appState.codeSearchHasMore = more.length >= CODE_SEARCH_PER_PAGE;
-          appState.codeSelectedRepo = 0;
-          appState.codeSearchScroll = 0;
-        }
-        finishLoading(gen);
-        render();
-      }).catch(e => { if (!isStale(gen, 'analyze-search-code')) showMessage(e.message || 'Page up failed', 'error'); finishLoading(gen); render(); });
-    } else if (type === 'user-repos' && appState.userReposPage > 1) {
-      const page = appState.userReposPage - 1;
-      const gen = startAsync('analyze-user-repos');
-      beginLoading(gen);
-      render();
-      getUserRepos(appState.token, appState.selectedUser.login, page, USER_REPOS_PER_PAGE, gen.signal).then(more => {
-        if (isStale(gen, 'analyze-user-repos')) { finishLoading(gen); return; }
-        if (Array.isArray(more)) {
-          appState.userRepos = more;
-          appState.userReposPage = page;
-          appState.userReposHasMore = more.length >= USER_REPOS_PER_PAGE;
-          appState.userReposSelected = 0;
-          appState.userReposScroll = 0;
-          applyUserReposSort();
-        }
-        finishLoading(gen);
-        render();
-      }).catch(e => { if (!isStale(gen, 'analyze-user-repos')) showMessage(e.message || 'Page up failed', 'error'); finishLoading(gen); render(); });
-    } else if (type === 'repos' && appState.searchPage > 1) {
-      const page = appState.searchPage - 1;
-      const gen = startAsync('analyze-search-repos');
-      beginLoading(gen);
-      render();
-      searchRepositories(appState.token, appState.searchQuery, page, SEARCH_PER_PAGE, gen.signal).then(more => {
-        if (isStale(gen, 'analyze-search-repos')) { finishLoading(gen); return; }
-        if (Array.isArray(more)) {
-          appState.searchResults = more;
-          appState.searchPage = page;
-          appState.searchHasMore = more.length >= SEARCH_PER_PAGE;
-          appState.selectedRepo = 0;
-          appState.searchScroll = 0;
-        }
-        finishLoading(gen);
-        render();
-      }).catch(e => { if (!isStale(gen, 'analyze-search-repos')) showMessage(e.message || 'Page up failed', 'error'); finishLoading(gen); render(); });
-    }
+  if (appState.analyzeView !== 'results') return;
+  const STEP = 10;
+  const type = appState.searchType || 'repos';
+  if (type === 'users') {
+    appState.userSelectedRepo = Math.max(0, (appState.userSelectedRepo || 0) - STEP);
+    appState.userSearchScroll = Math.min(appState.userSearchScroll || 0, appState.userSelectedRepo);
+  } else if (type === 'code') {
+    appState.codeSelectedRepo = Math.max(0, (appState.codeSelectedRepo || 0) - STEP);
+    appState.codeSearchScroll = Math.min(appState.codeSearchScroll || 0, appState.codeSelectedRepo);
+  } else if (type === 'user-repos') {
+    appState.userReposSelected = Math.max(0, (appState.userReposSelected || 0) - STEP);
+    appState.userReposScroll = Math.min(appState.userReposScroll || 0, appState.userReposSelected);
+  } else {
+    appState.selectedRepo = Math.max(0, (appState.selectedRepo || 0) - STEP);
+    appState.searchScroll = Math.min(appState.searchScroll || 0, appState.selectedRepo);
   }
+  render();
 }
 
 export function pageDown() {
@@ -503,11 +452,15 @@ function renderExploreLanding(screen, y, h) {
   const landing = getExploreLanding();
   const bottom = Math.min(screen.height - 2, y + Math.max(1, h) - 1);
   const maxRows = Math.max(1, bottom - y - 2);
-  const visible = landing.slice(0, maxRows);
-  const sel = Math.min(appState.exploreSel, Math.max(0, visible.length - 1));
+  let scroll = Math.min(appState.exploreLandingScroll || 0, Math.max(0, landing.length - maxRows));
+  let sel = Math.max(0, Math.min((appState.exploreSel || 0), Math.max(0, landing.length - 1)));
+  if (sel < scroll) scroll = sel;
+  else if (sel >= scroll + maxRows) scroll = sel - maxRows + 1;
   appState.exploreSel = sel;
+  appState.exploreLandingScroll = scroll;
+  const visible = landing.slice(scroll, scroll + maxRows);
   appState._exploreVisibleItems = visible;
-  appState._exploreBounds = { list: { x: 2, y: y + 2, count: visible.length, startIdx: 0 } };
+  appState._exploreBounds = { list: { x: 2, y: y + 2, count: visible.length, startIdx: scroll } };
 
   screen.writeStr(2, y, 'EXPLORE', color('title') || { fg: 'white', bold: true });
   screen.writeStr(12, y, visible.length + '/' + landing.length + ' visible', { dim: true });
@@ -515,7 +468,7 @@ function renderExploreLanding(screen, y, h) {
   for (let i = 0; i < visible.length; i++) {
     const item = visible[i];
     const row = y + 2 + i;
-    const selected = i === sel;
+    const selected = i === sel - scroll;
     for (let x = 0; selected && x < W; x++) screen.styleBuf[row][x] = color('selection');
     const prefix = selected ? '▶ ' : '  ';
     let label;
@@ -533,8 +486,15 @@ function renderExploreLanding(screen, y, h) {
     screen.writeStr(2, row, prefix + truncate(label, Math.max(10, W - 30)), selected ? color('selection') : color('repoName'));
     if (detail) screen.writeStr(Math.max(20, W - Math.min(28, Math.max(8, detail.length)) - 2), row, truncate(detail, 26), selected ? color('selection') : color('dim'));
   }
-  if (landing.length > visible.length) {
-    screen.writeStr(2, bottom, '↓ ' + (landing.length - visible.length) + ' more — search to narrow this list', { dim: true });
+  scrollIndicators(screen, y + 2, y + 1 + visible.length, scroll, landing.length);
+  const above = scroll;
+  const below = landing.length - (scroll + visible.length);
+  if (above > 0 || below > 0) {
+    let more;
+    if (above > 0 && below > 0) more = '↑ ' + above + ' above · ↓ ' + below + ' more — search to narrow this list';
+    else if (above > 0) more = '↑ ' + above + ' above — search to narrow this list';
+    else more = '↓ ' + below + ' more — search to narrow this list';
+    screen.writeStr(2, bottom, more, { dim: true });
   }
 }
 
@@ -545,7 +505,7 @@ export function renderResultsList(screen, y, h) {
     : type === 'user-repos' ? "USER'S REPOS" : 'CODE';
   screen.writeStr(2, y + 1, 'Search ' + typeLabel + ':', color('title') || { fg: 'white', bold: true });
   screen.writeStr(14 + typeLabel.length, y + 1, appState.searchQuery || '', { fg: 'cyan' });
-  const hint = '[i] Search repos   [u] Search users   [C] Search code';
+  const hint = '[i] Search repos   [u] Search users   [C] Search code   [Ctrl-S] Save search';
   screen.writeStr(2, y + 2, hint, { dim: true });
 
   const listY = y + 4;

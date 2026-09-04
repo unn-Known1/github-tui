@@ -16,7 +16,7 @@ A fast, zero-dependency terminal user interface for GitHub — six tabs, a comma
 - 🏠 **Real Dashboard** — greeting + 5 stat cards (★ stars, ⑂ forks, ◆ languages, ⏱ account age, ⚠ stale repos), profile mini with recent followers, **recent public activity heatmap** (public events only), **starred-activity sparkline** (repos you starred), top repos, language bar chart, live activity feed, **recent issues/PRs**, stale repos alert, trending-this-week, unread-notifications badge, **collapsible sections**.
 - 📁 **Repos browser, supercharged** — row selection (`▶`), `Enter` drills into Analyze details, sortable columns, **type filter cycle** (`t`: all/sources/forks/archived/private/public/templates), **language facet** (`L`), **stale-only** toggle (`x`), **density toggle** (`D` switches between compact and comfortable), **pinned favorites** (`P` — stick to top, persisted on disk), inline visibility badges (🔒 private, 🔱 fork, 📦 archived, 🗄 template, 📌 pinned, ★ bookmarked), `g`/`G` jump-to-top/bottom.
 - 🗂️ **File explorer** — `F` on Explore details opens a real in-terminal repo browser. Walk the tree, view files with line numbers + syntax highlighting for the supported top languages, browse per-file commit history and local blame, switch branches, **save individual files** (`s`), **save whole folders** recursively (`S`), **download zipballs** (`Z`) streamed straight to disk, **`git clone`** into your CWD (`C`), **`gh repo clone`** for private repos (`G`), copy raw URLs (`y`) or file contents (`Y`) to clipboard.
-- 🔍 **Explore any public repo** — search, 2-column detail view (metadata + languages bar + top contributors + latest releases), pane tabs `[O] Overview / [i] Issues / [P] PRs / [R] README / [F] Files / [T] Traffic / [K] Checks / [S] Security`, branch/ref comparison, file history, local blame, and parallel ahead/behind compares on forks.
+- 🔍 **Explore any public repo** — search, 2-column detail view (metadata + languages bar + top contributors + latest releases), pane tabs `[O] Overview / [i] Issues / [P] PRs / [R] README / [F] Files / [A] Packages / [T] Traffic / [K] Checks / [S] Security / [D] Compare`, branch/ref comparison, file history, local blame, and parallel ahead/behind compares on forks.
 - 📊 **Repo Analytics** — Traffic (views/clones/popular paths/referrers), Checks/CI (pass/fail/pending summary), Security (Dependabot alerts with severity icons), cross-repository security aggregation, health scoring, and branch comparison.
 - 📥 **Inbox triage** — color-coded notification types, grouping, snoozing, saved filters, mark-as-read (`m`) / mark-all (`M`) / unsubscribe (`u`) / filter cycle (`f`: all/unread/mentions/review), repo-grouped summary.
 - 🎨 **Themes** — `default` (dark) and `light` — each with a fully distinct palette using true-color (24-bit) and 256-color rendering. Persisted across sessions.
@@ -150,6 +150,9 @@ Your current token scopes are shown in the Settings → System panel so you can 
 | `T` | Open the **Traffic** pane (views/clones/popular paths) |
 | `K` | Open the **Checks/CI** pane |
 | `S` | Open the **Security** pane (Dependabot alerts) |
+| `D` | Compare refs (`base...head`) on the **Compare** pane |
+| `p` / `s` / `n` | On the Forks view: sort by last push / stars / name |
+| `Enter` (code result) | Drill into the containing repo's file at the result path (`o` opens in browser) |
 | `Space` | Load more search results or more forks |
 
 ### Issue/PR Detail Popup
@@ -317,7 +320,7 @@ Every tab module exports `render(screen, y, h)`, an optional `keys` map for tab-
 - Search any public repo. `Enter` opens a 2-column detail view.
 - `u` searches GitHub users; `Enter` on a user lists all their public repos (paginated with `Space`), and `Enter` on a repo drills into full details.
 - `C` searches code across GitHub.
-- **Pane tabs:** `[O] Overview`, `[i] Issues (N)`, `[P] PRs (N)`, `[R] README`, `[F] Files`, `[T] Traffic`, `[K] Checks`, `[S] Security`.
+- **Pane tabs:** `[O] Overview`, `[i] Issues (N)`, `[P] PRs (N)`, `[R] README`, `[F] Files`, `[A] Packages`, `[T] Traffic`, `[K] Checks`, `[S] Security`, `[D] Compare`.
 - Overview = metadata column + (languages bar chart / top contributors / latest releases) column.
 - README pane renders Markdown with naive styling (headings bold, lists in accent color, code fences dimmed).
 - **Traffic pane** = views, clones, popular paths, popular referrers.
