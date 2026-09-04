@@ -15,10 +15,6 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 const VERSION = JSON.parse(readFileSync(join(__dirname, '..', 'package.json'), 'utf8')).version;
 
-// Per-tab icon glyphs — a color-coded dashboard-nav signature. Each icon is
-// painted in its own theme hue (see iconHues in renderTabStrip); the glyphs
-// stay fixed so custom themes change colors, never meaning.
-const TAB_ICONS = ['◈', '▦', '◎', '▶', '✉', '⚙'];
 import { renderDashboard } from './tabs/dashboard.mjs';
 import { renderRepos } from './tabs/repos.mjs';
 import { renderAnalyze } from './tabs/analyze.mjs';
@@ -520,11 +516,8 @@ function renderTabStrip(y, W) {
 
     // Tab text: colored icon chip + dim label; the active tab renders on
     // the selection chip with a leading ▸ pointer. On narrow terminals the
-    // icon is dropped per-tab so labels never clip into the divider.
-    // In --accessible mode icons are always skipped (same narrow path).
     const tx = bx + 1;
-    const a11y = typeof _isA11y === 'function' ? _isA11y() : !!appState.accessible;
-    const kt = '[' + key + ']' + (tabW >= 14 && !a11y ? ' ' + TAB_ICONS[i] : '');
+    const kt = '[' + key + ']';
     const lt = ' ' + label;
     const text = isActive ? '▸ ' + kt + lt : kt + lt;
     if (isActive) {
