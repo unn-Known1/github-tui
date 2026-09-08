@@ -121,7 +121,12 @@ function findBoundNames(text) {
     if (m[2]) {
       for (const ident of m[2].split(',')) {
         const parts = ident.trim().split(/\s+as\s+/).map(s => s.trim()).filter(Boolean);
-        if (parts.length) bound.add(parts[parts.length - 1]);
+        if (parts.length) {
+          // Track both the local alias and imported export name. This makes
+          // aliased imports such as `render as appRender` count as bound.
+          bound.add(parts[0]);
+          bound.add(parts[parts.length - 1]);
+        }
       }
     }
     if (m[3]) bound.add(m[3]); // namespace
@@ -133,7 +138,12 @@ function findBoundNames(text) {
     if (m[1]) {
       for (const ident of m[1].split(',')) {
         const parts = ident.trim().split(/\s+as\s+/).map(s => s.trim()).filter(Boolean);
-        if (parts.length) bound.add(parts[parts.length - 1]);
+        if (parts.length) {
+          // Track both the local alias and imported export name. This makes
+          // aliased imports such as `render as appRender` count as bound.
+          bound.add(parts[0]);
+          bound.add(parts[parts.length - 1]);
+        }
       }
     }
     // Star re-exports are accessed via `ns.X` — never bare references.
@@ -176,6 +186,10 @@ function findBareReferences(text, name) {
   while ((m = re.exec(text)) !== null) {
     const before = m[1];
     const idx = m.index + before.length;
+    // Object literal keys (`confirm: ...`) are not identifier references.
+    let after = idx + name.length;
+    while (after < text.length && /[ \t]/.test(text[after])) after++;
+    if (text[after] === ':') continue;
 
     // Skip class method definitions: `render() {`, `async load() {`,
     // `get x() {`, `set y(v) {`, `* gen() {`. These define a method on

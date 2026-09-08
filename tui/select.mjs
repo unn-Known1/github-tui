@@ -1,1 +1,267 @@
-// Reusable Select Component — generic list picker with fuzzy search.\n// Inspired by OpenCode's DialogSelect pattern.\n\nimport { appState, render } from './state.mjs';\nimport { color } from './theme.mjs';\nimport { truncate, truncateToWidth, displayWidth } from './utils.mjs';\n\n/**\n * Create a select dialog.\n * @param {Object} options\n * @param {string} options.title - Dialog title\n * @param {Array<{label: string, value: any, category?: string, hint?: string}>} options.items - List items\n * @param {function} options.onSelect - Callback when item is selected: (item) => void\n * @param {function} [options.onCancel] - Callback when cancelled: () => void\n * @param {boolean} [options.searchable=true] - Show search input\n * @param {boolean} [options.categories=false] - Group items by category\n * @param {string} [options.placeholder='Search...'] - Search placeholder\n * @returns {Object} Select dialog instance\n */\nexport function createSelect(options) {\n  const state = {\n    query: '',\n    cursor: 0,\n    scroll: 0,\n    items: options.items || [],\n    filtered: [],\n  };\n\n  // Fuzzy search scoring\n  function score(query, label) {\n    if (!query) return 0;\n    const q = query.toLowerCase();\n    const s = label.toLowerCase();\n    if (s.startsWith(q)) return 1000 - (s.length - q.length);\n    let qi = 0, si = 0, hits = 0;\n    while (qi < q.length && si < s.length) {\n      if (q[qi] === s[si]) { hits++; qi++; }\n      si++;\n    }\n    if (qi < q.length) return -1;\n    return 500 - (s.length - hits);\n  }\n\n  // Filter and sort items\n  function applyFilter() {\n    const q = state.query;\n    state.filtered = state.items\n      .map(item => ({ item, score: score(q, item.label) }))\n      .filter(x => x.score >= 0)\n      .sort((a, b) => b.score - a.score)\n      .map(x => x.item);\n    state.cursor = 0;\n    state.scroll = 0;\n  }\n\n  // Group by category\n  function groupByCategory() {\n    if (!options.categories) return null;\n    const grouped = new Map();\n    for (const item of state.filtered) {\n      const cat = item.category || 'General';\n      if (!grouped.has(cat)) grouped.set(cat, []);\n      grouped.get(cat).push(item);\n    }\n    return grouped;\n  }\n\n  // Flatten grouped items for rendering\n  function flattenGrouped(grouped) {\n    const result = [];\n    for (const [cat, items] of grouped) {\n      result.push({ type: 'header', label: cat });\n      for (const item of items) {\n        result.push({ type: 'item', item });\n      }\n    }\n    return result;\n  }\n\n  // Render the select dialog\n  function render(screen) {\n    const W = screen.width, H = screen.height;\n    const boxW = Math.min(70, W - 4);\n    const boxH = Math.min(20, H - 4);\n    const x = Math.floor((W - boxW) / 2);\n    const y = Math.floor((H - boxH) / 2);\n\n    // Backdrop\n    const backdropStyle = color('modalBackdrop');\n    for (let yy = 0; yy < H; yy++) {\n      for (let xx = 0; xx < W; xx++) {\n        screen.styleBuf[yy][xx] = backdropStyle;\n      }\n    }\n\n    // Clear box area\n    for (let yy = y; yy < y + boxH; yy++) {\n      for (let xx = x; xx < x + boxW; xx++) {\n        screen.setCell(xx, yy, ' ', null);\n      }\n    }\n\n    // Draw box with title\n    screen.box(x, y, boxW, boxH, options.title || 'Select', color('modalBorder'));\n\n    // Search input\n    let contentY = y + 1;\n    if (options.searchable !== false) {\n      screen.writeStr(x + 2, contentY, '>', { fg: 'cyan', bold: true });\n      const inputStyle = color('inputBox');\n      screen.writeStr(x + 4, contentY, truncate(state.query, boxW - 8), inputStyle);\n      screen.writeStr(x + 4 + state.query.length, contentY, '█', { fg: 'cyan' });\n      contentY++;\n    }\n\n    // Separator\n    screen.hline(contentY, '─', color('dim'));\n    contentY++;\n\n    // Content area\n    const maxVisible = boxH - 4 - (options.searchable !== false ? 1 : 0);\n    const items = state.filtered;\n\n    if (items.length === 0) {\n      screen.writeStr(x + 2, contentY, 'No matching items', color('dim'));\n      return;\n    }\n\n    if (options.categories) {\n      // Grouped display\n      const grouped = groupByCategory();\n      const flat = flattenGrouped(grouped);\n      let itemIndex = 0;\n      let rendered = 0;\n\n      for (const entry of flat) {\n        if (rendered >= maxVisible) break;\n        if (entry.type === 'header') {\n          if (itemIndex >= state.scroll && itemIndex < state.scroll + maxVisible) {\n            const row = contentY + (itemIndex - state.scroll);\n            screen.writeStr(x + 2, row, entry.label.toUpperCase(), { fg: 'cyan', bold: true });\n            rendered++;\n          }\n          itemIndex++;\n        } else {\n          if (itemIndex >= state.scroll && itemIndex < state.scroll + maxVisible) {\n            const row = contentY + (itemIndex - state.scroll);\n            const sel = itemIndex === state.cursor;\n            if (sel) {\n              for (let xx = x + 1; xx < x + boxW - 1; xx++) {\n                screen.styleBuf[row][xx] = color('selection');\n              }\n            }\n            screen.writeStr(x + 3, row, sel ? '▶' : ' ', sel ? color('selection') : null);\n            screen.writeStr(x + 5, row, truncate(entry.item.label, boxW - 16), sel ? color('selection') : null);\n            if (entry.item.hint) {\n              screen.writeStr(x + boxW - entry.item.hint.length - 3, row,\n                entry.item.hint, sel ? color('selection') : { fg: 'cyan', dim: true });\n            }\n            rendered++;\n          }\n          itemIndex++;\n        }\n      }\n    } else {\n      // Flat display\n      for (let i = 0; i < maxVisible && (i + state.scroll) < items.length; i++) {\n        const item = items[i + state.scroll];\n        const row = contentY + i;\n        const sel = (i + state.scroll) === state.cursor;\n\n        if (sel) {\n          for (let xx = x + 1; xx < x + boxW - 1; xx++) {\n            screen.styleBuf[row][xx] = color('selection');\n          }\n        }\n\n        screen.writeStr(x + 3, row, sel ? '▶' : ' ', sel ? color('selection') : null);\n        screen.writeStr(x + 5, row, truncate(item.label, boxW - 16), sel ? color('selection') : null);\n        if (item.hint) {\n          screen.writeStr(x + boxW - item.hint.length - 3, row,\n            item.hint, sel ? color('selection') : { fg: 'cyan', dim: true });\n        }\n      }\n    }\n\n    // Footer\n    const footY = y + boxH - 2;\n    const hint = '↑↓ navigate   ⏎ select   Esc cancel';\n    screen.writeStr(x + 2, footY, hint, color('dim'));\n\n    // Count\n    const countText = items.length + ' item' + (items.length !== 1 ? 's' : '');\n    screen.writeStr(x + boxW - countText.length - 3, footY, countText, color('dim'));\n  }\n\n  // Handle key input\n  function handleKey(key) {\n    if (key === '\\x1b') {  // Escape\n      if (options.onCancel) options.onCancel();\n      return false;\n    }\n    if (key === '\\r' || key === '\\n') {  // Enter\n      const item = state.filtered[state.cursor];\n      if (item && options.onSelect) {\n        options.onSelect(item);\n      }\n      return false;\n    }\n    if (key === '\\x7f' || key === '\\b') {  // Backspace\n      state.query = state.query.slice(0, -1);\n      applyFilter();\n      render();\n      return true;\n    }\n    if (key === '\\x1b[A' || key === 'k') {  // Up\n      state.cursor = Math.max(0, state.cursor - 1);\n      if (state.cursor < state.scroll) state.scroll = state.cursor;\n      render();\n      return true;\n    }\n    if (key === '\\x1b[B' || key === 'j') {  // Down\n      state.cursor = Math.min(state.filtered.length - 1, state.cursor + 1);\n      const maxVisible = 14;  // Approximate\n      if (state.cursor >= state.scroll + maxVisible) {\n        state.scroll = state.cursor - maxVisible + 1;\n      }\n      render();\n      return true;\n    }\n    if (key === '\\x1b[5~') {  // PageUp\n      state.cursor = Math.max(0, state.cursor - 10);\n      state.scroll = Math.max(0, state.scroll - 10);\n      render();\n      return true;\n    }\n    if (key === '\\x1b[6~') {  // PageDown\n      state.cursor = Math.min(state.filtered.length - 1, state.cursor + 10);\n      state.scroll = Math.min(Math.max(0, state.filtered.length - 14), state.scroll + 10);\n      render();\n      return true;\n    }\n    if (key === 'g') {  // Home\n      state.cursor = 0;\n      state.scroll = 0;\n      render();\n      return true;\n    }\n    if (key === 'G') {  // End\n      state.cursor = Math.max(0, state.filtered.length - 1);\n      state.scroll = Math.max(0, state.filtered.length - 14);\n      render();\n      return true;\n    }\n    // Printable characters\n    if (key.length === 1 && key.charCodeAt(0) >= 32) {\n      state.query += key;\n      applyFilter();\n      render();\n      return true;\n    }\n    return true;\n  }\n\n  // Initialize\n  applyFilter();\n\n  return {\n    render,\n    handleKey,\n    getState: () => state,\n    setItems: (items) => {\n      state.items = items;\n      applyFilter();\n    },\n    close: () => {\n      if (options.onCancel) options.onCancel();\n    },\n  };\n}\n\n/**\n * Quick helper to show a select dialog and get result.\n * @param {Object} options - Same as createSelect\n * @returns {Promise<any>} Selected item value, or undefined if cancelled\n */\nexport function showSelect(options) {\n  return new Promise((resolve) => {\n    const select = createSelect({\n      ...options,\n      onSelect: (item) => {\n        resolve(item.value);\n        appState._activeSelect = null;\n        render();\n      },\n      onCancel: () => {\n        resolve(undefined);\n        appState._activeSelect = null;\n        render();\n      },\n    });\n\n    appState._activeSelect = select;\n    render();\n  });\n}\n
+// Reusable Select Component — generic list picker with fuzzy search.
+
+import { appState, render as appRender } from './state.mjs';
+import { color } from './theme.mjs';
+import { truncate, displayWidth } from './utils.mjs';
+
+/**
+ * Create a select dialog.
+ * @param {Object} options
+ * @param {string} options.title - Dialog title
+ * @param {Array<{label: string, value: any, category?: string, hint?: string}>} options.items
+ * @param {function} options.onSelect - Callback receiving the selected item
+ * @param {function} [options.onCancel] - Callback invoked on Escape
+ * @param {boolean} [options.searchable=true] - Show a search input
+ * @param {boolean} [options.categories=false] - Show category headers
+ * @returns {Object} Select dialog instance
+ */
+export function createSelect(options = {}) {
+  const state = {
+    query: '',
+    cursor: 0,
+    scroll: 0,
+    items: Array.isArray(options.items) ? options.items.slice() : [],
+    filtered: [],
+  };
+
+  function score(query, label) {
+    if (!query) return 0;
+    const q = String(query).toLowerCase();
+    const s = String(label || '').toLowerCase();
+    if (s.startsWith(q)) return 1000 - (s.length - q.length);
+    let qi = 0;
+    let hits = 0;
+    for (let si = 0; si < s.length && qi < q.length; si++) {
+      if (q[qi] === s[si]) {
+        hits++;
+        qi++;
+      }
+    }
+    return qi === q.length ? 500 - (s.length - hits) : -1;
+  }
+
+  function applyFilter() {
+    state.filtered = state.items
+      .map((item, index) => ({ item, index, score: score(state.query, item.label) }))
+      .filter(entry => entry.score >= 0)
+      .sort((a, b) => b.score - a.score || a.index - b.index)
+      .map(entry => entry.item);
+    state.cursor = Math.min(state.cursor, Math.max(0, state.filtered.length - 1));
+    state.scroll = Math.min(state.scroll, Math.max(0, state.filtered.length - 1));
+  }
+
+  function maxVisible(boxH) {
+    return Math.max(1, boxH - 5 - (options.searchable === false ? 0 : 1));
+  }
+
+  function layout(screen) {
+    const boxW = Math.max(1, Math.min(70, screen.width - 4));
+    const boxH = Math.max(1, Math.min(20, screen.height - 4));
+    return {
+      boxW,
+      boxH,
+      x: Math.floor((screen.width - boxW) / 2),
+      y: Math.floor((screen.height - boxH) / 2),
+    };
+  }
+
+  function render(screen) {
+    if (!screen) return;
+    const { boxW, boxH, x, y } = layout(screen);
+    const backdropStyle = color('modalBackdrop');
+
+    for (let yy = 0; yy < screen.height; yy++) {
+      for (let xx = 0; xx < screen.width; xx++) screen.styleBuf[yy][xx] = backdropStyle;
+    }
+    for (let yy = y; yy < y + boxH; yy++) {
+      for (let xx = x; xx < x + boxW; xx++) screen.setCell(xx, yy, ' ', null);
+    }
+
+    screen.box(x, y, boxW, boxH, options.title || 'Select', color('modalBorder'));
+    let contentY = y + 1;
+    if (options.searchable !== false) {
+      screen.writeStr(x + 2, contentY, '>', { fg: 'cyan', bold: true });
+      screen.writeStr(x + 4, contentY, truncate(state.query, Math.max(0, boxW - 8)), color('inputBox'));
+      const cursorX = x + 4 + Math.min(displayWidth(state.query), Math.max(0, boxW - 8));
+      screen.writeStr(cursorX, contentY, '█', { fg: 'cyan' });
+      contentY++;
+    }
+    screen.hline(contentY, '─', color('dim'));
+    contentY++;
+
+    const visible = maxVisible(boxH);
+    const items = state.filtered;
+    if (items.length === 0) {
+      screen.writeStr(x + 2, contentY, 'No matching items', color('dim'));
+    } else if (options.categories) {
+      const entries = [];
+      let lastCategory = Symbol('none');
+      for (let i = 0; i < items.length; i++) {
+        const category = items[i].category || 'General';
+        if (category !== lastCategory) {
+          entries.push({ type: 'header', label: category });
+          lastCategory = category;
+        }
+        entries.push({ type: 'item', item: items[i], index: i });
+      }
+      const selectedEntry = entries.findIndex(entry => entry.type === 'item' && entry.index === state.cursor);
+      const start = Math.max(0, selectedEntry - visible + 1, state.scroll);
+      state.scroll = start;
+      for (let rowOffset = 0; rowOffset < visible; rowOffset++) {
+        const entry = entries[start + rowOffset];
+        if (!entry) break;
+        const row = contentY + rowOffset;
+        if (entry.type === 'header') {
+          screen.writeStr(x + 2, row, String(entry.label).toUpperCase(), { fg: 'cyan', bold: true });
+          continue;
+        }
+        const selected = entry.index === state.cursor;
+        if (selected) {
+          for (let xx = x + 1; xx < x + boxW - 1; xx++) screen.styleBuf[row][xx] = color('selection');
+        }
+        screen.writeStr(x + 3, row, selected ? '▶' : ' ', selected ? color('selection') : null);
+        screen.writeStr(x + 5, row, truncate(entry.item.label, Math.max(0, boxW - 16)), selected ? color('selection') : null);
+        if (entry.item.hint) {
+          const hint = String(entry.item.hint);
+          screen.writeStr(x + Math.max(5, boxW - hint.length - 3), row, hint,
+            selected ? color('selection') : { fg: 'cyan', dim: true });
+        }
+      }
+    } else {
+      state.scroll = Math.min(state.scroll, Math.max(0, items.length - visible));
+      for (let i = 0; i < visible; i++) {
+        const index = state.scroll + i;
+        const item = items[index];
+        if (!item) break;
+        const row = contentY + i;
+        const selected = index === state.cursor;
+        if (selected) {
+          for (let xx = x + 1; xx < x + boxW - 1; xx++) screen.styleBuf[row][xx] = color('selection');
+        }
+        screen.writeStr(x + 3, row, selected ? '▶' : ' ', selected ? color('selection') : null);
+        screen.writeStr(x + 5, row, truncate(item.label, Math.max(0, boxW - 16)), selected ? color('selection') : null);
+        if (item.hint) {
+          const hint = String(item.hint);
+          screen.writeStr(x + Math.max(5, boxW - hint.length - 3), row, hint,
+            selected ? color('selection') : { fg: 'cyan', dim: true });
+        }
+      }
+    }
+
+    const footY = y + boxH - 2;
+    if (footY >= 0 && footY < screen.height) {
+      screen.writeStr(x + 2, footY, '↑↓ navigate   ⏎ select   Esc cancel', color('dim'));
+      const count = items.length + ' item' + (items.length === 1 ? '' : 's');
+      screen.writeStr(x + Math.max(2, boxW - count.length - 3), footY, count, color('dim'));
+    }
+  }
+
+  function ensureCursorVisible() {
+    const visible = 14;
+    if (state.cursor < state.scroll) state.scroll = state.cursor;
+    else if (state.cursor >= state.scroll + visible) state.scroll = state.cursor - visible + 1;
+  }
+
+  function handleKey(key) {
+    if (key === '\x1b') {
+      options.onCancel?.();
+      return false;
+    }
+    if (key === '\r' || key === '\n') {
+      const item = state.filtered[state.cursor];
+      if (item) options.onSelect?.(item);
+      return false;
+    }
+    if (key === '\x7f' || key === '\b') {
+      state.query = state.query.slice(0, -1);
+      applyFilter();
+      appRender();
+      return true;
+    }
+    if (key === '\x1b[A' || key === 'k') {
+      state.cursor = Math.max(0, state.cursor - 1);
+      ensureCursorVisible();
+      appRender();
+      return true;
+    }
+    if (key === '\x1b[B' || key === 'j') {
+      state.cursor = Math.min(Math.max(0, state.filtered.length - 1), state.cursor + 1);
+      ensureCursorVisible();
+      appRender();
+      return true;
+    }
+    if (key === '\x1b[5~') {
+      state.cursor = Math.max(0, state.cursor - 10);
+      ensureCursorVisible();
+      appRender();
+      return true;
+    }
+    if (key === '\x1b[6~') {
+      state.cursor = Math.min(Math.max(0, state.filtered.length - 1), state.cursor + 10);
+      ensureCursorVisible();
+      appRender();
+      return true;
+    }
+    if (key === 'g') {
+      state.cursor = 0;
+      state.scroll = 0;
+      appRender();
+      return true;
+    }
+    if (key === 'G') {
+      state.cursor = Math.max(0, state.filtered.length - 1);
+      ensureCursorVisible();
+      appRender();
+      return true;
+    }
+    if (key.length === 1 && key.charCodeAt(0) >= 32 && key.charCodeAt(0) !== 127) {
+      state.query += key;
+      applyFilter();
+      appRender();
+      return true;
+    }
+    return true;
+  }
+
+  applyFilter();
+  return {
+    render,
+    handleKey,
+    getState: () => state,
+    setItems(items) {
+      state.items = Array.isArray(items) ? items.slice() : [];
+      applyFilter();
+      appRender();
+    },
+    close() {
+      options.onCancel?.();
+    },
+  };
+}
+
+/** Show a select dialog and resolve with the selected value. */
+export function showSelect(options = {}) {
+  return new Promise(resolve => {
+    let settled = false;
+    const finish = value => {
+      if (settled) return;
+      settled = true;
+      appState._activeSelect = null;
+      resolve(value);
+      appRender();
+    };
+    const select = createSelect({
+      ...options,
+      onSelect: item => {
+        options.onSelect?.(item);
+        finish(item?.value);
+      },
+      onCancel: () => {
+        options.onCancel?.();
+        finish(undefined);
+      },
+    });
+    appState._activeSelect = select;
+    appRender();
+  });
+}

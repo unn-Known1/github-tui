@@ -12,6 +12,7 @@ import * as dashboard from './tabs/dashboard.mjs';
 import * as settings from './tabs/settings.mjs';
 import * as inbox from './tabs/inbox.mjs';
 import { focusDashboardZone } from './focus.mjs';
+import * as quickSettings from './quick-settings.mjs';
 
 // ── Text-selection helpers for README / file viewer ──
 
@@ -414,27 +415,17 @@ function _dispatchOverlayClick(sx, sy) {
 
 // Click handler for quick settings popup
 function _clickQuickSettings(sx, sy) {
-  const W = getScreen() ? getScreen().width : 80;
-  const H = getScreen() ? getScreen().height : 24;
-  const boxW = Math.min(50, W - 4);
-  const boxH = 5 + 6;  // 5 settings + 6 (title, search, separator, footer, etc.)
-  const x0 = Math.floor((W - boxW) / 2);
-  const y0 = Math.floor((H - boxH) / 2);
+  const screen = getScreen();
+  if (!screen) return;
+  const { boxW, boxH, x: x0, y: y0, rowStart, rowCount } = quickSettings.getLayout(screen);
   const inside = sx >= x0 && sx < x0 + boxW && sy >= y0 && sy < y0 + boxH;
   if (!inside) {
     import('./quick-settings.mjs').then(m => m.close()).catch(() => {});
     return;
   }
-  // Click on a setting row → select it
-  const settingY = y0 + 2;  // Settings start at y0 + 2
-  const row = sy - settingY;
-  if (row >= 0 && row < 5) {
-    // Simulate key press to select and activate
-    import('./quick-settings.mjs').then(m => {
-      // Move cursor and activate
-      m.handleKey('\r');  // Enter key
-    }).catch(() => {});
-  }
+  // Click on a setting row → select and activate it.
+  const row = sy - rowStart;
+  if (row >= 0 && row < rowCount) quickSettings.activateAt(row);
 }
 
 // Hover handler for command palette — highlights the item under the cursor

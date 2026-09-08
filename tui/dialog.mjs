@@ -203,10 +203,15 @@ export function openPalette() {
   if (isDialogOpen('palette')) return;
 
   import('./palette.mjs').then(palette => {
+    palette.open(false);
     pushDialog({
       id: 'palette',
       render: (screen) => palette.renderPalette(screen),
-      handleKey: (key) => palette.handleKey(key),
+      handleKey: (key) => {
+        const handled = palette.handleKey(key);
+        if (!appState.showPalette && isDialogOpen('palette')) popDialog();
+        return handled;
+      },
       onClose: () => palette.close(),
     });
   });
@@ -219,17 +224,22 @@ export function openHelp() {
   if (isDialogOpen('help')) return;
 
   import('./tabs/help.mjs').then(help => {
+    appState.showHelp = true;
+    appState.helpQuery = '';
+    appState.helpCursor = 0;
     pushDialog({
       id: 'help',
       render: (screen) => help.render(screen),
       handleKey: (key) => {
-        if (key === '\x1b' || key === 'q') {
+        if (key === 'q') {
           popDialog();
           return true;
         }
-        // Delegate to help module's key handling
+        // The existing global help handler owns search and scrolling. Return
+        // false so keys.mjs can continue into that handler.
         return false;
       },
+      onClose: () => { appState.showHelp = false; },
     });
   });
 }
@@ -241,15 +251,17 @@ export function openBookmarks() {
   if (isDialogOpen('bookmarks')) return;
 
   import('./bookmarks.mjs').then(bookmarks => {
+    bookmarks.openBookmarks(false);
     pushDialog({
       id: 'bookmarks',
       render: (screen) => bookmarks.renderBookmarksOverlay(screen),
-      handleKey: (key) => bookmarks.handleKey(key),
-      onClose: () => {
-        appState.showBookmarks = false;
+      handleKey: (key) => {
+        const handled = bookmarks.handleKey(key);
+        if (!appState.showBookmarks && isDialogOpen('bookmarks')) popDialog();
+        return handled;
       },
+      onClose: () => { appState.showBookmarks = false; },
     });
-    appState.showBookmarks = true;
   });
 }
 
@@ -260,14 +272,16 @@ export function openQuickSettings() {
   if (isDialogOpen('quickSettings')) return;
 
   import('./quick-settings.mjs').then(qs => {
+    qs.open(false);
     pushDialog({
       id: 'quickSettings',
       render: (screen) => qs.renderQuickSettings(screen),
-      handleKey: (key) => qs.handleKey(key),
-      onClose: () => {
-        appState._quickSettingsOpen = false;
+      handleKey: (key) => {
+        const handled = qs.handleKey(key);
+        if (!qs.isOpen() && isDialogOpen('quickSettings')) popDialog();
+        return handled;
       },
+      onClose: () => { appState._quickSettingsOpen = false; },
     });
-    appState._quickSettingsOpen = true;
   });
 }

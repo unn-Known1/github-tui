@@ -109,14 +109,14 @@ export function filterGrouped(query) {
 
 let _paletteFocusToken = null;
 
-export function open() {
+export function open(manageFocus = true) {
   if (appState.showPalette) return;
   appState.showPalette = true;
   appState.paletteQuery = '';
   appState.paletteCursor = 0;
   _pasteActive = false;
   _pasteBuf = '';
-  _paletteFocusToken = saveFocus();
+  if (manageFocus) _paletteFocusToken = saveFocus();
   render();
 }
 export function close() {
@@ -126,7 +126,7 @@ export function close() {
   appState.paletteCursor = 0;
   _pasteActive = false;
   _pasteBuf = '';
-  restoreFocus(_paletteFocusToken);
+  if (_paletteFocusToken) restoreFocus(_paletteFocusToken);
   _paletteFocusToken = null;
 }
 export function execSelected() {

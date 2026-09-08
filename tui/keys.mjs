@@ -21,7 +21,10 @@ import { startInput, registerInputHandler } from './input.mjs';
 import * as bookmarks from './bookmarks.mjs';
 import * as quickSettings from './quick-settings.mjs';
 import { saveFocus, restoreFocus } from './focus.mjs';
-import { handleDialogKey, getDialogStack, popDialog } from './dialog.mjs';
+import {
+  handleDialogKey, getDialogStack, popDialog,
+  openPalette, openHelp, openBookmarks, openQuickSettings,
+} from './dialog.mjs';
 import * as whichKey from './which-key.mjs';
 
 import * as dashboard from './tabs/dashboard.mjs';
@@ -533,16 +536,10 @@ export function handleKey(key) {
       }
       return;
     }
-    case '?':
-      if (!appState.showHelp) {
-        appState._helpFocusToken = saveFocus();
-      }
-      appState.showHelp = true;
-      render();
-      return;
+    case '?': openHelp(); return;
     case '\x10':
-    case ':': palette.open(); return;
-    case '\x0e': quickSettings.open(); return;  // Ctrl+,,
+    case ':': openPalette(); return;
+    case '\x0e': openQuickSettings(); return;  // Ctrl+,
     case 'r': {
       // a retry handler attached by error-recovery.mjs takes priority
       // over the per-tab refresh / Actions workflow rerun. Users in an error
@@ -604,7 +601,7 @@ export function handleKey(key) {
           showMessage('Branch picker failed: ' + (e && e.message || 'unknown'), 'error'));
         return;
       }
-      bookmarks.openBookmarks();
+      openBookmarks();
       return;
     }
     case 'w': onboarding.startWelcome(); return;
@@ -1076,13 +1073,7 @@ export function registerCoreActions() {
   reg({ id: 'open',    label: 'Open current item in browser', hint: 'o', category: 'Global', run: openCurrent });
   reg({ id: 'copy',    label: 'Copy current URL to clipboard', hint: 'y', category: 'Global', run: copyCurrentUrl });
   reg({ id: 'help',    label: 'Show help overlay',            hint: '?', category: 'Global',
-        run: () => {
-          if (!appState.showHelp) {
-            appState._helpFocusToken = saveFocus();
-          }
-          appState.showHelp = true;
-          render();
-        } });
+        run: openHelp });
   reg({ id: 'welcome', label: 'Show "What\'s new" / tour',    hint: 'w', category: 'Global', run: onboarding.startWelcome });
   reg({ id: 'quit',    label: 'Quit application',             hint: 'q', category: 'Global', run: quit });
 
@@ -1201,7 +1192,7 @@ export function registerCoreActions() {
         run: () => { setTab(5); appState.settingsCursor = SETTINGS_APPEARANCE_CURSOR; render(); settings.enter(); } });
   reg({ id: 'settings.logout', label: 'Log out', category: 'Settings', run: () => confirm('Log out of GitHub?', settings.handleLogout, 'Log Out') });
   reg({ id: 'settings.quick', label: 'Quick Settings...', category: 'Settings', hint: 'Ctrl+,',
-        run: () => quickSettings.open() });
+        run: openQuickSettings });
 
   // ── Dashboard ──
   reg({ id: 'dashboard.refresh', label: 'Refresh dashboard data', category: 'Dashboard',
@@ -1247,7 +1238,7 @@ export function registerCoreActions() {
 
   // Bookmarks browser
   reg({ id: 'bookmarks.browse', label: 'Browse bookmarks',
-        run: () => bookmarks.openBookmarks() });
+        run: openBookmarks });
   reg({ id: 'bookmarks.export', label: 'Export bookmarks to Markdown',
         run: () => bookmarks.exportMarkdown() });
 

@@ -336,8 +336,12 @@ export function buildHeatmap(events, repos = appState.repos) {
   // Current streak: consecutive active days ending today (or yesterday when
   // today is still empty — mirrors github.com behaviour).
   let streak = 0;
-  let end = weeks * 7 - 1;
-  if (perDay[end] === 0 && weeks * 7 >= 2) end = weeks * 7 - 2;
+  // The final column contains future cells until the current week ends.
+  // Anchor the streak at today (or yesterday when today is empty), not at
+  // the end of the fixed 15-week array.
+  const todayIndex = (weeks - 1) * 7 + todayDay;
+  let end = todayIndex;
+  if (perDay[end] === 0 && end > 0) end--;
   for (let i = end; i >= 0; i--) {
     if (perDay[i] > 0) streak++;
     else break;

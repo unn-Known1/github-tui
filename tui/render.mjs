@@ -27,7 +27,7 @@ import { renderDetail } from './tabs/detail.mjs';
 import { renderOnboarding } from './tabs/onboarding.mjs';
 import * as quickSettings from './quick-settings.mjs';
 import { renderToasts } from './toast.mjs';
-import { renderDialogs, getDialogStack } from './dialog.mjs';
+import { renderDialogs, getDialogStack, isDialogOpen } from './dialog.mjs';
 import * as whichKey from './which-key.mjs';
 
 let screen;
@@ -806,22 +806,22 @@ function doRender() {
 
   // ── Overlays (rendered last, on top; later = on top) ──
   // Legacy overlay rendering (maintained for backward compatibility)
-  if (appState.showDetail) renderDetail(screen);
-  if (appState.showOnboarding) renderOnboarding(screen);
-  if (appState.showWelcome) renderOnboarding(screen, { welcomeMode: true });
-  if (appState.showHelp) help.render(screen);
+  if (appState.showDetail && !isDialogOpen('detail')) renderDetail(screen);
+  if (appState.showOnboarding && !isDialogOpen('onboarding')) renderOnboarding(screen);
+  if (appState.showWelcome && !isDialogOpen('welcome')) renderOnboarding(screen, { welcomeMode: true });
+  if (appState.showHelp && !isDialogOpen('help')) help.render(screen);
   // Confirm + typed input sit ABOVE the detail popup: detail actions
   // (c/r/x/M/...) open them while showDetail stays true, and renderDetail
   // paints a full-screen backdrop that would otherwise hide them.
-  if (appState.confirmAction) renderConfirmDialog(screen);
-  if (appState.showPalette) renderPalette(screen);
-  if (appState.showBookmarks) renderBookmarksOverlay(screen);
+  if (appState.confirmAction && !isDialogOpen('confirm')) renderConfirmDialog(screen);
+  if (appState.showPalette && !isDialogOpen('palette')) renderPalette(screen);
+  if (appState.showBookmarks && !isDialogOpen('bookmarks')) renderBookmarksOverlay(screen);
   // Quick settings popup — renders above palette but below select.
-  if (appState._quickSettingsOpen) renderQuickSettings(screen);
+  if (appState._quickSettingsOpen && !isDialogOpen('quickSettings')) renderQuickSettings(screen);
   // Select dialog — renders above palette but below input prompt.
   if (appState._activeSelect) appState._activeSelect.render(screen);
   // Redraw the input prompt on top of the detail popup's backdrop.
-  if (appState.inputMode === 'input') {
+  if (appState.inputMode === 'input' && !isDialogOpen('input')) {
     renderFooterInput(screen, H - FOOTER_HEIGHT + 1, W);
   }
 

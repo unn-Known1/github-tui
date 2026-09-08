@@ -8,20 +8,20 @@ import { saveFocus, restoreFocus } from './focus.mjs';
 
 let _bookmarksFocusToken = null;
 
-export function openBookmarks() {
+export function openBookmarks(manageFocus = true) {
   if (appState.showBookmarks) return;
   appState.bookmarks = loadBookmarks();
   appState.showBookmarks = true;
   appState.bookmarksCursor = 0;
   appState.bookmarksScroll = 0;
-  _bookmarksFocusToken = saveFocus();
+  if (manageFocus) _bookmarksFocusToken = saveFocus();
   render();
 }
 
 export function closeBookmarks() {
   if (!appState.showBookmarks) return;
   appState.showBookmarks = false;
-  restoreFocus(_bookmarksFocusToken);
+  if (_bookmarksFocusToken) restoreFocus(_bookmarksFocusToken);
   _bookmarksFocusToken = null;
   render();
 }

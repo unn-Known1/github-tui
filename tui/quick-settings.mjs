@@ -72,9 +72,14 @@ const SETTINGS = [
     id: 'repos-sort',
     label: 'Repos Sort',
     type: 'cycle',
-    get: () => appState.repoSort || 'updated',
+    get: () => appState.repoSort?.field || 'updated',
     options: () => ['name', 'stars', 'forks', 'issues', 'updated'],
-    set: (value) => { appState.repoSort = value; },
+    set: (value) => {
+      const current = appState.repoSort && typeof appState.repoSort === 'object'
+        ? appState.repoSort
+        : { field: 'updated', asc: false };
+      appState.repoSort = { field: value, asc: value === current.field ? !!current.asc : value === 'name' };
+    },
   },
   {
     id: 'theme-mode',
@@ -116,18 +121,31 @@ export function isOpen() {
   return _active;
 }
 
-export function open() {
+export function getLayout(screen) {
+  const boxW = Math.min(50, Math.max(1, screen.width - 4));
+  const boxH = SETTINGS.length + 6;
+  return {
+    boxW,
+    boxH,
+    x: Math.floor((screen.width - boxW) / 2),
+    y: Math.floor((screen.height - boxH) / 2),
+    rowStart: Math.floor((screen.height - boxH) / 2) + 2,
+    rowCount: SETTINGS.length,
+  };
+}
+
+export function open(manageFocus = true) {
   if (_active) return;
   _active = true;
   _cursor = 0;
-  _focusToken = saveFocus();
+  if (manageFocus) _focusToken = saveFocus();
   appRender();
 }
 
 export function close() {
   if (!_active) return;
   _active = false;
-  restoreFocus(_focusToken);
+  if (_focusToken) restoreFocus(_focusToken);
   _focusToken = null;
 }
 
@@ -148,6 +166,15 @@ function toggleSetting(setting) {
   const current = getValue(setting);
   setting.set(current === 'On' ? 'Off' : 'On');
   appRender();
+}
+
+export function activateAt(index) {
+  if (!_active || !Number.isInteger(index) || index < 0 || index >= SETTINGS.length) return false;
+  _cursor = index;
+  const setting = SETTINGS[_cursor];
+  if (setting.type === 'cycle') cycleSetting(setting);
+  else if (setting.type === 'toggle') toggleSetting(setting);
+  return true;
 }
 
 export function handleKey(key) {
@@ -183,15 +210,7 @@ export function handleKey(key) {
   // Number keys 1-11 for direct selection
   if (key >= '1' && key <= '9') {
     const idx = parseInt(key) - 1;
-    if (idx < SETTINGS.length) {
-      _cursor = idx;
-      const setting = SETTINGS[_cursor];
-      if (setting.type === 'cycle') {
-        cycleSetting(setting);
-      } else if (setting.type === 'toggle') {
-        toggleSetting(setting);
-      }
-    }
+    if (idx < SETTINGS.length) activateAt(idx);
     return true;
   }
 
@@ -202,10 +221,7 @@ export function renderQuickSettings(screen) {
   if (!_active) return;
 
   const W = screen.width, H = screen.height;
-  const boxW = Math.min(50, W - 4);
-  const boxH = SETTINGS.length + 6;
-  const x = Math.floor((W - boxW) / 2);
-  const y = Math.floor((H - boxH) / 2);
+  const { boxW, boxH, x, y } = getLayout(screen);
 
   // Backdrop
   const backdropStyle = color('modalBackdrop');
