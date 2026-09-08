@@ -25,6 +25,10 @@ import * as help from './tabs/help.mjs';
 import { renderPalette } from './palette.mjs';
 import { renderDetail } from './tabs/detail.mjs';
 import { renderOnboarding } from './tabs/onboarding.mjs';
+import * as quickSettings from './quick-settings.mjs';
+import { renderToasts } from './toast.mjs';
+import { renderDialogs, getDialogStack } from './dialog.mjs';
+import * as whichKey from './which-key.mjs';
 
 let screen;
 
@@ -801,6 +805,7 @@ function doRender() {
   renderFooter(W, H);
 
   // ── Overlays (rendered last, on top; later = on top) ──
+  // Legacy overlay rendering (maintained for backward compatibility)
   if (appState.showDetail) renderDetail(screen);
   if (appState.showOnboarding) renderOnboarding(screen);
   if (appState.showWelcome) renderOnboarding(screen, { welcomeMode: true });
@@ -811,10 +816,28 @@ function doRender() {
   if (appState.confirmAction) renderConfirmDialog(screen);
   if (appState.showPalette) renderPalette(screen);
   if (appState.showBookmarks) renderBookmarksOverlay(screen);
+  // Quick settings popup — renders above palette but below select.
+  if (appState._quickSettingsOpen) renderQuickSettings(screen);
+  // Select dialog — renders above palette but below input prompt.
+  if (appState._activeSelect) appState._activeSelect.render(screen);
   // Redraw the input prompt on top of the detail popup's backdrop.
   if (appState.inputMode === 'input') {
     renderFooterInput(screen, H - FOOTER_HEIGHT + 1, W);
   }
+
+  // Dialog stack rendering (new system)
+  const stackDialogs = getDialogStack();
+  if (stackDialogs.length > 0) {
+    renderDialogs(screen);
+  }
+
+  // Which-Key overlay — renders above dialogs but below toasts.
+  if (whichKey.isOpen()) {
+    whichKey.render(screen);
+  }
+
+  // Toast notifications — rendered last, on top of everything.
+  renderToasts(screen);
 
   screen.render();
 }
@@ -936,6 +959,12 @@ function renderBookmarksOverlay(screen) {
 
   const hint = '[Enter] Open  [d] Delete  [y] URL  [Esc] Close';
   screen.writeStr(x + boxW - hint.length - 3, footY, hint, color('dim'));
+}
+
+function renderQuickSettings(screen) {
+  if (appState._quickSettingsOpen) {
+    quickSettings.renderQuickSettings(screen);
+  }
 }
 
 bindRender(doRender);

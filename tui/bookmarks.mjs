@@ -4,17 +4,25 @@
 import { appState, render, showMessage, confirm } from './state.mjs';
 import { loadBookmarks, removeBookmark } from './store.mjs';
 import { openUrl, copyToClipboard } from './utils.mjs';
+import { saveFocus, restoreFocus } from './focus.mjs';
+
+let _bookmarksFocusToken = null;
 
 export function openBookmarks() {
+  if (appState.showBookmarks) return;
   appState.bookmarks = loadBookmarks();
   appState.showBookmarks = true;
   appState.bookmarksCursor = 0;
   appState.bookmarksScroll = 0;
+  _bookmarksFocusToken = saveFocus();
   render();
 }
 
 export function closeBookmarks() {
+  if (!appState.showBookmarks) return;
   appState.showBookmarks = false;
+  restoreFocus(_bookmarksFocusToken);
+  _bookmarksFocusToken = null;
   render();
 }
 

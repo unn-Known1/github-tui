@@ -1,13 +1,15 @@
 // Custom user keybindings — loaded from ~/.github-tui/keybindings.json.
-// Each binding maps a key to a shell command with placeholder substitution.
+// Each binding maps a key to a shell command OR internal action.
 
 // Expected format:
 // [
 //   { "key": "E", "command": "code .", "label": "Open in VS Code", "context": "repo" },
-//   { "key": "T", "command": "gh pr view {number} --web", "label": "View PR in browser", "context": "detail" }
+//   { "key": "T", "command": "gh pr view {number} --web", "label": "View PR in browser", "context": "detail" },
+//   { "key": "s", "action": "star.toggle", "label": "Star repo", "context": "repo" }
 // ]
 
 // Supported placeholders: {owner}, {repo}, {number}, {branch}
+// Supported actions: any registered palette action ID (e.g., 'star.toggle', 'refresh', etc.)
 
 import { KEYBINDINGS_FILE, readJson } from './config.mjs';
 import { appState, tabState, showMessage, render } from './state.mjs';
@@ -24,8 +26,15 @@ function validateBinding(binding, index) {
   if (!binding.key || typeof binding.key !== 'string' || binding.key.length !== 1) {
     return `Entry ${index}: "key" must be a single character string`;
   }
-  if (!binding.command || typeof binding.command !== 'string') {
-    return `Entry ${index}: "command" is required and must be a string`;
+  // Must have either command or action
+  if (!binding.command && !binding.action) {
+    return `Entry ${index}: must have either "command" or "action"`;
+  }
+  if (binding.command && typeof binding.command !== 'string') {
+    return `Entry ${index}: "command" must be a string if provided`;
+  }
+  if (binding.action && typeof binding.action !== 'string') {
+    return `Entry ${index}: "action" must be a string if provided`;
   }
   if (binding.context && !VALID_CONTEXTS.has(binding.context)) {
     return `Entry ${index}: "context" must be one of: ${[...VALID_CONTEXTS].join(', ')}`;
@@ -112,6 +121,20 @@ function contextMatches(binding) {
   return true;
 }
 
+// Action registry - maps action IDs to functions
+let _actionRegistry = null;
+
+function getActionRegistry() {
+  if (!_actionRegistry) {
+    // Lazy import to avoid circular dependencies
+    import('./palette.mjs').then(m => {
+      _actionRegistry = {};
+      // We'll use the palette's filter to find actions
+    }).catch(() => {});
+  }
+  return _actionRegistry;
+}
+
 /**
  * Try to handle a key press via custom keybindings.
  * Returns true if a binding was matched and executed, false otherwise.
@@ -123,6 +146,52 @@ export function runCustomKey(key) {
   const binding = bindings.find(b => b.key === key && contextMatches(b));
   if (!binding) return false;
 
+  // Handle internal action
+  if (binding.action) {
+    return runInternalAction(binding);
+  }
+
+  // Handle shell command
+  if (binding.command) {
+    return runShellCommand(binding);
+  }
+
+  return false;
+}
+
+/**
+ * Run an internal action (palette action).
+ */
+function runInternalAction(binding) {
+  const actionId = binding.action;
+  showMessage('Running: ' + (binding.label || actionId), 'info');
+
+  // Try to find and execute the action via palette
+  import('./palette.mjs').then(palette => {
+    const actions = palette.filter('');  // Get all actions
+    const action = actions.find(a => a.id === actionId);
+    if (action && action.run) {
+      try {
+        Promise.resolve(action.run()).catch(e => {
+          showMessage('Action failed: ' + (e.message || 'unknown'), 'error');
+        });
+      } catch (e) {
+        showMessage('Action failed: ' + (e.message || 'unknown'), 'error');
+      }
+    } else {
+      showMessage('Action not found: ' + actionId, 'error');
+    }
+  }).catch(() => {
+    showMessage('Failed to load action module', 'error');
+  });
+
+  return true;
+}
+
+/**
+ * Run a shell command.
+ */
+function runShellCommand(binding) {
   const cmd = resolvePlaceholders(binding.command);
   showMessage('Running: ' + (binding.label || cmd), 'info');
 

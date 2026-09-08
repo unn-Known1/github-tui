@@ -11,7 +11,7 @@
 
 import {
   appState, tabState, setTab, showMessage, render, TABS, dismissConfirm, confirm,
-  consumeRetryHandler, SECURITY_SUB_PANES, toggleFocusMode,
+  consumeRetryHandler, SECURITY_SUB_PANES, toggleFocusMode, getUnreadCount,
 } from './state.mjs';
 import * as palette from './palette.mjs';
 import * as onboarding from './tabs/onboarding.mjs';
@@ -19,6 +19,10 @@ import { handleInputKey } from './input.mjs';
 import { copyToClipboard, openUrl, notificationToHtmlUrl, getLastClipboardMethod, getClipboardTempFilePath } from './utils.mjs';
 import { startInput, registerInputHandler } from './input.mjs';
 import * as bookmarks from './bookmarks.mjs';
+import * as quickSettings from './quick-settings.mjs';
+import { saveFocus, restoreFocus } from './focus.mjs';
+import { handleDialogKey, getDialogStack, popDialog } from './dialog.mjs';
+import * as whichKey from './which-key.mjs';
 
 import * as dashboard from './tabs/dashboard.mjs';
 import * as repos     from './tabs/repos.mjs';
@@ -285,6 +289,29 @@ export function handleKey(key) {
     return;
   }
 
+  // 0a. Dialog stack handles keys first (new system)
+  const stackDialogs = getDialogStack();
+  if (stackDialogs.length > 0) {
+    // Esc pops the top dialog
+    if (key === '\x1b') {
+      popDialog();
+      return;
+    }
+    // Let the top dialog handle the key
+    if (handleDialogKey(key)) return;
+  }
+
+  // 0a1. Which-Key handles keys when active
+  if (whichKey.isOpen()) {
+    if (whichKey.handleKey(key)) return;
+  }
+
+  // 0a2. Check for prefix keys to start which-key sequence
+  if (!whichKey.isOpen() && whichKey.isPrefixKey(key)) {
+    whichKey.startSequence(key);
+    return;
+  }
+
   // 0b. Esc dismisses ANY open overlay — prevents stuck modal states.
   // Also clears text selection in README / file viewer before falling
   // through to the normal back handler.
@@ -297,7 +324,15 @@ export function handleKey(key) {
       return;
     }
     if (appState.showBookmarks) { bookmarks.closeBookmarks(); return; }
-    if (appState.showHelp) { appState.showHelp = false; render(); return; }
+    if (appState.showHelp) {
+      appState.showHelp = false;
+      if (appState._helpFocusToken) {
+        restoreFocus(appState._helpFocusToken);
+        appState._helpFocusToken = null;
+      }
+      render();
+      return;
+    }
     // Confirm / input overlays sit ON TOP of the detail popup (actions like
     // c/r/x/M open them while showDetail stays true), so Esc must dismiss
     // those first. handleBack closes the reaction picker / diff view before
@@ -313,6 +348,16 @@ export function handleKey(key) {
       return;
     }
     // No overlay open — let Esc fall through to per-tab back handlers.
+  }
+
+  // 0c. Quick settings popup captures all keys.
+  if (appState._quickSettingsOpen) {
+    if (quickSettings.handleKey(key)) return;
+  }
+
+  // 0d. Active select dialog captures all keys.
+  if (appState._activeSelect) {
+    if (appState._activeSelect.handleKey(key)) return;
   }
 
   // 1. Palette captures all keys first.
@@ -488,9 +533,16 @@ export function handleKey(key) {
       }
       return;
     }
-    case '?': appState.showHelp = true; render(); return;
+    case '?':
+      if (!appState.showHelp) {
+        appState._helpFocusToken = saveFocus();
+      }
+      appState.showHelp = true;
+      render();
+      return;
     case '\x10':
     case ':': palette.open(); return;
+    case '\x0e': quickSettings.open(); return;  // Ctrl+,,
     case 'r': {
       // a retry handler attached by error-recovery.mjs takes priority
       // over the per-tab refresh / Actions workflow rerun. Users in an error
@@ -1010,48 +1062,60 @@ const SETTINGS_APPEARANCE_CURSOR = 6;
 export function registerCoreActions() {
   const reg = palette.register;
 
+  // ── Navigation ──
   TABS.forEach((t, i) => reg({
     id: 'tab.' + t.label.toLowerCase(),
     label: 'Go to ' + t.label,
     hint: 'tab ' + (i + 1),
+    category: 'Navigation',
     run: () => setTab(i),
   }));
 
-  reg({ id: 'refresh', label: 'Refresh current view',         hint: 'r', run: refreshCurrent });
-  reg({ id: 'open',    label: 'Open current item in browser', hint: 'o', run: openCurrent });
-  reg({ id: 'copy',    label: 'Copy current URL to clipboard', hint: 'y', run: copyCurrentUrl });
-  reg({ id: 'help',    label: 'Show help overlay',            hint: '?',
-        run: () => { appState.showHelp = true; render(); } });
-  reg({ id: 'welcome', label: 'Show "What\'s new" / tour',    hint: 'w', run: onboarding.startWelcome });
-  reg({ id: 'quit',    label: 'Quit application',             hint: 'q', run: quit });
+  // ── Global Actions ──
+  reg({ id: 'refresh', label: 'Refresh current view',         hint: 'r', category: 'Global', run: refreshCurrent });
+  reg({ id: 'open',    label: 'Open current item in browser', hint: 'o', category: 'Global', run: openCurrent });
+  reg({ id: 'copy',    label: 'Copy current URL to clipboard', hint: 'y', category: 'Global', run: copyCurrentUrl });
+  reg({ id: 'help',    label: 'Show help overlay',            hint: '?', category: 'Global',
+        run: () => {
+          if (!appState.showHelp) {
+            appState._helpFocusToken = saveFocus();
+          }
+          appState.showHelp = true;
+          render();
+        } });
+  reg({ id: 'welcome', label: 'Show "What\'s new" / tour',    hint: 'w', category: 'Global', run: onboarding.startWelcome });
+  reg({ id: 'quit',    label: 'Quit application',             hint: 'q', category: 'Global', run: quit });
 
-  reg({ id: 'star.toggle',     label: 'Star / unstar current repo',         hint: '*', run: toggleStar });
-  reg({ id: 'watch.toggle',    label: 'Watch / unwatch current repo',       hint: 'palette', run: toggleWatch });
-  reg({ id: 'bookmark.toggle', label: 'Bookmark / unbookmark current repo', hint: 'b', run: toggleBookmark });
+  // ── Repository Actions ──
+  reg({ id: 'star.toggle',     label: 'Star / unstar current repo',         hint: '*', category: 'Repository', run: toggleStar });
+  reg({ id: 'watch.toggle',    label: 'Watch / unwatch current repo',       hint: 'palette', category: 'Repository', run: toggleWatch });
+  reg({ id: 'bookmark.toggle', label: 'Bookmark / unbookmark current repo', hint: 'b', category: 'Repository', run: toggleBookmark });
 
-  reg({ id: 'repos.sort.name',    label: 'Sort repos by name',    hint: 'n', run: () => { setTab(1); repos.keys.n(); } });
-  reg({ id: 'repos.sort.stars',   label: 'Sort repos by stars',   hint: 'S', run: () => { setTab(1); repos.keys.S(); } });
-  reg({ id: 'repos.sort.updated', label: 'Sort repos by updated', hint: 'u', run: () => { setTab(1); repos.keys.u(); } });
+  // ── Repos Tab ──
+  reg({ id: 'repos.sort.name',    label: 'Sort repos by name',    hint: 'n', category: 'Repos', run: () => { setTab(1); repos.keys.n(); } });
+  reg({ id: 'repos.sort.stars',   label: 'Sort repos by stars',   hint: 'S', category: 'Repos', run: () => { setTab(1); repos.keys.S(); } });
+  reg({ id: 'repos.sort.updated', label: 'Sort repos by updated', hint: 'u', category: 'Repos', run: () => { setTab(1); repos.keys.u(); } });
   reg({ id: 'repos.filter',       label: 'Filter your repositories...',
-        hint: '/', run: () => { setTab(1); repos.keys['/'](); } });
+        hint: '/', category: 'Repos', run: () => { setTab(1); repos.keys['/'](); } });
   reg({ id: 'repos.clear-filter', label: 'Clear all repos filters',
-        hint: 'c', run: () => { setTab(1); repos.keys.c(); } });
+        hint: 'c', category: 'Repos', run: () => { setTab(1); repos.keys.c(); } });
   reg({ id: 'repos.type', label: 'Cycle repos type filter (all/sources/forks/...)',
-        hint: 't', run: () => { setTab(1); repos.keys.t(); } });
+        hint: 't', category: 'Repos', run: () => { setTab(1); repos.keys.t(); } });
   reg({ id: 'repos.lang', label: 'Filter repos by language...',
-        hint: 'L', run: () => { setTab(1); repos.keys.L(); } });
+        hint: 'L', category: 'Repos', run: () => { setTab(1); repos.keys.L(); } });
   reg({ id: 'repos.stale', label: 'Toggle stale-only filter (no push 6+ months)',
-        hint: 'x', run: () => { setTab(1); repos.keys.x(); } });
+        hint: 'x', category: 'Repos', run: () => { setTab(1); repos.keys.x(); } });
   reg({ id: 'repos.starred', label: 'View starred repos',
-        hint: 'V', run: () => { setTab(1); repos.toggleReposView(); } });
+        hint: 'V', category: 'Repos', run: () => { setTab(1); repos.toggleReposView(); } });
   reg({ id: 'repos.density', label: 'Toggle Repos density (compact / comfortable)',
-        hint: 'D', run: () => { setTab(1); repos.keys.D(); } });
+        hint: 'D', category: 'Repos', run: () => { setTab(1); repos.keys.D(); } });
   reg({ id: 'repos.pin', label: 'Pin / unpin highlighted repo',
-        hint: 'P', run: () => { setTab(1); repos.keys.P(); } });
+        hint: 'P', category: 'Repos', run: () => { setTab(1); repos.keys.P(); } });
   reg({ id: 'repos.load-more', label: 'Load more repositories (lift background cap)',
-        hint: 'l', run: () => { setTab(1); repos.keys.l(); } });
+        hint: 'l', category: 'Repos', run: () => { setTab(1); repos.keys.l(); } });
+  // ── Explore Tab ──
   reg({ id: 'analyze.files', label: 'Open File explorer for current repo',
-        hint: 'F',
+        hint: 'F', category: 'Explore',
         run: () => {
           if (!appState.repoDetails) { showMessage('Open a repo on Explore first', 'warning'); return; }
           setTab(2);
@@ -1059,103 +1123,112 @@ export function registerCoreActions() {
         }});
 
   reg({ id: 'analyze.search', label: 'Search public repositories...',
-        hint: 'i', run: () => { setTab(2); analyze.keys.i(); } });
+        hint: 'i', category: 'Explore', run: () => { setTab(2); analyze.keys.i(); } });
   reg({ id: 'analyze.search-users', label: 'Search GitHub users...',
-        hint: 'u', run: () => { setTab(2); analyze.keys.u(); } });
+        hint: 'u', category: 'Explore', run: () => { setTab(2); analyze.keys.u(); } });
   reg({ id: 'analyze.search-code', label: 'Search code...',
-        hint: 'C', run: () => { setTab(2); analyze.keys.C(); } });
+        hint: 'C', category: 'Explore', run: () => { setTab(2); analyze.keys.C(); } });
   reg({ id: 'analyze.readme', label: 'View README of current repo',
-        hint: 'R', run: () => { setTab(2); if (appState.repoDetails) analyze.keys.R(); } });
+        hint: 'R', category: 'Explore', run: () => { setTab(2); if (appState.repoDetails) analyze.keys.R(); } });
 
+  // ── Files Pane (Explore) ──
   // Files pane actions (files.mjs is lazily imported — keys.mjs has no
   // static import to avoid a cycle; setTab(2) mirrors the analyze neighbors).
   reg({ id: 'files.save', label: 'Files: save current file to CWD',
-        hint: 's', run: () => { setTab(2); return import('./tabs/files.mjs').then(m => m.keys.s()); } });
+        hint: 's', category: 'Files', run: () => { setTab(2); return import('./tabs/files.mjs').then(m => m.keys.s()); } });
   reg({ id: 'files.save-folder', label: 'Files: save whole folder recursively to CWD',
-        hint: 'S', run: () => { setTab(2); return import('./tabs/files.mjs').then(m => m.keys.S()); } });
+        hint: 'S', category: 'Files', run: () => { setTab(2); return import('./tabs/files.mjs').then(m => m.keys.S()); } });
   reg({ id: 'files.zipball', label: 'Files: download repo zipball to CWD',
-        hint: 'Z', run: () => { setTab(2); return import('./tabs/files.mjs').then(m => m.keys.Z()); } });
+        hint: 'Z', category: 'Files', run: () => { setTab(2); return import('./tabs/files.mjs').then(m => m.keys.Z()); } });
   reg({ id: 'files.clone', label: 'Files: git clone repo into CWD',
-        hint: 'C', run: () => { setTab(2); return import('./tabs/files.mjs').then(m => m.keys.C()); } });
+        hint: 'C', category: 'Files', run: () => { setTab(2); return import('./tabs/files.mjs').then(m => m.keys.C()); } });
   reg({ id: 'files.gh-clone', label: 'Files: gh repo clone (private repos)',
-        hint: 'G', run: () => { setTab(2); return import('./tabs/files.mjs').then(m => m.keys.G()); } });
+        hint: 'G', category: 'Files', run: () => { setTab(2); return import('./tabs/files.mjs').then(m => m.keys.G()); } });
   reg({ id: 'files.branch', label: 'Files: branch / tag picker',
-        hint: 'B', run: () => { setTab(2); return import('./tabs/files.mjs').then(m => m.keys.B()); } });
+        hint: 'B', category: 'Files', run: () => { setTab(2); return import('./tabs/files.mjs').then(m => m.keys.B()); } });
   reg({ id: 'files.copy-contents', label: 'Files: copy entire file contents',
-        hint: 'Y', run: () => { setTab(2); return import('./tabs/files.mjs').then(m => m.keys.Y()); } });
+        hint: 'Y', category: 'Files', run: () => { setTab(2); return import('./tabs/files.mjs').then(m => m.keys.Y()); } });
   reg({ id: 'files.history', label: 'Files: per-file commit history',
-        hint: 'H', run: () => { setTab(2); return import('./tabs/files.mjs').then(m => m.keys.H()); } });
+        hint: 'H', category: 'Files', run: () => { setTab(2); return import('./tabs/files.mjs').then(m => m.keys.H()); } });
   reg({ id: 'files.blame', label: 'Files: git blame for current file',
-        hint: 'b', run: () => { setTab(2); return import('./tabs/files.mjs').then(m => m.keys.b()); } });
+        hint: 'b', category: 'Files', run: () => { setTab(2); return import('./tabs/files.mjs').then(m => m.keys.b()); } });
   reg({ id: 'files.copy-raw', label: 'Files: copy raw file URL',
-        hint: 'y', run: () => { setTab(2); return import('./tabs/files.mjs').then(m => m.copyRawUrl()); } });
+        hint: 'y', category: 'Files', run: () => { setTab(2); return import('./tabs/files.mjs').then(m => m.copyRawUrl()); } });
   reg({ id: 'files.copy-path', label: 'Files: copy repo-relative file path',
-        hint: 'p', run: () => { setTab(2); return import('./tabs/files.mjs').then(m => m.copyFilePath()); } });
+        hint: 'p', category: 'Files', run: () => { setTab(2); return import('./tabs/files.mjs').then(m => m.copyFilePath()); } });
   reg({ id: 'files.open-browser', label: 'Files: open file / folder in browser',
-        hint: 'o', run: () => { setTab(2); return import('./tabs/files.mjs').then(m => m.openFileInBrowser()); } });
+        hint: 'o', category: 'Files', run: () => { setTab(2); return import('./tabs/files.mjs').then(m => m.openFileInBrowser()); } });
   reg({ id: 'files.filter', label: 'Files: filter current directory...',
-        hint: '/', run: () => { setTab(2); return import('./tabs/files.mjs').then(m => m.promptFilesFilter()); } });
+        hint: '/', category: 'Files', run: () => { setTab(2); return import('./tabs/files.mjs').then(m => m.promptFilesFilter()); } });
   reg({ id: 'files.clear-filter', label: 'Files: clear directory filter',
-        hint: 'c', run: () => { setTab(2); return import('./tabs/files.mjs').then(m => m.clearFilesFilter()); } });
+        hint: 'c', category: 'Files', run: () => { setTab(2); return import('./tabs/files.mjs').then(m => m.clearFilesFilter()); } });
   reg({ id: 'files.sort', label: 'Files: cycle tree sort (name/size/type)',
-        hint: 't', run: () => { setTab(2); return import('./tabs/files.mjs').then(m => m.cycleFilesSort()); } });
+        hint: 't', category: 'Files', run: () => { setTab(2); return import('./tabs/files.mjs').then(m => m.cycleFilesSort()); } });
   reg({ id: 'files.goto', label: 'Files: go to file path...',
-        hint: 'e', run: () => { setTab(2); return import('./tabs/files.mjs').then(m => m.promptGoToPath()); } });
+        hint: 'e', category: 'Files', run: () => { setTab(2); return import('./tabs/files.mjs').then(m => m.promptGoToPath()); } });
   reg({ id: 'files.refresh', label: 'Files: refresh tree / file',
-        hint: 'r', run: () => { setTab(2); return import('./tabs/files.mjs').then(m => m.refreshFiles()); } });
+        hint: 'r', category: 'Files', run: () => { setTab(2); return import('./tabs/files.mjs').then(m => m.refreshFiles()); } });
   reg({ id: 'files.history-browser', label: 'Files: open selected history commit in browser',
-        hint: 'o', run: () => { setTab(2); return import('./tabs/files.mjs').then(m => m.openHistoryCommitInBrowser()); } });
+        hint: 'o', category: 'Files', run: () => { setTab(2); return import('./tabs/files.mjs').then(m => m.openHistoryCommitInBrowser()); } });
 
-  reg({ id: 'undo.undo', label: 'Undo last action', hint: 'u',
+  // ── Edit ──
+  reg({ id: 'undo.undo', label: 'Undo last action', hint: 'u', category: 'Edit',
         run: () => undo() });
-  reg({ id: 'undo.redo', label: 'Redo last undone action', hint: 'Ctrl-Y',
+  reg({ id: 'undo.redo', label: 'Redo last undone action', hint: 'Ctrl-Y', category: 'Edit',
         run: () => redo() });
 
-  reg({ id: 'inbox.refresh',     label: 'Inbox: refresh notifications',       hint: 'r', run: inbox.loadNotifications });
-  reg({ id: 'inbox.mark.read',   label: 'Inbox: mark current thread as read', hint: 'm', run: inbox.markCurrentRead });
-  reg({ id: 'inbox.mark.all',    label: 'Inbox: mark all as read',            hint: 'M', run: inbox.markAllRead });
-  reg({ id: 'inbox.unsubscribe', label: 'Inbox: unsubscribe from thread',     hint: 'u', run: inbox.unsubscribeCurrent });
-  reg({ id: 'inbox.cycle',       label: 'Inbox: cycle filter',                run: inbox.cycleFilter });
-  reg({ id: 'inbox.hide-processed', label: 'Inbox: hide / show processed threads', hint: 'H',
+  // ── Inbox Tab ──
+  reg({ id: 'inbox.refresh',     label: 'Inbox: refresh notifications',       hint: 'r', category: 'Inbox', run: inbox.loadNotifications });
+  reg({ id: 'inbox.mark.read',   label: 'Inbox: mark current thread as read', hint: 'm', category: 'Inbox', run: inbox.markCurrentRead });
+  reg({ id: 'inbox.mark.all',    label: 'Inbox: mark all as read',            hint: 'M', category: 'Inbox', run: inbox.markAllRead });
+  reg({ id: 'inbox.unsubscribe', label: 'Inbox: unsubscribe from thread',     hint: 'u', category: 'Inbox', run: inbox.unsubscribeCurrent });
+  reg({ id: 'inbox.cycle',       label: 'Inbox: cycle filter',                category: 'Inbox', run: inbox.cycleFilter });
+  reg({ id: 'inbox.hide-processed', label: 'Inbox: hide / show processed threads', hint: 'H', category: 'Inbox',
         run: () => { setTab(4); inbox.keys.H(); } });
-  reg({ id: 'inbox.group', label: 'Inbox: toggle grouping by thread', hint: 'G',
+  reg({ id: 'inbox.group', label: 'Inbox: toggle grouping by thread', hint: 'G', category: 'Inbox',
         run: () => { setTab(4); inbox.keys.G(); } });
-  reg({ id: 'inbox.snooze', label: 'Inbox: snooze thread for 1 hour', hint: 'z',
+  reg({ id: 'inbox.snooze', label: 'Inbox: snooze thread for 1 hour', hint: 'z', category: 'Inbox',
         run: () => { setTab(4); inbox.keys.z(); } });
-  reg({ id: 'inbox.unsnooze', label: 'Inbox: unsnooze current thread', hint: 'Z',
+  reg({ id: 'inbox.unsnooze', label: 'Inbox: unsnooze current thread', hint: 'Z', category: 'Inbox',
         run: () => { setTab(4); inbox.keys.Z(); } });
-  reg({ id: 'inbox.save-filter', label: 'Inbox: save current filter...', hint: 'v',
+  reg({ id: 'inbox.save-filter', label: 'Inbox: save current filter...', hint: 'v', category: 'Inbox',
         run: () => { setTab(4); inbox.keys.v(); } });
-  reg({ id: 'inbox.apply-filter', label: 'Inbox: apply a saved filter...', hint: 'V',
+  reg({ id: 'inbox.apply-filter', label: 'Inbox: apply a saved filter...', hint: 'V', category: 'Inbox',
         run: () => { setTab(4); inbox.keys.V(); } });
 
-  reg({ id: 'settings.theme',  label: 'Change theme...',
+  // ── Settings ──
+  reg({ id: 'settings.theme',  label: 'Change theme...', category: 'Settings',
         run: () => { setTab(5); appState.settingsCursor = SETTINGS_APPEARANCE_CURSOR; render(); settings.enter(); } });
-  reg({ id: 'settings.logout', label: 'Log out', run: () => confirm('Log out of GitHub?', settings.handleLogout, 'Log Out') });
-  reg({ id: 'dashboard.refresh', label: 'Refresh dashboard data',
+  reg({ id: 'settings.logout', label: 'Log out', category: 'Settings', run: () => confirm('Log out of GitHub?', settings.handleLogout, 'Log Out') });
+  reg({ id: 'settings.quick', label: 'Quick Settings...', category: 'Settings', hint: 'Ctrl+,',
+        run: () => quickSettings.open() });
+
+  // ── Dashboard ──
+  reg({ id: 'dashboard.refresh', label: 'Refresh dashboard data', category: 'Dashboard',
         run: () => dashboard.refreshDashboard() });
-  reg({ id: 'dashboard.inbox', label: 'Open Inbox',
+  reg({ id: 'dashboard.inbox', label: 'Open Inbox', category: 'Dashboard',
         run: () => {
           setTab(4);
           if (appState.notifications.length === 0 && appState.token) inbox.loadNotifications();
           else render();
         } });
-  reg({ id: 'dashboard.actions', label: 'Open Actions',
+  reg({ id: 'dashboard.actions', label: 'Open Actions', category: 'Dashboard',
         run: () => {
           setTab(3);
           if (appState.actionsRepos.length === 0 && appState.token) actions.loadActionsRepos();
           else render();
         } });
-  reg({ id: 'dashboard.search', label: 'Search repositories',
+  reg({ id: 'dashboard.search', label: 'Search repositories', category: 'Dashboard',
         run: () => { setTab(2); analyze.keys.i(); } });
-  reg({ id: 'dashboard.new-issue', label: 'Create new issue from TUI',
+  reg({ id: 'dashboard.new-issue', label: 'Create new issue from TUI', category: 'Dashboard',
         run: () => import('./issue-create.mjs').then(m => m.startCreateIssue()) });
 
-  reg({ id: 'detail.comment', label: 'Comment on current issue/PR',
+  // ── Detail (Issue/PR) ──
+  reg({ id: 'detail.comment', label: 'Comment on current issue/PR', category: 'Detail',
         run: () => { if (appState.showDetail) detail.openCommentInput(); } });
-  reg({ id: 'detail.close', label: 'Close / Reopen current issue/PR',
+  reg({ id: 'detail.close', label: 'Close / Reopen current issue/PR', category: 'Detail',
         run: () => { if (appState.showDetail) detail.closeOrReopen(); } });
-  reg({ id: 'detail.merge', label: 'Merge current PR',
+  reg({ id: 'detail.merge', label: 'Merge current PR', category: 'Detail',
         run: () => { if (appState.showDetail) detail.mergePR(); } });
   reg({ id: 'detail.react', label: 'Add reaction to current issue/PR',
         run: () => { if (appState.showDetail) detail.toggleReactionPicker(); } });
@@ -1281,15 +1354,79 @@ export function registerCoreActions() {
     }).catch(e => showMessage('Host configuration failed: ' + e.message, 'error'));
   });
 
+  // ── Suggested Actions (context-aware) ──
+  // These appear at the top of the palette when no search query is entered.
+  reg({ id: 'suggest.refresh', label: 'Refresh current view', hint: 'r',
+        category: 'Suggested', suggested: () => appState.loading || appState.dashboardStaleCount > 0,
+        run: refreshCurrent });
+  reg({ id: 'suggest.star', label: 'Star current repo', hint: '*',
+        category: 'Suggested',
+        suggested: () => { const r = currentRepoForAction(); return r && !r._isStarred; },
+        run: toggleStar });
+  reg({ id: 'suggest.search', label: 'Search repositories...', hint: 'i',
+        category: 'Suggested',
+        suggested: () => tabState.current === 2 && appState.analyzeView === 'search',
+        run: () => { setTab(2); analyze.keys.i(); } });
+  reg({ id: 'suggest.unread', label: 'Check unread notifications', hint: '4',
+        category: 'Suggested',
+        suggested: () => appState.token && getUnreadCount() > 0,
+        run: () => { setTab(4); if (appState.notifications.length === 0) inbox.loadNotifications(); else render(); } });
+  reg({ id: 'suggest.actions', label: 'Check workflow failures', hint: '3',
+        category: 'Suggested',
+        suggested: () => appState.token && appState.actionsFailures && appState.actionsFailures.length > 0,
+        run: () => { setTab(3); actions.loadActionsRepos(); } });
+  reg({ id: 'suggest.login', label: 'Login to GitHub', hint: 'Settings',
+        category: 'Suggested',
+        suggested: () => !appState.token,
+        run: () => { setTab(5); } });
+  reg({ id: 'suggest.readme', label: 'View README', hint: 'R',
+        category: 'Suggested',
+        suggested: () => appState.repoDetails && appState.analyzeView === 'details',
+        run: () => { setTab(2); analyze.keys.R(); } });
+  reg({ id: 'suggest.files', label: 'Browse files', hint: 'F',
+        category: 'Suggested',
+        suggested: () => appState.repoDetails && appState.analyzeView !== 'files',
+        run: () => { setTab(2); analyze.keys.F(); } });
+  reg({ id: 'suggest.new-issue', label: 'Create new issue', hint: 'n',
+        category: 'Suggested',
+        suggested: () => appState.repoDetails && appState.token,
+        run: () => import('./issue-create.mjs').then(m => m.startCreateIssue()) });
+  reg({ id: 'suggest.bookmark', label: 'Bookmark current repo', hint: 'b',
+        category: 'Suggested',
+        suggested: () => { const r = currentRepoForAction(); return r && !isBookmarked(r.full_name); },
+        run: toggleBookmark });
+  reg({ id: 'suggest.issues', label: 'View issues', hint: 'i',
+        category: 'Suggested',
+        suggested: () => appState.repoDetails && appState.analyzeView === 'details' && appState.detailsPane !== 'issues',
+        run: () => { setTab(2); appState.detailsPane = 'issues'; render(); } });
+  reg({ id: 'suggest.prs', label: 'View pull requests', hint: 'P',
+        category: 'Suggested',
+        suggested: () => appState.repoDetails && appState.analyzeView === 'details' && appState.detailsPane !== 'prs',
+        run: () => { setTab(2); appState.detailsPane = 'prs'; render(); } });
+  reg({ id: 'suggest.traffic', label: 'View traffic', hint: 'T',
+        category: 'Suggested',
+        suggested: () => appState.repoDetails && appState.analyzeView === 'details' && appState.detailsPane !== 'traffic',
+        run: () => { setTab(2); appState.detailsPane = 'traffic'; render(); } });
+  reg({ id: 'suggest.checks', label: 'View checks', hint: 'K',
+        category: 'Suggested',
+        suggested: () => appState.repoDetails && appState.analyzeView === 'details' && appState.detailsPane !== 'checks',
+        run: () => { setTab(2); appState.detailsPane = 'checks'; render(); } });
+  reg({ id: 'suggest.security', label: 'View security alerts', hint: 'S',
+        category: 'Suggested',
+        suggested: () => appState.repoDetails && appState.analyzeView === 'details' && appState.detailsPane !== 'security',
+        run: () => { setTab(2); appState.detailsPane = 'security'; render(); } });
+
+  // ── Saved Searches ──
   appState.savedSearches.forEach(s => {
     reg({ id: 'search.run.' + s.id, label: 'Run saved search: ' + s.label,
-          hint: s.query,
+          hint: s.query, category: 'Saved Searches',
           run: () => {
             setTab(2);
             appState.analyzeView = 'search';
             submitSearch(s.query);
           } });
     reg({ id: 'search.delete.' + s.id, label: 'Delete saved search: ' + s.label,
+          category: 'Saved Searches',
           run: () => {
             // Saved searches are persisted to disk under ~/.github-tui/.
             // Confirm before removing so a misclick doesn't blow away

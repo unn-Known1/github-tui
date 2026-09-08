@@ -1,7 +1,54 @@
 // Focus management system — tracks which widget has keyboard focus
 // and supports Tab/Shift+Tab navigation between focusable elements.
+// Enhanced with dialog focus trapping and save/restore.
 
 import { appState, render, isDashboardHidden } from './state.mjs';
+
+// ── Focus Stack (for dialog focus trapping) ──
+// When a dialog opens, we save the current focus state.
+// When the dialog closes, we restore it.
+const _focusStack = [];
+
+/**
+ * Save current focus state (called when opening a dialog).
+ * Returns a token that can be used to verify the stack state.
+ */
+export function saveFocus() {
+  const saved = { ..._focusState };
+  _focusStack.push(saved);
+  return _focusStack.length;
+}
+
+/**
+ * Restore previously saved focus state (called when closing a dialog).
+ * @param {number} [token] - Optional token from saveFocus() to verify correct restore
+ */
+export function restoreFocus(token) {
+  if (_focusStack.length === 0) return;
+  
+  // Verify token if provided (prevents stale restores)
+  if (token !== undefined && token !== _focusStack.length) return;
+  
+  const saved = _focusStack.pop();
+  _focusState.tab = saved.tab;
+  _focusState.zoneIndex = saved.zoneIndex;
+  syncDashboardFocus();
+  render();
+}
+
+/**
+ * Check if a dialog is currently trapping focus.
+ */
+export function isDialogFocusTrapped() {
+  return _focusStack.length > 0;
+}
+
+/**
+ * Get the depth of the focus stack (for debugging).
+ */
+export function getFocusStackDepth() {
+  return _focusStack.length;
+}
 
 function localRepoName() {
   return appState.localRepo && appState.localRepoFilter
@@ -142,6 +189,13 @@ export function resetFocus(tabIndex) {
     appState.dashboardCardsFocus = false;
     appState.dashboardFocusZone = 'trending';
   }
+}
+
+/**
+ * Clear the entire focus stack (used on hard reset or logout).
+ */
+export function clearFocusStack() {
+  _focusStack.length = 0;
 }
 
 export function isFocused(tabIndex, zoneId) {

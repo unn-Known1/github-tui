@@ -275,6 +275,12 @@ export function handleMouseEvent(event) {
       }
     }
 
+    // Command palette hover — highlight the hovered item
+    if (appState.showPalette) {
+      _hoverPalette(sx, sy);
+      return;
+    }
+
     // Dashboard trending list (same filtered rows as the click handler).
     if (t === 0 && inTrendingSection(sx, sy)) {
       const th = appState._sectionHeaders['dashboard:trending'];
@@ -400,9 +406,60 @@ function _dispatchOverlayClick(sx, sy) {
   if (appState.showPalette)   { _clickPalette(sx, sy);   return true; }
   if (appState.showHelp)      { _clickHelp(sx, sy);      return true; }
   if (appState.showBookmarks) { _clickBookmarks(sx, sy); return true; }
+  if (appState._quickSettingsOpen) { _clickQuickSettings(sx, sy); return true; }
   if (appState.confirmAction) { _clickConfirm(sx, sy);   return true; }
   if (appState.showOnboarding || appState.showWelcome) { return true; } // swallow
   return false;
+}
+
+// Click handler for quick settings popup
+function _clickQuickSettings(sx, sy) {
+  const W = getScreen() ? getScreen().width : 80;
+  const H = getScreen() ? getScreen().height : 24;
+  const boxW = Math.min(50, W - 4);
+  const boxH = 5 + 6;  // 5 settings + 6 (title, search, separator, footer, etc.)
+  const x0 = Math.floor((W - boxW) / 2);
+  const y0 = Math.floor((H - boxH) / 2);
+  const inside = sx >= x0 && sx < x0 + boxW && sy >= y0 && sy < y0 + boxH;
+  if (!inside) {
+    import('./quick-settings.mjs').then(m => m.close()).catch(() => {});
+    return;
+  }
+  // Click on a setting row → select it
+  const settingY = y0 + 2;  // Settings start at y0 + 2
+  const row = sy - settingY;
+  if (row >= 0 && row < 5) {
+    // Simulate key press to select and activate
+    import('./quick-settings.mjs').then(m => {
+      // Move cursor and activate
+      m.handleKey('\r');  // Enter key
+    }).catch(() => {});
+  }
+}
+
+// Hover handler for command palette — highlights the item under the cursor
+function _hoverPalette(sx, sy) {
+  const W = getScreen() ? getScreen().width : 80;
+  const H = getScreen() ? getScreen().height : 24;
+  const boxW = Math.min(80, W - 4);
+  const boxH = Math.min(20, H - 4);
+  const x0 = Math.floor((W - boxW) / 2);
+  const y0 = Math.floor((H - boxH) / 2);
+  const inside = sx >= x0 && sx < x0 + boxW && sy >= y0 && sy < y0 + boxH;
+  if (!inside) return;
+
+  // Compute the row index from sy. Items list starts at y0+3.
+  const itemY = sy - (y0 + 3);
+  const maxVisible = boxH - 5;
+  let scrollOff = 0;
+  if (typeof appState.paletteCursor === 'number' && appState.paletteCursor >= maxVisible) {
+    scrollOff = appState.paletteCursor - maxVisible + 1;
+  }
+  const rowIdx = itemY + scrollOff;
+  if (itemY >= 0 && itemY < maxVisible && rowIdx !== appState.paletteCursor) {
+    appState.paletteCursor = rowIdx;
+    render();
+  }
 }
 
 function _clickPalette(sx, sy) {
@@ -410,7 +467,7 @@ function _clickPalette(sx, sy) {
   const W = getScreen() ? getScreen().width : 80;
   const H = getScreen() ? getScreen().height : 24;
   const boxW = Math.min(80, W - 4);
-  const boxH = Math.min(18, H - 4);
+  const boxH = Math.min(20, H - 4);
   const x0 = Math.floor((W - boxW) / 2);
   const y0 = Math.floor((H - boxH) / 2);
   const inside = sx >= x0 && sx < x0 + boxW && sy >= y0 && sy < y0 + boxH;

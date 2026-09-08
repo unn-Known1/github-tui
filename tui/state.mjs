@@ -733,8 +733,27 @@ const TOAST_ICONS = {
   warning: '!',
 };
 
+// Toast system - lazy loaded to avoid circular dependencies
+let _toastModule = null;
+function getToastModule() {
+  if (!_toastModule) {
+    // Lazy import to avoid circular dependencies
+    import('./toast.mjs').then(m => { _toastModule = m; }).catch(() => {});
+  }
+  return _toastModule;
+}
+
 export function showMessage(text, type = 'info', durationMs = 3000) {
   if (durationMs === 3000) durationMs = type === 'error' ? 6000 : type === 'warning' ? 5000 : 3000;
+  
+  // Use stacked toast system if available
+  const toast = getToastModule();
+  if (toast) {
+    toast.showToast({ message: text, variant: type, duration: durationMs });
+    return;
+  }
+  
+  // Fallback to legacy single-message system
   appState.message = { text, type, icon: TOAST_ICONS[type] || 'ⓘ' };
   if (appState.messageTimer) clearTimeout(appState.messageTimer);
   appState.messageTimer = setTimeout(() => {
@@ -749,6 +768,13 @@ export function showMessage(text, type = 'info', durationMs = 3000) {
 }
 
 export function clearMessage() {
+  // Clear stacked toasts if available
+  const toast = getToastModule();
+  if (toast) {
+    toast.clearToasts();
+  }
+  
+  // Also clear legacy message
   appState.message = null;
   if (appState.messageTimer) { clearTimeout(appState.messageTimer); appState.messageTimer = null; }
   render();
@@ -932,6 +958,76 @@ export function dismissConfirm() {
   appState.confirmMessage = '';
   appState.confirmTitle = 'Confirm';
   render();
+}
+
+/**
+ * Promise-based confirm dialog.
+ * Returns: true (confirmed), false (cancelled/dismissed)
+ *
+ * Usage:
+ *   const confirmed = await confirmAsync('Delete this?');
+ *   if (confirmed) { ... }
+ */
+export function confirmAsync(message, title = 'Confirm') {
+  return new Promise((resolve) => {
+    const origAction = appState.confirmAction;
+    const origMessage = appState.confirmMessage;
+    const origTitle = appState.confirmTitle;
+
+    // Guard against stacked confirms
+    if (origAction) {
+      showMessage('A confirmation is already pending', 'warning');
+      resolve(false);
+      return;
+    }
+
+    appState.confirmMessage = message;
+    appState.confirmTitle = title;
+    appState.confirmAction = () => {
+      // Restore original state (in case of nested confirms)
+      appState.confirmAction = origAction;
+      appState.confirmMessage = origMessage;
+      appState.confirmTitle = origTitle;
+      resolve(true);
+    };
+
+    // Store original dismissConfirm for cleanup
+    const origDismiss = dismissConfirm;
+    const patchedDismiss = () => {
+      // Restore original state
+      appState.confirmAction = origAction;
+      appState.confirmMessage = origMessage;
+      appState.confirmTitle = origTitle;
+      resolve(false);
+    };
+
+    // Override dismissConfirm temporarily
+    // Note: keys.mjs calls dismissConfirm() directly, so we need to
+    // intercept the state change. We'll use a proxy pattern.
+    const checkDismissed = () => {
+      if (appState.confirmAction === null && !resolved) {
+        resolved = true;
+        resolve(false);
+      }
+    };
+
+    let resolved = false;
+
+    // Poll for dismissal (simple approach)
+    const interval = setInterval(() => {
+      if (resolved) {
+        clearInterval(interval);
+        return;
+      }
+      if (appState.confirmAction === null) {
+        resolved = true;
+        clearInterval(interval);
+        resolve(false);
+      }
+    }, 50);
+
+    render();
+  });
 }
 
 // Recently viewed repos — used for breadcrumbs and quick re-open.
