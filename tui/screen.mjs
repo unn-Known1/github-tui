@@ -261,8 +261,10 @@ export class Screen {
     this.height = 24;
     this.charBuf = [];
     this.styleBuf = [];
+    this.linkBuf = [];
     this.prevChar = [];
     this.prevStyle = [];
+    this.prevLink = [];
     this._viewport = null;
     this._init();
   }
@@ -271,13 +273,16 @@ export class Screen {
     this._viewport = null;
     this.charBuf = [];
     this.styleBuf = [];
+    this.linkBuf = [];
     for (let y = 0; y < this.height; y++) {
       this.charBuf.push(new Array(this.width).fill(' '));
       this.styleBuf.push(new Array(this.width).fill(null));
+      this.linkBuf.push(new Array(this.width).fill(null));
     }
     // Start with prev buffers marked as different so first render draws everything.
     this.prevChar = this.charBuf.map(r => r.map(() => '\x00'));
     this.prevStyle = this.styleBuf.map(r => r.map(() => null));
+    this.prevLink = this.linkBuf.map(r => r.map(() => null));
   }
 
   updateSize() {
@@ -322,6 +327,7 @@ export class Screen {
       for (let x = 0; x < this.width; x++) {
         this.charBuf[y][x] = ' ';
         this.styleBuf[y][x] = null;
+        this.linkBuf[y][x] = null;
       }
     }
   }
@@ -357,15 +363,46 @@ export class Screen {
       if (w === 2 && cx + 1 >= this.width) break;
       this.charBuf[y][cx] = chars.slice(i, i + units).join('');
       this.styleBuf[y][cx] = style;
+      this.linkBuf[y][cx] = null;
       // For wide characters, fill the next cell with a continuation marker
       if (w === 2) {
         // U9b: plain space under --accessible so screen-reader/copy buffers
         // don't collect invisible ZWSP bytes; ZWSP otherwise.
         this.charBuf[y][cx + 1] = isAccessible() ? ' ' : '\u200B'; // zero-width space as filler
         this.styleBuf[y][cx + 1] = style;
+        this.linkBuf[y][cx + 1] = null;
       }
       cx += w;
       i += units - 1; // skip a consumed variation selector
+    }
+  }
+
+  // Write display text that opens `url` when the terminal handles the click
+  // natively (Cmd/Ctrl+click, mouse reporting off). Emitted as an OSC 8
+  // hyperlink: the visible cells show `display` (often truncated to fit),
+  // but the terminal opens the COMPLETE `url`. Terminals without OSC 8
+  // support ignore the sequence and just show the text, so this degrades
+  // gracefully. In-app plain clicks are still handled via mouse bounds.
+  writeLink(x, y, display, url, style = null) {
+    y = this.mapViewportY(y);
+    if (y < 0 || y >= this.height) return;
+    const chars = Array.from(display ?? '');
+    let cx = x;
+    for (let i = 0; i < chars.length; i++) {
+      const { width: w, units } = charCellWidth(chars, i);
+      if (w === 0) continue;
+      if (cx < 0 || cx >= this.width) break;
+      if (w === 2 && cx + 1 >= this.width) break;
+      this.charBuf[y][cx] = chars.slice(i, i + units).join('');
+      this.styleBuf[y][cx] = style;
+      this.linkBuf[y][cx] = url || null;
+      if (w === 2) {
+        this.charBuf[y][cx + 1] = isAccessible() ? ' ' : '\u200B';
+        this.styleBuf[y][cx + 1] = style;
+        this.linkBuf[y][cx + 1] = url || null;
+      }
+      cx += w;
+      i += units - 1;
     }
   }
 
@@ -382,8 +419,10 @@ export class Screen {
       if (cx < 0 || cx >= this.width) break;
       if (w === 2 && cx + 1 >= this.width) break;
       this.charBuf[y][cx] = chars.slice(i, i + units).join('');
+      this.linkBuf[y][cx] = null;
       if (w === 2) {
-        this.charBuf[y][cx + 1] = isAccessible() ? ' ' : '\u200B';
+        this.charBuf[y][cx + 1] = isAccessible() ? ' ' : '\\u200B';
+        this.linkBuf[y][cx + 1] = null;
       }
       cx += w;
       i += units - 1;
@@ -395,6 +434,7 @@ export class Screen {
     if (y < 0 || y >= this.height || x < 0 || x >= this.width) return;
     this.charBuf[y][x] = ch;
     this.styleBuf[y][x] = style;
+    this.linkBuf[y][x] = null;
   }
 
   fillRow(y, ch, style = null) {
@@ -403,6 +443,7 @@ export class Screen {
     for (let x = 0; x < this.width; x++) {
       this.charBuf[y][x] = ch;
       this.styleBuf[y][x] = style;
+      this.linkBuf[y][x] = null;
     }
   }
 
@@ -413,6 +454,7 @@ export class Screen {
         if (xx < 0 || xx >= this.width) continue;
         this.charBuf[yy][xx] = ch;
         this.styleBuf[yy][xx] = style;
+        this.linkBuf[yy][xx] = null;
       }
     }
   }
@@ -553,20 +595,30 @@ export class Screen {
   render() {
     const out = [];
     let curCompiled = null;
+    let curLink = null;
+    const LINK_CLOSE = `${ESC}]8;;${ESC}\\`;
 
     for (let y = 0; y < this.height; y++) {
       for (let x = 0; x < this.width; x++) {
         const ch = this.charBuf[y][x];
         const st = this.styleBuf[y][x];
+        const link = this.linkBuf[y][x];
         const pCh = this.prevChar[y] ? this.prevChar[y][x] : undefined;
         const pSt = this.prevStyle[y] ? this.prevStyle[y][x] : undefined;
+        const pLink = this.prevLink[y] ? this.prevLink[y][x] : undefined;
         // Renderers commonly create fresh style objects on every pass. Compare
         // the compiled ANSI representation rather than object identity so an
         // unchanged styled cell is genuinely skipped.
         const compiled = FORCE_COLOR === false ? null : compileStyle(st);
         const previousCompiled = FORCE_COLOR === false ? null : compileStyle(pSt);
 
-        if (ch === pCh && compiled === previousCompiled) continue;
+        if (ch === pCh && compiled === previousCompiled && link === pLink) {
+          // Skipped: the terminal already shows exactly this cell, so sync
+          // the link tracker without emitting (otherwise a later changed
+          // cell could miss its close/open or emit a redundant one).
+          curLink = link;
+          continue;
+        }
 
         out.push(`${ESC}[${y + 1};${x + 1}H`);
         if (compiled !== curCompiled) {
@@ -574,11 +626,20 @@ export class Screen {
           if (compiled) out.push(compiled);
           curCompiled = compiled;
         }
+        // OSC 8 hyperlink: terminals with support open `link` on native
+        // click even though the visible text may be truncated; terminals
+        // without support ignore the sequence and show plain text.
+        if (link !== curLink) {
+          if (curLink) out.push(LINK_CLOSE);
+          if (link) out.push(`${ESC}]8;;${link}${ESC}\\`);
+          curLink = link;
+        }
 
         out.push(ch);
       }
     }
 
+    if (curLink) { out.push(LINK_CLOSE); curLink = null; }
     if (curCompiled) out.push(RESET);
 
     if (out.length > 0) {
@@ -592,15 +653,19 @@ export class Screen {
     // Swap buffers instead of copying — zero allocation after warm-up.
     const tmpChar = this.prevChar;
     const tmpStyle = this.prevStyle;
+    const tmpLink = this.prevLink;
     this.prevChar = this.charBuf;
     this.prevStyle = this.styleBuf;
+    this.prevLink = this.linkBuf;
     this.charBuf = tmpChar;
     this.styleBuf = tmpStyle;
+    this.linkBuf = tmpLink;
     // Clear the new buffer (was prev buffer).
     for (let y = 0; y < this.height; y++) {
       for (let x = 0; x < this.width; x++) {
         this.charBuf[y][x] = ' ';
         this.styleBuf[y][x] = null;
+        this.linkBuf[y][x] = null;
       }
     }
   }

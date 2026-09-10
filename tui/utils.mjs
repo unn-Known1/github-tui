@@ -304,8 +304,16 @@ export async function openUrl(url) {
         resolve(result);
       };
       child.once('error', (error) => finish({ ok: false, error: error.message }));
-      child.once('close', (code) => finish(code === 0 || code == null
-        ? { ok: true } : { ok: false, error: 'Browser opener exited with code ' + code }));
+      child.once('close', (code) => {
+        if (code === 0 || code == null) { finish({ ok: true }); return; }
+        // xdg-open exit 3 = "no method available" (no browser / no DISPLAY
+        // in headless containers). Spell that out instead of a bare code.
+        if (code === 3 && platform !== 'darwin' && platform !== 'win32') {
+          finish({ ok: false, error: 'no browser found (xdg-open exit 3)' });
+          return;
+        }
+        finish({ ok: false, error: 'Browser opener exited with code ' + code });
+      });
       child.unref();
     });
   } catch (e) {

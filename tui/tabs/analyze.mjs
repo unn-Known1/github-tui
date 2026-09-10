@@ -344,16 +344,55 @@ export async function loadRepoDetails(owner, name) {
 
 
 // Normalize a repo homepage value into a complete, openable URL.
-// GitHub allows any string here (`example.com`, `www.example.com/docs`,
-// `http://...`), but openUrl / browsers need a scheme. Trims whitespace
-// and prepends `https://` when no `<scheme>://` prefix is present.
+// GitHub allows any string here (`example.com`, `//host/path`,
+// `mailto:foo@bar.com`, `http://...` with trailing punctuation or spaces),
+// but openUrl / browsers need a clean URL. Trims whitespace/control chars,
+// strips copy-paste trailing punctuation, keeps ANY existing scheme
+// (`xxx:...` — not just `xxx://` so mailto:/tel: aren't mangled into
+// `https://mailto:...` which xdg-open has no method for → exit 3),
+// prepends `https://` otherwise, and percent-encodes unsafe chars (spaces).
 // Returns null for empty / non-string values. Exported for tests.
 export function normalizeHomepageUrl(value) {
   if (typeof value !== 'string') return null;
-  const trimmed = value.trim();
+  let trimmed = value.trim().replace(/[\u0000-\u001F\u007F]+/g, '');
   if (!trimmed) return null;
-  if (/^[a-zA-Z][a-zA-Z0-9+.-]*:\/\//.test(trimmed)) return trimmed;
-  return 'https://' + trimmed;
+  // Unwrap surrounding pairs first: "(url)", "[url]", '"url"', "'url'".
+  // Must run before the trailing-punctuation strip so a balanced wrapper
+  // is removed as a unit instead of leaving a leading "(" behind (which
+  // would then fail the scheme test and gain a bogus "https://" prefix).
+  for (;;) {
+    if (trimmed.length >= 2) {
+      const first = trimmed[0], last = trimmed[trimmed.length - 1];
+      if ((first === '(' && last === ')') || (first === '[' && last === ']') ||
+          (first === '"' && last === '"') || (first === "'" && last === "'")) {
+        trimmed = trimmed.slice(1, -1).trim();
+        continue;
+      }
+    }
+    break;
+  }
+  if (!trimmed) return null;
+  // Strip copy-pasted trailing punctuation: "see https://ex.com.", ".../x,"
+  trimmed = trimmed.replace(/[.,;!?'"\u2019]+$/, '');
+  // Strip unbalanced trailing ) or ] ("(https://ex.com/foo" paste fragment).
+  const extraParens = (trimmed.match(/\)/g) || []).length - (trimmed.match(/\(/g) || []).length;
+  if (extraParens > 0 && trimmed.endsWith(')')) trimmed = trimmed.slice(0, -extraParens).replace(/[.,;!?'"\u2019]+$/, '');
+  const extraBrackets = (trimmed.match(/\]/g) || []).length - (trimmed.match(/\[/g) || []).length;
+  if (extraBrackets > 0 && trimmed.endsWith(']')) trimmed = trimmed.slice(0, -extraBrackets).replace(/[.,;!?'"\u2019]+$/, '');
+  if (!trimmed) return null;
+  // Strip unbalanced LEADING wrappers ("(https://ex.com/foo" fragment).
+  let openP = (trimmed.match(/\(/g) || []).length, closeP = (trimmed.match(/\)/g) || []).length;
+  while (openP > closeP && trimmed.startsWith('(')) { trimmed = trimmed.slice(1); openP--; }
+  let openB = (trimmed.match(/\[/g) || []).length, closeB = (trimmed.match(/\]/g) || []).length;
+  while (openB > closeB && trimmed.startsWith('[')) { trimmed = trimmed.slice(1); openB--; }
+  if (!trimmed) return null;
+  // Protocol-relative: //example.com/x → https://example.com/x
+  if (trimmed.startsWith('//')) trimmed = 'https:' + trimmed;
+  // Any existing scheme (http:, https:, ftp:, mailto:, tel:, ...) → keep.
+  // Old code required "://" and rewrote "mailto:foo" to "https://mailto:foo",
+  // which xdg-open cannot open (exit 3) while repo html_urls always worked.
+  else if (!/^[a-zA-Z][a-zA-Z0-9+.-]*:/.test(trimmed)) trimmed = 'https://' + trimmed;
+  try { return encodeURI(trimmed); } catch { return trimmed; }
 }
 
 function renderRepoDetails(screen, y, maxH) {
@@ -508,12 +547,17 @@ function renderRepoDetails(screen, y, maxH) {
   if (repo.homepage) {
     if (ly < leftEnd) {
       screen.writeStr(2, ly, 'Homepage:', { dim: true });
-      // Display may be truncated to fit the column, but the click target
+      // Display may be truncated to fit the column, but every click path
       // must open the COMPLETE normalized URL (with scheme), not the
-      // visible truncated text. Bounds are stored for mouse.mjs.
+      // visible truncated text:
+      // - writeLink emits an OSC 8 hyperlink so terminal-native clicks
+      //   (Cmd/Ctrl+click, mouse reporting off) open the full URL even
+      //   though only the truncated text is visible.
+      // - bounds are stored for mouse.mjs so in-app plain clicks do the same.
       const fullHomepage = normalizeHomepageUrl(repo.homepage);
       const shownHomepage = truncateToWidth(String(repo.homepage).trim(), valW);
-      screen.writeStr(valX, ly, shownHomepage, color('accent'));
+      if (fullHomepage) screen.writeLink(valX, ly, shownHomepage, fullHomepage, color('accent'));
+      else screen.writeStr(valX, ly, shownHomepage, color('accent'));
       if (fullHomepage) {
         appState._overviewHomepageBounds = {
           y: ly, x1: valX, x2: valX + displayWidth(shownHomepage), url: fullHomepage,
@@ -541,7 +585,10 @@ function renderRepoDetails(screen, y, maxH) {
     screen.writeStr(2, ly, 'URL:', { dim: true });
     const repoUrl = String(repo.html_url || '').trim();
     const shownUrl = truncateToWidth(repoUrl, Math.max(8, W - valX - 2));
-    screen.writeStr(valX, ly, shownUrl, color('accent'));
+    // Same OSC 8 treatment as Homepage so terminal-native clicks always
+    // open the complete URL even on narrow terminals where it truncates.
+    if (repoUrl) screen.writeLink(valX, ly, shownUrl, repoUrl, color('accent'));
+    else screen.writeStr(valX, ly, shownUrl, color('accent'));
     if (repoUrl) {
       appState._overviewRepoUrlBounds = {
         y: ly, x1: valX, x2: valX + displayWidth(shownUrl), url: repoUrl,

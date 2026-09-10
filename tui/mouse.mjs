@@ -1264,7 +1264,16 @@ function dispatchAnalyzeClick(sx, sy) {
       if (sy === b.y && sx >= b.x1 && sx < b.x2 && b.url) {
         openUrl(b.url).then((r) => {
           if (r.ok) showMessage('Opened ' + b.url, 'success');
-          else showMessage(r.error || 'Open failed', 'error');
+          else {
+            // Headless / no-browser environments (xdg-open exit 3) would
+            // otherwise show only a cryptic code. Fall back to copying the
+            // COMPLETE url so the user still gets something usable.
+            const copied = copyToClipboard(b.url);
+            showMessage(
+              'No browser (' + (r.error || 'open failed') + ') — URL ' + (copied ? 'copied: ' : '') + b.url,
+              'error', 8000,
+            );
+          }
         });
         return;
       }
