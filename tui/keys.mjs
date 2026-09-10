@@ -304,15 +304,38 @@ export function handleKey(key) {
     if (handleDialogKey(key)) return;
   }
 
-  // 0a1. Which-Key handles keys when active
-  if (whichKey.isOpen()) {
-    if (whichKey.handleKey(key)) return;
-  }
+  // 0a1/0a2. Which-Key only applies in base navigation mode. Text-entry
+  // and modal overlays (input modal, palette, select, help search,
+  // confirms, detail popup, onboarding, dialog stack, etc.) own their
+  // keystrokes — letting a prefix like 'c'/'g'/'r' start a sequence there
+  // would swallow the typed character (e.g. typing 'c' in the Explore
+  // search box opened Which-Key instead of inserting 'c').
+  const _inTextEntry = appState.inputMode === 'input'
+    || appState.showPalette
+    || appState._activeSelect
+    || appState._quickSettingsOpen
+    || appState.showHelp
+    || appState.showBookmarks
+    || appState.confirmAction
+    || appState.showDetail
+    || appState.showOnboarding
+    || appState.showWelcome
+    || getDialogStack().length > 0;
+  if (_inTextEntry) {
+    // Never trap keystrokes in text entry; also dismiss a stale Which-Key
+    // overlay so it can't linger on top of the input prompt.
+    if (whichKey.isOpen()) whichKey.close();
+  } else {
+    // 0a1. Which-Key handles keys when active
+    if (whichKey.isOpen()) {
+      if (whichKey.handleKey(key)) return;
+    }
 
-  // 0a2. Check for prefix keys to start which-key sequence
-  if (!whichKey.isOpen() && whichKey.isPrefixKey(key)) {
-    whichKey.startSequence(key);
-    return;
+    // 0a2. Check for prefix keys to start which-key sequence
+    if (!whichKey.isOpen() && whichKey.isPrefixKey(key)) {
+      whichKey.startSequence(key);
+      return;
+    }
   }
 
   // 0b. Esc dismisses ANY open overlay — prevents stuck modal states.
