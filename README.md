@@ -2,7 +2,7 @@
 
 A fast, zero-dependency terminal user interface for GitHub — six tabs, a command palette, an in-terminal file explorer that can clone or save anything to your CWD, an inbox triage workflow, themes, persistent bookmarks & pins, OSC-52 clipboard, ETag-aware caching, mouse support, collapsible sections, and comprehensive repo analytics. All driven by your keyboard (and mouse).
 
-![status](https://img.shields.io/badge/status-active-success) ![node](https://img.shields.io/badge/node-%E2%89%A518-blue) ![deps](https://img.shields.io/badge/deps-0-green) [![Socket Badge](https://badge.socket.dev/npm/package/github-tui/0.7.2)](https://badge.socket.dev/npm/package/github-tui/0.7.2) ![license](https://img.shields.io/badge/license-MIT-blue)
+![status](https://img.shields.io/badge/status-active-success) ![node](https://img.shields.io/badge/node-%E2%89%A518-blue) ![deps](https://img.shields.io/badge/deps-0-green) [![Socket Badge](https://badge.socket.dev/npm/package/github-tui/0.7.4)](https://badge.socket.dev/npm/package/github-tui/0.7.4) ![license](https://img.shields.io/badge/license-MIT-blue)
 
 ![GitHub TUI Screenshot](https://raw.githubusercontent.com/unn-Known1/github-tui/main/Screenshot.png)
 
@@ -34,7 +34,7 @@ A fast, zero-dependency terminal user interface for GitHub — six tabs, a comma
 - 🖥️ **Diff-based renderer** — only changed cells are redrawn; resizes adaptively.
 - 📝 **Issue/PR detail popup** — `Enter` on an issue or PR opens a full detail view with rendered body, labels, comments tab, **reviews tab**, and PR files tab. Comment (`c`), react (`r`), close/reopen (`x`), merge PR (`M`) — all from the TUI.
 - 🔀 **PR diff viewer** — Files tab in the detail popup shows changed files with `+/-` stats. Select a file to view its unified diff with syntax-colored additions/deletions.
-- 🖱️ **Mouse support** — click tabs, pane tabs, list items; scroll wheel navigation; hover effects with row highlighting on all list views.
+- 🖱️ **Mouse support** — click tabs, pane tabs, list items; scroll wheel navigation; hover effects with row highlighting on all list views. Repo overview homepage/URL rows open the complete link (OSC 8 hyperlink + click), never the truncated display text.
 - 📂 **Collapsible sections** — `z` toggle, `Z` collapse all, `X` expand all. State persisted to disk (`~/.github-tui/collapsed.json`).
 - 📈 **Rate limit visual bar** — real-time `█░` indicator in the header showing API quota usage.
 - 🎯 **Context-aware help** — `?` shows current tab's shortcuts first.
@@ -251,7 +251,7 @@ The app is split into focused zero-dependency modules. Adding a new tab is: crea
 │   ├── theme.test.mjs
 │   └── keychain.test.mjs
 └── tui/
-    ├── screen.mjs                   # Diff-based terminal renderer + buffer swap + FORCE_COLOR + CJK support
+    ├── screen.mjs                   # Diff-based terminal renderer + buffer swap + FORCE_COLOR + CJK + OSC 8 hyperlink support
     ├── github.mjs                   # HTTPS client + ETag cache + 60+ endpoints + streaming downloader
     ├── config.mjs                   # Constants + token I/O (delegates to keychain.mjs) + JSON store helpers
     ├── keychain.mjs                 # OS keychain abstraction (macOS / Linux / Windows, zero deps)
@@ -344,7 +344,7 @@ Every tab module exports `render(screen, y, h)`, an optional `keys` map for tab-
 - **Actions:** Refresh Dashboard, Refresh User Data (`r` refreshes both), Auto-Refresh (interval persists across restarts), **Change Theme**, Clear Token File, Token display.
 - **Integrations:** Enterprise host, profiles list/switch, organizations, config export/import.
 - **Data management:** Clear Local Data (bookmarks/pins/searches/filters/sections/cache) with per-store counts in the System panel.
-- **System panel:** app version (`0.7.2`), config dir, token file path, Node version, platform/arch, terminal size, **API remaining / limit / reset-in minutes**, **token scopes**, active keychain backend.
+- **System panel:** app version (`0.7.4`), config dir, token file path, Node version, platform/arch, terminal size, **API remaining / limit / reset-in minutes**, **token scopes**, active keychain backend.
 
 ### 6 · Inbox
 - Per-row: ▶ selection, ● yellow unread dot, color-coded subject type (PR/cyan, Issue/yellow, Release/green, Discussion/magenta, Commit/blue, CheckSuite/red), repo·title, reason, relative time.
@@ -427,6 +427,10 @@ Every tab module exports `render(screen, y, h)`, an optional `keys` map for tab-
 - **Settings + Inbox** — danger-row mouse routing fixed, disabled-row guards, INTEGRATIONS menu rows (Enterprise/profiles/export/import), store counts + Clear Local Data, persisted auto-refresh; Inbox viewport math unified, mark-group-read, durable snooze + `Z` unsnooze, visible-scoped mark-all, reason labels, memoized filter pipeline.
 - **Repos + Actions** — `repos.load-more` palette action, append-model paging, isolated starred async scope, ordered background prefetch, `activeRepo()` snapshot so filter-then-act can't hit the wrong repo, rerun confirm, preserved expansion across refreshes, bounded progressive workflow scan, honest failure-queue coverage.
 - **329 / 329 tests pass** with import and syntax checks clean.
+
+**Shipped in v0.7.4:**
+- **Explore overview links open the complete URL** — homepage/repo-URL rows render truncated but carry the full URL as an OSC 8 hyperlink (terminal-native Cmd/Ctrl+click works) plus in-app click bounds; homepage values are normalized (scheme prepended, `mailto:`/`tel:` preserved, spaces encoded, paste-junk stripped); no-browser environments copy the URL and name it instead of a bare exit code.
+- **396 / 396 tests pass** with import and syntax checks clean.
 
 **Shipped in v0.6.7:**
 - **Audit hardening** — fixed lifecycle cleanup, upgrade-note gating, account-safe logout/reset, token-partitioned ETag caching, secure streamed downloads, stale-request cancellation, filtered Inbox actions, Settings navigation, starred pagination, and Unicode input cursor handling.

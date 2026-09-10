@@ -2,7 +2,7 @@
 
 > *The fastest way to live in GitHub without a browser tab — discovery, triage, review, and CI in one terminal.*
 
-**Current version:** v0.7.2
+**Current version:** v0.7.4
 
 ---
 
@@ -20,7 +20,7 @@
 
 ---
 
-## 📊 What's Built (v0.1 → v0.7.2)
+## 📊 What's Built (v0.1 → v0.7.4)
 
 | Feature | Status |
 |---|---|
@@ -49,6 +49,8 @@
 | **Zero dependencies** — just `node app.mjs` | ✅ |
 | **269 tests** — Node built-in test runner, zero deps | ✅ |
 | **329 tests** — Node built-in test runner, zero deps (v0.7.2) | ✅ |
+| **396 tests** — Node built-in test runner, zero deps (v0.7.4) | ✅ |
+| **OSC 8 hyperlinks** — truncated URLs display short but open complete (v0.7.4) | ✅ |
 | **Graceful shutdown** — atomic handlers, raw mode restore, crash logging | ✅ |
 | **Cross-platform rendering** — ASCII box fallback, FORCE_COLOR/NO_COLOR | ✅ |
 | **Input cursor movement** — arrow keys, Home/End, Ctrl-A/E/U/W | ✅ |

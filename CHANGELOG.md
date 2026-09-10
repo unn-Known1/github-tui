@@ -2,6 +2,16 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.7.4] - 2026-09-10
+
+### Fixed
+- Repo overview homepage/URL rows now open the complete link instead of the truncated display text. The visible text still truncates to fit the column, but every click path carries the full URL: an OSC 8 hyperlink for terminal-native clicks (Cmd/Ctrl+click, mouse reporting off) and stored click bounds for in-app plain clicks.
+- Homepage normalization hardened: prepends `https://` when scheme-less, preserves non-HTTP schemes (`mailto:`, `tel:`) instead of mangling them into `https://mailto:...`, handles protocol-relative URLs, percent-encodes spaces, and strips copy-pasted wrappers/trailing punctuation.
+- No-browser environments (xdg-open exit 3) now report `no browser found` and copy the complete URL to the clipboard instead of showing a bare exit code.
+
+### Verification
+- Full suite 396 / 396 pass with import and syntax checks clean.
+
 ## [0.7.2] - 2026-09-04
 
 ### Fixed
