@@ -199,6 +199,8 @@ export function resetDetailState() {
   appState.fileBlameMode = false;
   appState.filesBranchPicker = false;
   appState.filesBranchCursor = 0;
+  appState._overviewHomepageBounds = null;
+  appState._overviewRepoUrlBounds = null;
   // Per-pane filter stamps (E4): kept in sync with the global filter when no
   // data is loaded; defaults live in state.mjs.
   appState.repoIssuesFilter = appState.issueStateFilter;
@@ -341,12 +343,27 @@ export async function loadRepoDetails(owner, name) {
 }
 
 
+// Normalize a repo homepage value into a complete, openable URL.
+// GitHub allows any string here (`example.com`, `www.example.com/docs`,
+// `http://...`), but openUrl / browsers need a scheme. Trims whitespace
+// and prepends `https://` when no `<scheme>://` prefix is present.
+// Returns null for empty / non-string values. Exported for tests.
+export function normalizeHomepageUrl(value) {
+  if (typeof value !== 'string') return null;
+  const trimmed = value.trim();
+  if (!trimmed) return null;
+  if (/^[a-zA-Z][a-zA-Z0-9+.-]*:\/\//.test(trimmed)) return trimmed;
+  return 'https://' + trimmed;
+}
+
 function renderRepoDetails(screen, y, maxH) {
   const W = screen.width;
   const repo = appState.repoDetails;
   if (!repo) return;
   appState._overviewAssetBounds = null;
   appState._exploreStarBounds = null;
+  appState._overviewHomepageBounds = null;
+  appState._overviewRepoUrlBounds = null;
 
   // Repo name + status badges (visibility / fork / archived / template).
   // Badges stop before the right-aligned health + star button.
@@ -491,7 +508,17 @@ function renderRepoDetails(screen, y, maxH) {
   if (repo.homepage) {
     if (ly < leftEnd) {
       screen.writeStr(2, ly, 'Homepage:', { dim: true });
-      screen.writeStr(valX, ly, truncate(String(repo.homepage), valW), color('accent'));
+      // Display may be truncated to fit the column, but the click target
+      // must open the COMPLETE normalized URL (with scheme), not the
+      // visible truncated text. Bounds are stored for mouse.mjs.
+      const fullHomepage = normalizeHomepageUrl(repo.homepage);
+      const shownHomepage = truncateToWidth(String(repo.homepage).trim(), valW);
+      screen.writeStr(valX, ly, shownHomepage, color('accent'));
+      if (fullHomepage) {
+        appState._overviewHomepageBounds = {
+          y: ly, x1: valX, x2: valX + displayWidth(shownHomepage), url: fullHomepage,
+        };
+      }
       ly++;
     }
   }
@@ -512,7 +539,14 @@ function renderRepoDetails(screen, y, maxH) {
   writeDetailRow('Pushed:', dateWithRel(repo.pushed_at));
   if (ly < leftEnd) {
     screen.writeStr(2, ly, 'URL:', { dim: true });
-    screen.writeStr(valX, ly, truncate(String(repo.html_url || ''), Math.max(8, W - valX - 2)), color('accent'));
+    const repoUrl = String(repo.html_url || '').trim();
+    const shownUrl = truncateToWidth(repoUrl, Math.max(8, W - valX - 2));
+    screen.writeStr(valX, ly, shownUrl, color('accent'));
+    if (repoUrl) {
+      appState._overviewRepoUrlBounds = {
+        y: ly, x1: valX, x2: valX + displayWidth(shownUrl), url: repoUrl,
+      };
+    }
     ly++;
   }
   const leftUsedEnd = ly;

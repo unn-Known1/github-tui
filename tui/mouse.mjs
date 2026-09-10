@@ -1255,8 +1255,20 @@ function dispatchAnalyzeClick(sx, sy) {
     return;
   }
 
-  // ── Detail view: overview pane (click on release assets) ──
-  if (appState.detailsPane === 'overview') {
+  // ── Detail view: overview pane (click on homepage / repo URL / release assets) ──
+  if (appState.analyzeView === 'details' && appState.detailsPane === 'overview') {
+    // Homepage and repo URL rows render truncated to fit the column, but
+    // must open the COMPLETE stored URL — never the visible truncated text.
+    const linkBounds = [appState._overviewHomepageBounds, appState._overviewRepoUrlBounds].filter(Boolean);
+    for (const b of linkBounds) {
+      if (sy === b.y && sx >= b.x1 && sx < b.x2 && b.url) {
+        openUrl(b.url).then((r) => {
+          if (r.ok) showMessage('Opened ' + b.url, 'success');
+          else showMessage(r.error || 'Open failed', 'error');
+        });
+        return;
+      }
+    }
     const assetBounds = appState._overviewAssetBounds;
     if (assetBounds) {
       for (const b of assetBounds) {
