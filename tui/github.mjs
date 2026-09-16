@@ -389,9 +389,13 @@ export function request(path, opts) {
   return new Promise((resolve, reject) => {
     let settled = false;
     let req;
+    const signal = o.signal;
+    let abortHandler;
+    const cleanup = () => { if (signal && abortHandler) signal.removeEventListener('abort', abortHandler); };
     const timer = setTimeout(() => {
       if (settled) return;
       settled = true;
+      cleanup();
       try { if (req) req.destroy(); } catch (e) {}
       // A slow endpoint is not proof that the whole connection is offline.
       // Prefer this request's cached response, if any, while preserving its
@@ -417,19 +421,19 @@ export function request(path, opts) {
     // Honor an external AbortSignal — when fired, kill the socket immediately
     // and reject so the caller's rate-limit budget isn't consumed by a no-op
     // wait for the response.
-    const signal = o.signal;
     if (signal) {
       if (signal.aborted) {
         clearTimeout(timer);
         return reject(new Error('Aborted'));
       }
-      signal.addEventListener('abort', () => {
+      abortHandler = () => {
         if (settled) return;
         settled = true;
         clearTimeout(timer);
         try { if (req) req.destroy(); } catch (e) {}
         reject(new Error('Aborted'));
-      }, { once: true });
+      };
+      signal.addEventListener('abort', abortHandler, { once: true });
     }
 
     req = https.request(options, (res) => {
@@ -477,6 +481,7 @@ export function request(path, opts) {
       res.on('end', () => {
         if (settled) return;
         settled = true;
+        cleanup();
         clearTimeout(timer);
 
         if (res.statusCode === 304) {
@@ -540,6 +545,7 @@ export function request(path, opts) {
     req.on('error', (err) => {
       if (settled) return;
       settled = true;
+      cleanup();
       clearTimeout(timer);
       // Network error → mark offline.
       offlineState.isOffline = true;
@@ -558,6 +564,7 @@ export function request(path, opts) {
     req.on('close', () => {
       if (settled) return;
       settled = true;
+      cleanup();
       clearTimeout(timer);
       reject(new Error('Connection closed'));
     });
@@ -812,7 +819,9 @@ export function fetchTextUrl(url, token, signal, maxBytes = 2_000_000) {
     try { current = new URL(url); } catch { return reject(new Error('Invalid log URL')); }
     if (current.protocol !== 'https:') return reject(new Error('Log URL must use HTTPS'));
     let settled = false;
-    const finish = (fn, value) => { if (settled) return; settled = true; fn(value); };
+    let abortHandler;
+    const cleanup = () => { if (signal && abortHandler) signal.removeEventListener('abort', abortHandler); };
+    const finish = (fn, value) => { if (settled) return; settled = true; cleanup(); fn(value); };
     const get = (u, redirectsLeft) => {
       if (signal?.aborted) return finish(reject, new Error('Aborted'));
       const headers = { 'User-Agent': USER_AGENT };
@@ -824,6 +833,7 @@ export function fetchTextUrl(url, token, signal, maxBytes = 2_000_000) {
           try { next = new URL(res.headers.location, u); } catch { res.resume(); return finish(reject, new Error('Invalid log redirect')); }
           if (next.protocol !== 'https:') { res.resume(); return finish(reject, new Error('Log redirect must use HTTPS')); }
           res.resume();
+          cleanup();
           return get(next, redirectsLeft - 1);
         }
         if (res.statusCode !== 200) { res.resume(); return finish(reject, new GitHubApiError('Workflow log HTTP ' + res.statusCode, res.statusCode, u.pathname)); }
@@ -839,7 +849,8 @@ export function fetchTextUrl(url, token, signal, maxBytes = 2_000_000) {
         res.on('error', e => finish(reject, e));
       });
       req.on('error', e => finish(reject, e));
-      signal?.addEventListener('abort', () => { try { req.destroy(); } catch {} finish(reject, new Error('Aborted')); }, { once: true });
+      abortHandler = () => { try { req.destroy(); } catch {} finish(reject, new Error('Aborted')); };
+      signal?.addEventListener('abort', abortHandler, { once: true });
     };
     get(current, 5);
   });

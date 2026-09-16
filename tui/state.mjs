@@ -27,6 +27,8 @@ export function render() {
 // scope still exists as a fallback if anyone forgets the argument, but new
 // code should never rely on it.
 
+import { setMaxListeners } from 'node:events';
+
 const asyncGenerations = { _global: 0 };
 const asyncControllers = {};  // { [scope]: AbortController }
 let _accountEpoch = 0;
@@ -261,6 +263,7 @@ export function startAsync(scope) {
     try { prev.abort(); } catch { /* ignore */ }
   }
   const ctl = new AbortController();
+  setMaxListeners(20, ctl.signal);
   asyncControllers[scope] = ctl;
   return {
     gen: _bumpScope(scope), controller: ctl, signal: ctl.signal, scope,

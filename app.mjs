@@ -16,7 +16,6 @@ import { loadToken } from './tui/config.mjs';
 import { loadTheme, setAccessible } from './tui/theme.mjs';
 import { initScreen, render } from './tui/render.mjs';
 import { handleKey, registerCoreActions } from './tui/keys.mjs';
-import { registerInputHandler } from './tui/input.mjs';
 import { loadUserData } from './tui/tabs/repos.mjs';
 import { loadBookmarks, loadSavedSearches, loadPins, loadInboxFilters, loadRepoPrefs, saveRepoPrefs } from './tui/store.mjs';
 import { getRateLimit, resyncRateLimit, resetRateLimit, getUserRepositories, getNotifications, getWorkflowRuns } from './tui/github.mjs';
@@ -224,12 +223,6 @@ async function main() {
   process.stdout.write('\x1b[?25l');
   if (!process.argv.includes('--no-mouse')) enableMouse();
   enableBracketedPaste();
-
-  // wire the issue-create input modal contexts. Without this, pressing
-  // Enter on the title/body modal does nothing.
-  const issueCreate = await import('./tui/tabs/issue-create.mjs');
-  registerInputHandler('create-issue-title', (s) => issueCreate.submitTitle(s));
-  registerInputHandler('create-issue-body',  (s) => issueCreate.submitBody(s));
 
   // Load persisted state.
   loadTheme();
