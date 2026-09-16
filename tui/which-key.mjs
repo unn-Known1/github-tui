@@ -34,12 +34,11 @@ const KEY_GROUPS = {
       { key: 'c', desc: 'Comment', run: () => null },
     ],
   },
-  'r': {
-    label: 'Refresh',
-    bindings: [
-      { key: 'r', desc: 'Refresh', run: () => 'r' },
-    ],
-  },
+  // NOTE: 'r' is intentionally NOT a prefix key. It is the global
+  // single-press "Refresh current view" hotkey (see keys.mjs `case 'r'`).
+  // Registering it here made the first press only open this overlay and
+  // the second press re-open it (handleKey returns false -> isPrefixKey
+  // re-triggers), so refresh never fired.
   'w': {
     label: 'Window',
     bindings: [

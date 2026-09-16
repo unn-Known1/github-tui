@@ -228,29 +228,73 @@ function toggleBookmark() {
   render();
 }
 
-function refreshCurrent() {
+export function refreshCurrent() {
   const t = tabState.current;
   if (t === 0) {
     appState.dashboardLoaded = false;
     dashboard.refreshDashboard();
     showMessage('Refreshing dashboard...', 'info');
   } else if (t === 1) {
-    repos.loadUserData();
-  } else if (t === 2 && appState.analyzeView === 'details' && appState.repoDetails) {
-    // Files sub-pane refreshes in place (tree or file) so `r` doesn't kick
-    // the user back to Overview and lose their place in the tree.
-    if (appState.detailsPane === 'files') {
-      import('./tabs/files.mjs').then(m => m.refreshFiles()).catch(e =>
+    showMessage('Refreshing repositories...', 'info');
+    repos.loadUserData().catch(e =>
+      showMessage('Refresh failed: ' + (e && e.message || 'unknown'), 'error'));
+  } else if (t === 2) {
+    // Details view with an open repo: files sub-pane refreshes in place
+    // (tree or file) so `r` doesn't kick the user back to Overview.
+    if (appState.analyzeView === 'details' && appState.repoDetails) {
+      if (appState.detailsPane === 'files') {
+        import('./tabs/files.mjs').then(m => m.refreshFiles()).catch(e =>
+          showMessage('Refresh failed: ' + (e && e.message || 'unknown'), 'error'));
+        return;
+      }
+      const [o, n] = appState.repoDetails.full_name.split('/');
+      showMessage('Refreshing ' + appState.repoDetails.full_name + '...', 'info');
+      analyze.loadRepoDetails(o, n).catch(e =>
         showMessage('Refresh failed: ' + (e && e.message || 'unknown'), 'error'));
       return;
     }
-    const [o, n] = appState.repoDetails.full_name.split('/');
-    analyze.loadRepoDetails(o, n);
+    // Forks sub-view: reload the forks list for the open repo.
+    if (appState.analyzeView === 'forks' && appState.repoDetails) {
+      showMessage('Refreshing forks...', 'info');
+      import('./tabs/forks.mjs').then(m => m.loadForks()).catch(e =>
+        showMessage('Refresh failed: ' + (e && e.message || 'unknown'), 'error'));
+      return;
+    }
+    // Search results: re-run the last search so `r` actually refreshes.
+    if (appState.analyzeView === 'results' && appState.searchQuery) {
+      const q = appState.searchQuery;
+      const type = appState.searchType || 'repos';
+      showMessage('Refreshing search...', 'info');
+      const p = type === 'users' ? analyze.submitUserSearch(q)
+        : type === 'code' ? analyze.submitCodeSearch(q)
+        : type === 'user-repos' && appState.selectedUser ? analyze.openUserRepos(appState.selectedUser)
+        : analyze.submitSearch(q);
+      Promise.resolve(p).catch(e =>
+        showMessage('Refresh failed: ' + (e && e.message || 'unknown'), 'error'));
+      return;
+    }
+    // Landing / search input / details without a repo: nothing to refetch.
+    // Render so the key never feels dead, and hint at what to do next.
+    if (appState.analyzeView === 'details' || appState.analyzeView === 'forks') {
+      showMessage('Open a repo on Explore first', 'warning');
+    } else {
+      showMessage('Nothing to refresh — run a search first', 'info');
+    }
+    render();
   } else if (t === 3) {
-    if (appState.actionsView === 'runs') actions.loadWorkflowRuns();
-    else actions.loadActionsRepos();
+    if (appState.actionsView === 'runs') {
+      showMessage('Refreshing workflow runs...', 'info');
+      actions.loadWorkflowRuns().catch(e =>
+        showMessage('Refresh failed: ' + (e && e.message || 'unknown'), 'error'));
+    } else {
+      showMessage('Refreshing workflows...', 'info');
+      actions.loadActionsRepos().catch(e =>
+        showMessage('Refresh failed: ' + (e && e.message || 'unknown'), 'error'));
+    }
   } else if (t === 4) {
-    inbox.loadNotifications();
+    showMessage('Refreshing notifications...', 'info');
+    inbox.loadNotifications().catch(e =>
+      showMessage('Refresh failed: ' + (e && e.message || 'unknown'), 'error'));
   } else if (t === 5) {
     settings.refreshAll();
   }
