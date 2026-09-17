@@ -191,8 +191,7 @@ function matchesQuery(s, q) {
 }
 
 export function render(screen) {
-  const W = screen.width;
-  const H = screen.height;
+  if (!screen || !(screen.width > 0) || !(screen.height > 0)) return;
   const q = (appState.helpQuery || '').trim();
 
   const backdropStyle = color('modalBackdrop');
@@ -318,14 +317,13 @@ export function setHelpQuery(q) {
   appState.helpCursor = 0;
 }
 export function scrollHelp(delta, screen) {
-  // Accept an optional `screen` so callers can clamp against the current
-  // terminal height rather than process.stdout.rows, which is stale between
-  // renders (and inaccurate inside tmux where rows != visible lines).
   const q = (appState.helpQuery || '').trim();
   const lines = getHelpLines(q);
-  const H = screen ? screen.height : (process.stdout.rows || 24);
-  const boxH = Math.min(H - 4, 28);
-  const maxLines = boxH - 4;
+  // Prefer the caller's screen; fall back to process.stdout.rows (stale between
+  // resize but the best we have without passing screen everywhere).
+  const rawH = (screen && screen.height > 0) ? screen.height : (process.stdout.rows || 24);
+  const boxH = Math.max(1, Math.min(rawH - 4, 28));
+  const maxLines = Math.max(1, boxH - 4);
   const totalLines = lines.length;
   const cur = appState.helpCursor || 0;
   const maxScroll = Math.max(0, totalLines - maxLines);
