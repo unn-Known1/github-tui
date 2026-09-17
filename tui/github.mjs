@@ -505,7 +505,7 @@ export function request(path, opts) {
           // if the retry fails for another reason, deleting first would
           // throw away a body the caller may still want on a later call.
           if (!o._retried304) {
-            resolve(request(path, { ...o, _retried304: true }))
+            Promise.resolve(request(path, { ...o, _retried304: true }))
               .catch(() => etagCache.delete(cacheKey)); // only drop it if the retry also fails
             return;
           }
