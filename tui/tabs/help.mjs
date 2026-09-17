@@ -192,6 +192,8 @@ function matchesQuery(s, q) {
 
 export function render(screen) {
   if (!screen || !(screen.width > 0) || !(screen.height > 0)) return;
+  const W = screen.width;
+  const H = screen.height;
   const q = (appState.helpQuery || '').trim();
 
   const backdropStyle = color('modalBackdrop');
