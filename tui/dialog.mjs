@@ -1,7 +1,7 @@
 // Unified Stack-Based Dialog Management System
 // Provides a centralized way to manage overlays/dialogs with stacking support.
 
-import { appState, render as appRender } from './state.mjs';
+import { appState, render as appRender, showMessage } from './state.mjs';
 import { saveFocus, restoreFocus } from './focus.mjs';
 
 // Dialog stack - each entry has: { id, render, handleKey, onClose, focusToken }
@@ -199,8 +199,24 @@ function resetLegacyState() {
 /**
  * Open the command palette.
  */
+// Reserve dialog ids synchronously while their module import is in flight.
+// Without this, two openPalette() calls in quick succession both pass the
+// isDialogOpen() guard (pushDialog happens only after the async import) and
+// push the same dialog twice.
+const _openingDialogs = new Set();
+
+function beginOpenDialog(id) {
+  if (isDialogOpen(id) || _openingDialogs.has(id)) return false;
+  _openingDialogs.add(id);
+  return true;
+}
+
+function endOpenDialog(id) {
+  _openingDialogs.delete(id);
+}
+
 export function openPalette() {
-  if (isDialogOpen('palette')) return;
+  if (!beginOpenDialog('palette')) return;
 
   import('./palette.mjs').then(palette => {
     palette.open(false);
@@ -214,6 +230,10 @@ export function openPalette() {
       },
       onClose: () => palette.close(),
     });
+    endOpenDialog('palette');
+  }).catch(e => {
+    endOpenDialog('palette');
+    showMessage('Failed to open palette: ' + (e && e.message || e), 'error');
   });
 }
 
@@ -221,7 +241,7 @@ export function openPalette() {
  * Open the help overlay.
  */
 export function openHelp() {
-  if (isDialogOpen('help')) return;
+  if (!beginOpenDialog('help')) return;
 
   import('./tabs/help.mjs').then(help => {
     appState.showHelp = true;
@@ -241,6 +261,10 @@ export function openHelp() {
       },
       onClose: () => { appState.showHelp = false; },
     });
+    endOpenDialog('help');
+  }).catch(e => {
+    endOpenDialog('help');
+    showMessage('Failed to open help: ' + (e && e.message || e), 'error');
   });
 }
 
@@ -248,7 +272,7 @@ export function openHelp() {
  * Open bookmarks overlay.
  */
 export function openBookmarks() {
-  if (isDialogOpen('bookmarks')) return;
+  if (!beginOpenDialog('bookmarks')) return;
 
   import('./bookmarks.mjs').then(bookmarks => {
     bookmarks.openBookmarks(false);
@@ -262,6 +286,10 @@ export function openBookmarks() {
       },
       onClose: () => { appState.showBookmarks = false; },
     });
+    endOpenDialog('bookmarks');
+  }).catch(e => {
+    endOpenDialog('bookmarks');
+    showMessage('Failed to open bookmarks: ' + (e && e.message || e), 'error');
   });
 }
 
@@ -269,7 +297,7 @@ export function openBookmarks() {
  * Open quick settings.
  */
 export function openQuickSettings() {
-  if (isDialogOpen('quickSettings')) return;
+  if (!beginOpenDialog('quickSettings')) return;
 
   import('./quick-settings.mjs').then(qs => {
     qs.open(false);
@@ -283,5 +311,9 @@ export function openQuickSettings() {
       },
       onClose: () => { appState._quickSettingsOpen = false; },
     });
+    endOpenDialog('quickSettings');
+  }).catch(e => {
+    endOpenDialog('quickSettings');
+    showMessage('Failed to open quick settings: ' + (e && e.message || e), 'error');
   });
 }

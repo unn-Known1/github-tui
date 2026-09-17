@@ -15,7 +15,12 @@ export async function loadOrganizations() {
     if (isStale(gen)) return [];
     appState.organizations = Array.isArray(orgs) ? orgs : [];
     appState.organizationSelected = 0;
-    if (appState.organizations[0]) await loadOrganizationContext(appState.organizations[0].login || appState.organizations[0].name);
+    // Propagate THIS generation into the nested load: loadOrganizationContext
+    // opens its own startAsync('organization-context') and would otherwise
+    // commit stale org context over a newer load that has already begun.
+    if (appState.organizations[0] && !isStale(gen)) {
+      await loadOrganizationContext(appState.organizations[0].login || appState.organizations[0].name, gen);
+    }
     showMessage('Loaded ' + appState.organizations.length + ' organizations', 'success');
     render();
     return appState.organizations;
@@ -53,9 +58,16 @@ export async function organizationEnter() {
   if (org) await loadOrganizationContext(org.login || org.name);
 }
 
-export async function loadOrganizationContext(org) {
+export async function loadOrganizationContext(org, parentGen) {
   if (!org || !appState.token) return;
   const gen = startAsync('organization-context');
+  // Chain to the caller's generation (when provided): a stale parent must
+  // abort the nested fetches too, not just its own direct request.
+  if (parentGen && !parentGen.signal.aborted) {
+    const onAbort = () => gen.controller.abort();
+    parentGen.signal.addEventListener('abort', onAbort, { once: true });
+    if (isStale(parentGen)) { gen.controller.abort(); return; }
+  }
   const [repos, teams] = await Promise.allSettled([
     getOrganizationRepos(appState.token, org, 1, 100, gen.signal),
     getOrganizationTeams(appState.token, org, 1, 100, gen.signal),

@@ -2,23 +2,29 @@
 
 import { appState, render, startAsync, isStale, showMessage, beginLoading, finishLoading } from '../state.mjs';
 import { getReadme } from '../github.mjs';
-import { sectionHeader, wrapTextWithMap } from '../utils.mjs';
+import { sectionHeader, wrapTextWithMap, stripAnsi } from '../utils.mjs';
 import { scrollIndicators } from '../render.mjs';
 import { color } from '../theme.mjs';
 
 export async function viewReadme() {
   const repo = appState.repoDetails;
   if (!repo) return;
+  // full_name may be missing/malformed on partial API responses — the old
+  // unguarded .split('/') threw out of viewReadme and skipped finishLoading.
+  const parts = typeof repo.full_name === 'string' ? repo.full_name.split('/') : [];
+  const [owner, name] = parts;
+  if (!owner || !name) { showMessage('Cannot determine repository for README', 'warning'); return; }
   const gen = startAsync('analyze-readme');
   beginLoading(gen);
   render();
   try {
-    const [owner, name] = repo.full_name.split('/');
     const md = await getReadme(appState.token, owner, name, gen.signal);
     if (isStale(gen, 'analyze-readme')) { finishLoading(gen); return; }
     appState.detailsPane = 'readme';
     appState.detailsScroll = 0;
-    appState._readmeText = md || '(empty README)';
+    // Sanitize: untrusted markdown must never reach the screen buffer with
+    // terminal control sequences intact.
+    appState._readmeText = md ? stripAnsi(md) : '(empty README)';
     // Reset text selection when loading new README.
     appState.textSelectionMode = 'none';
     appState.textSelectStart = null;
@@ -40,7 +46,11 @@ export function clampReadmeSel(row, col, screen) {
   // The exact Y offset matches renderReadmePane below.
   const paneTopY = 9; // HEADER_HEIGHT + 5 (pane tabs row)
   const paneLeftX = 2;
-  if (row < paneTopY || row >= paneTopY + screen.height - 2) return null;
+  // Bottom bound is the PANE bottom (paneTopY + pane height), not the screen
+  // bottom — the old screen.height-2 bound let clicks outside the pane but
+  // inside the screen be treated as in-pane selections.
+  const paneH = Math.max(0, screen.height - paneTopY - 1);
+  if (row < paneTopY || row >= paneTopY + paneH) return null;
   if (col < paneLeftX || col >= paneLeftX + innerW) return null;
   return { row, col };
 }

@@ -1,8 +1,17 @@
-import { describe, it } from 'node:test';
+import { describe, it, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
 import { appState } from '../tui/state.mjs';
 
 describe('text selection state', () => {
+  // Isolation: the shared appState singleton is mutated by every case below.
+  // Reset before each so ordering/reordering can't corrupt assertions.
+  const initial = { textSelectionMode: 'none', textSelectStart: null, textSelectEnd: null };
+  beforeEach(() => {
+    appState.textSelectionMode = initial.textSelectionMode;
+    appState.textSelectStart = initial.textSelectStart;
+    appState.textSelectEnd = initial.textSelectEnd;
+  });
+
   it('defaults to none mode with null start/end', () => {
     assert.equal(appState.textSelectionMode, 'none');
     assert.equal(appState.textSelectStart, null);

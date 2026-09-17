@@ -4,6 +4,7 @@
 
 import { SECTIONS_FILE, readJson, writeJson } from './config.mjs';
 import { appState, render, showMessage } from './state.mjs';
+import { setCancelHook } from './input.mjs';
 import { startInput, registerInputHandler } from './input.mjs';
 import { request } from './github.mjs';
 
@@ -73,9 +74,13 @@ export async function loadCustomSections(token) {
   if (defs.length === 0) return [];
 
   const enabled = defs.filter(def => def.enabled !== false).slice(0, 12);
-  // Fetch independent sections concurrently. The hard cap keeps a malformed
-  // config from becoming an unbounded rate-limit fan-out.
-  const sections = await Promise.all(enabled.map(async (def) => {
+  // Fetch independent sections concurrently, but STAGGERED: 12 simultaneous
+  // /search/issues requests with zero backoff trips GitHub search rate
+  // limits (which are stricter than the core API). 75ms between launches
+  // keeps wall-clock time nearly identical while avoiding the burst.
+  const STAGGER_MS = 75;
+  const sections = await Promise.all(enabled.map(async (def, i) => {
+    if (i > 0) await new Promise(r => setTimeout(r, STAGGER_MS * i));
     try {
       const result = await request(
         '/search/issues?q=' + encodeURIComponent(def.query) +
@@ -103,6 +108,10 @@ export function startSectionEditor(index = -1) {
   const defs = loadSectionDefinitions();
   const current = index >= 0 ? defs[index] : null;
   appState._sectionDraft = { ...(current || {}), index };
+  // Clear the draft if the user aborts the editor chain mid-way (Esc in any
+  // prompt) — otherwise the stale draft lingers on appState until the next
+  // editor run overwrites it.
+  setCancelHook(() => { appState._sectionDraft = null; });
   startInput('Section title: ', 'section-title');
 }
 

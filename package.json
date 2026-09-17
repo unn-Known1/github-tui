@@ -6,13 +6,15 @@
   "bin": {
     "github-tui": "app.mjs"
   },
+  "exports": {
+    ".": "./app.mjs"
+  },
   "engines": {
-    "node": ">=18"
+    "node": ">=20"
   },
   "scripts": {
     "test": "node tools/check-imports.mjs && node --test tests/*.test.mjs",
-    "lint:imports": "node tools/check-imports.mjs",
-    "check:imports": "node tools/check-imports.mjs"
+    "lint:imports": "node tools/check-imports.mjs"
   },
   "keywords": [
     "github",

@@ -14,6 +14,12 @@
 export function calculateViewport(totalItems, selectedItem, scrollOffset, viewportHeight, itemHeight = 1, overscan = 2) {
   if (totalItems === 0) return { startIndex: 0, endIndex: 0, offsetY: 0, maxScroll: 0 };
 
+  // Guard degenerate geometry: itemHeight <= 0 (or non-finite viewportHeight)
+  // would put Infinity/NaN into maxScroll, startItem and offsetY and silently
+  // corrupt every consumer indexing the source list.
+  if (!Number.isFinite(itemHeight) || itemHeight <= 0) itemHeight = 1;
+  if (!Number.isFinite(viewportHeight) || viewportHeight <= 0) viewportHeight = 1;
+
   const maxScroll = Math.max(0, totalItems - Math.floor(viewportHeight / itemHeight));
 
   let scroll = Math.max(0, Math.min(scrollOffset, maxScroll));
@@ -51,6 +57,8 @@ export function calculateViewport(totalItems, selectedItem, scrollOffset, viewpo
  */
 export function handleScroll(direction, state, totalItems, viewportHeight, itemHeight = 1) {
   if (totalItems === 0) return { selected: 0, scroll: 0 };
+  if (!Number.isFinite(itemHeight) || itemHeight <= 0) itemHeight = 1;
+  if (!Number.isFinite(viewportHeight) || viewportHeight <= 0) viewportHeight = 1;
 
   const maxVisible = Math.floor(viewportHeight / itemHeight);
   const maxScroll = Math.max(0, totalItems - maxVisible);
@@ -127,6 +135,11 @@ export function handleWheel(up, state, totalItems, viewportHeight, itemHeight = 
  * @returns {number} Item index at that row, or -1 if none
  */
 export function getItemAtRow(row, scrollOffset, itemHeight = 1) {
+  // JSDoc promises -1 for "no item at this row" — honor it. The unguarded
+  // floor math returned negative indexes for row < 0 and unbounded indexes
+  // past the viewport, corrupting lookups into the source list.
+  if (!Number.isFinite(itemHeight) || itemHeight <= 0) itemHeight = 1;
+  if (!Number.isFinite(row) || row < 0) return -1;
   const itemIndex = Math.floor(scrollOffset) + Math.floor(row / itemHeight);
-  return itemIndex;
+  return itemIndex >= 0 ? itemIndex : -1;
 }

@@ -54,6 +54,10 @@ export function createSelect(options = {}) {
     return Math.max(1, boxH - 5 - (options.searchable === false ? 0 : 1));
   }
 
+  // Remembers the viewport size from the last render so keyboard scrolling
+  // (ensureCursorVisible) agrees with what is actually on screen.
+  let lastViewport = { visible: 14 };
+
   function layout(screen) {
     const boxW = Math.max(1, Math.min(70, screen.width - 4));
     const boxH = Math.max(1, Math.min(20, screen.height - 4));
@@ -90,6 +94,7 @@ export function createSelect(options = {}) {
     contentY++;
 
     const visible = maxVisible(boxH);
+    lastViewport = { visible };
     const items = state.filtered;
     if (items.length === 0) {
       screen.writeStr(x + 2, contentY, 'No matching items', color('dim'));
@@ -105,7 +110,13 @@ export function createSelect(options = {}) {
         entries.push({ type: 'item', item: items[i], index: i });
       }
       const selectedEntry = entries.findIndex(entry => entry.type === 'item' && entry.index === state.cursor);
-      const start = Math.max(0, selectedEntry - visible + 1, state.scroll);
+      // Preserve scroll intent but never let the selection slide out of the
+      // window (the old Math.max included state.scroll unclamped, so a stale
+      // scroll could push the highlighted entry off-screen entirely).
+      let start = Math.max(0, selectedEntry - visible + 1, Math.min(state.scroll, Math.max(0, entries.length - visible)));
+      if (selectedEntry >= 0 && (selectedEntry < start || selectedEntry >= start + visible)) {
+        start = Math.max(0, selectedEntry - visible + 1);
+      }
       state.scroll = start;
       for (let rowOffset = 0; rowOffset < visible; rowOffset++) {
         const entry = entries[start + rowOffset];
@@ -156,8 +167,10 @@ export function createSelect(options = {}) {
     }
   }
 
+  // Viewport height the render loop actually uses — keep scroll math in sync
+  // with layout() instead of a stale hardcoded 14.
   function ensureCursorVisible() {
-    const visible = 14;
+    const visible = lastViewport.visible;
     if (state.cursor < state.scroll) state.scroll = state.cursor;
     else if (state.cursor >= state.scroll + visible) state.scroll = state.cursor - visible + 1;
   }
@@ -234,7 +247,11 @@ export function createSelect(options = {}) {
       appRender();
     },
     close() {
+      // Clear the mounted modal (when used via createSelect directly, nothing
+      // else removes it — it kept receiving keys/renders forever) and repaint.
+      appState._activeSelect = null;
       options.onCancel?.();
+      appRender();
     },
   };
 }
@@ -253,12 +270,21 @@ export function showSelect(options = {}) {
     const select = createSelect({
       ...options,
       onSelect: item => {
-        options.onSelect?.(item);
-        finish(item?.value);
+        // User callbacks run inside try/finally: a throwing callback used to
+        // skip finish() entirely, leaving the Promise unresolved and the
+        // modal unkillable.
+        try {
+          options.onSelect?.(item);
+        } finally {
+          finish(item?.value);
+        }
       },
       onCancel: () => {
-        options.onCancel?.();
-        finish(undefined);
+        try {
+          options.onCancel?.();
+        } finally {
+          finish(undefined);
+        }
       },
     });
     appState._activeSelect = select;

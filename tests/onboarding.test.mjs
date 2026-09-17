@@ -5,7 +5,7 @@
 //   - compareVersions (semver-like comparator)
 //   - shouldAutoLaunchWelcome (version-gate predicate)
 
-import { describe, it } from 'node:test';
+import { describe, it, before, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
 import {
   parseReleaseNotes, buildWhatsNewBody,
@@ -187,9 +187,12 @@ describe('shouldAutoLaunchWelcome (P0-1 gate)', () => {
     const onboarding = await import('../tui/tabs/onboarding.mjs');
     const { appState } = await import('../tui/state.mjs');
     const saved = appState.lastSeenVersion;
-    appState.lastSeenVersion = null;
-    assert.equal(onboarding.shouldAutoLaunchWelcome(), false);
-    appState.lastSeenVersion = saved;
+    try {
+      appState.lastSeenVersion = null;
+      assert.equal(onboarding.shouldAutoLaunchWelcome(), false);
+    } finally {
+      appState.lastSeenVersion = saved; // must run even if the assert throws
+    }
   });
 
   it('returns true when lastSeenVersion is strictly lower (any difference)', async () => {
@@ -198,18 +201,24 @@ describe('shouldAutoLaunchWelcome (P0-1 gate)', () => {
     const onboarding = await import('../tui/tabs/onboarding.mjs');
     const { appState } = await import('../tui/state.mjs');
     const saved = appState.lastSeenVersion;
-    appState.lastSeenVersion = '0.0.0';
-    assert.equal(onboarding.shouldAutoLaunchWelcome(), true);
-    appState.lastSeenVersion = saved;
+    try {
+      appState.lastSeenVersion = '0.0.0';
+      assert.equal(onboarding.shouldAutoLaunchWelcome(), true);
+    } finally {
+      appState.lastSeenVersion = saved; // must run even if the assert throws
+    }
   });
 
   it('returns false when lastSeenVersion is strictly higher (downgrade)', async () => {
     const onboarding = await import('../tui/tabs/onboarding.mjs');
     const { appState } = await import('../tui/state.mjs');
     const saved = appState.lastSeenVersion;
-    appState.lastSeenVersion = '9999.0.0';
-    assert.equal(onboarding.shouldAutoLaunchWelcome(), false);
-    appState.lastSeenVersion = saved;
+    try {
+      appState.lastSeenVersion = '9999.0.0';
+      assert.equal(onboarding.shouldAutoLaunchWelcome(), false);
+    } finally {
+      appState.lastSeenVersion = saved; // must run even if the assert throws
+    }
   });
 
   it('returns false when lastSeenVersion equals APP_VERSION', async () => {
@@ -217,8 +226,11 @@ describe('shouldAutoLaunchWelcome (P0-1 gate)', () => {
     const { appState } = await import('../tui/state.mjs');
     const { APP_VERSION } = await import('../tui/config.mjs');
     const saved = appState.lastSeenVersion;
-    appState.lastSeenVersion = APP_VERSION;
-    assert.equal(onboarding.shouldAutoLaunchWelcome(), false);
-    appState.lastSeenVersion = saved;
+    try {
+      appState.lastSeenVersion = APP_VERSION;
+      assert.equal(onboarding.shouldAutoLaunchWelcome(), false);
+    } finally {
+      appState.lastSeenVersion = saved; // must run even if the assert throws
+    }
   });
 });

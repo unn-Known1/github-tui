@@ -1,2 +1,7 @@
 node_modules/
-package-lock.json
+# NOTE: package-lock.json is intentionally NOT ignored — the lockfile is
+# committed so CI and contributors install the exact same dependency tree.
+.env
+.env.local
+.env.*.local
+*.pem

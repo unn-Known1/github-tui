@@ -4,7 +4,10 @@ export function buildMyWorkQueue({ notifications = [], pullRequests = [], issues
   const items = [];
   for (const n of notifications) {
     if (n.unread || n.reason === 'review_requested' || n.reason === 'mention') {
-      items.push({ kind: n.reason === 'review_requested' ? 'review' : 'inbox', id: n.id, title: n.subject?.title || 'Notification', repo: n.repository?.full_name || '', updated_at: n.updated_at || n.last_read_at, source: n });
+      // NOTE: no last_read_at fallback — last_read_at reflects the user's
+      // reading behavior, not item activity; sorting by it would float a
+      // just-glanced-at read mention above genuinely fresh activity.
+      items.push({ kind: n.reason === 'review_requested' ? 'review' : 'inbox', id: n.id, title: n.subject?.title || 'Notification', repo: n.repository?.full_name || '', updated_at: n.updated_at || '', source: n });
     }
   }
   for (const pr of pullRequests) items.push({ kind: 'authored-pr', id: pr.id || pr.number, title: pr.title || 'Pull request', repo: pr.base?.repo?.full_name || pr.repository?.full_name || '', updated_at: pr.updated_at, source: pr });

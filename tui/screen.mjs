@@ -421,7 +421,7 @@ export class Screen {
       this.charBuf[y][cx] = chars.slice(i, i + units).join('');
       this.linkBuf[y][cx] = null;
       if (w === 2) {
-        this.charBuf[y][cx + 1] = isAccessible() ? ' ' : '\\u200B';
+        this.charBuf[y][cx + 1] = isAccessible() ? ' ' : '\u200B';
         this.linkBuf[y][cx + 1] = null;
       }
       cx += w;

@@ -227,6 +227,23 @@ export async function loadAllReposBackground(gen) {
   if (!isStale(gen, 'repos')) render();
 }
 
+// Shared 401/expired-token recovery for loaders (mirrors loadUserData).
+// A stale token previously stranded users in a generic error message with no
+// re-auth path in loadMoreRepos / loadStarredRepos / loadMoreStarred.
+function _recover401(e, retryFn) {
+  const msg = (e && e.message) || '';
+  const status = e && e.status;
+  if (status === 401 || /401|Bad credentials|Unauthorized/i.test(msg)) {
+    resetAccountState();
+    resetRateLimit();
+    removeToken();
+    setTab(5);
+    showError('Token expired or invalid — please log in again', 'Authentication', { retry: retryFn });
+    return true;
+  }
+  return false;
+}
+
 export async function loadMoreRepos() {
   if (!appState.token || !appState.reposHasMore) return;
   const gen = startAsync('repos');
@@ -243,7 +260,9 @@ export async function loadMoreRepos() {
     enrichIssueCounts();
     showMessage('Loaded ' + appState.repos.length + ' repos total', 'info');
   } catch (e) {
-    if (!isStale(gen, 'repos')) showMessage('Failed to load more repos', 'error');
+    if (!isStale(gen, 'repos') && !_recover401(e, loadUserData)) {
+      showMessage('Failed to load more repos', 'error');
+    }
   }
   finishLoading(gen);
   if (!isStale(gen, 'repos')) render();
@@ -722,7 +741,9 @@ export async function toggleStarRepo(r) {
     upsertEntity(r, {
       isStarred: !already,
       starredAt: already ? null : new Date().toISOString(),
-      isOwner: false,
+      // Derived, not hardcoded: isOwner:false would overwrite a cached
+      // isOwner:true for the user's own repos on every star toggle.
+      isOwner: r.owner?.login === appState.user?.login,
     });
     render();
   } catch (e) {
@@ -785,7 +806,10 @@ export function toggleReposView() {
 function _seedStarredCache() {
   if (!Array.isArray(appState.starred)) return;
   for (const r of appState.starred) {
-    upsertEntity(r, { isStarred: true, starredAt: r.starred_at, isOwner: false });
+    // Derive ownership from the repo data — hardcoding isOwner:false here
+    // clobbered a cached isOwner:true every time the user starred their own
+    // repo (breaking the ownership badge and Actions filtering).
+    upsertEntity(r, { isStarred: true, starredAt: r.starred_at, isOwner: r.owner?.login === appState.user?.login });
   }
 }
 
@@ -806,7 +830,9 @@ async function loadStarredRepos() {
     appState.starredHasMore = appState.starred.length >= 100;
     showMessage('Loaded ' + appState.starred.length + ' starred repos', 'success');
   } catch (e) {
-    if (!isStale(gen, 'repos-starred')) showMessage('Failed to load starred repos: ' + e.message, 'error');
+    if (!isStale(gen, 'repos-starred') && !_recover401(e, loadStarredRepos)) {
+      showMessage('Failed to load starred repos: ' + e.message, 'error');
+    }
   }
   finishLoading(gen);
   if (!isStale(gen, 'repos-starred')) render();
@@ -826,7 +852,7 @@ export async function loadMoreStarred() {
       appState.starred = [...appState.starred, ...mapped];
       // Seed only the newly-mapped delta — previously-seeds stay valid.
       // Full re-seed via _seedStarredCache() would re-upsert every page.
-      for (const r of mapped) upsertEntity(r, { isStarred: true, starredAt: r.starred_at, isOwner: false });
+      for (const r of mapped) upsertEntity(r, { isStarred: true, starredAt: r.starred_at, isOwner: r.owner?.login === appState.user?.login });
       appState.starredPage = page;
       appState.starredHasMore = more.length >= 100;
       showMessage('Loaded ' + appState.starred.length + ' starred repos', 'success');
@@ -835,7 +861,9 @@ export async function loadMoreStarred() {
       showMessage('All starred repos loaded', 'info');
     }
   } catch (e) {
-    if (!isStale(gen, 'repos-starred')) showMessage('Failed to load more starred repos', 'error');
+    if (!isStale(gen, 'repos-starred') && !_recover401(e, loadStarredRepos)) {
+      showMessage('Failed to load more starred repos', 'error');
+    }
   }
   finishLoading(gen);
   if (!isStale(gen, 'repos-starred')) render();
@@ -884,7 +912,11 @@ export const keys = {
     // Manual load-more if the background cap kicked in (lowercase l).
     if (appState._moreReposAvailable && appState.reposView === 'own') {
       appState._moreReposAvailable = false;
-      const gen = startAsync('repos-more');
+      // Use the 'repos' scope — loadAllReposBackground's stale checks read
+      // gen.scope, and loadUserData() must be able to cancel this worker.
+      // A separate 'repos-more' scope was invisible to startAsync('repos'),
+      // letting duplicate workers commit pages concurrently.
+      const gen = startAsync('repos');
       appState.reposHasMore = true;
       loadAllReposBackground(gen);
     }

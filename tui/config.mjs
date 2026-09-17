@@ -12,7 +12,7 @@ import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
 import {
   existsSync, readFileSync, writeFileSync,
-  mkdirSync, unlinkSync, chmodSync,
+  mkdirSync, unlinkSync, chmodSync, renameSync, openSync, writeSync, closeSync,
 } from 'fs';
 import {
   saveTokenSecure, loadTokenSecure, removeTokenSecure, detectBackend,
@@ -44,6 +44,13 @@ export const KEYBINDINGS_FILE = join(CONFIG_DIR, 'keybindings.json');
 // Exposed so the Settings UI can display the storage method.
 export let tokenStorageBackend = detectBackend() || 'plaintext';
 
+// One-shot guard for the background plaintext→keychain migration. Without
+// it, every concurrent loadToken() scheduled its own migration: duplicate
+// keychain writes plus a race on unlinkSync(TOKEN_FILE) — and if a NEW token
+// was saved between scheduling and execution, the migration could delete the
+// freshly written plaintext file for a token that was never migrated.
+let _migrationScheduled = false;
+
 export function loadToken() {
   const secure = loadTokenSecure();
   if (secure) {
@@ -56,16 +63,21 @@ export function loadToken() {
     const legacy = readFileSync(TOKEN_FILE, 'utf-8').trim();
     if (legacy) {
       tokenStorageBackend = 'plaintext';
-      // Silently migrate to keychain in the background — non-blocking
-      setImmediate(() => {
-        try {
-          if (saveTokenSecure(legacy)) {
-            // Migration succeeded — remove plaintext file
-            try { unlinkSync(TOKEN_FILE); } catch {}
-            tokenStorageBackend = detectBackend() || 'plaintext';
-          }
-        } catch {}
-      });
+      // Silently migrate to keychain in the background — non-blocking, once.
+      if (!_migrationScheduled) {
+        _migrationScheduled = true;
+        setImmediate(() => {
+          try {
+            // Re-read: the file may have been rewritten by saveToken() in
+            // the meantime — migrate what is on disk NOW, not the stale copy.
+            const current = readFileSync(TOKEN_FILE, 'utf-8').trim();
+            if (current && saveTokenSecure(current)) {
+              try { unlinkSync(TOKEN_FILE); } catch {}
+              tokenStorageBackend = detectBackend() || 'plaintext';
+            }
+          } catch {}
+        });
+      }
       return legacy;
     }
   } catch {}
@@ -87,12 +99,23 @@ export function saveToken(token) {
   // 2. Fall back to plaintext with strict permissions
   tokenStorageBackend = 'plaintext';
   if (!existsSync(CONFIG_DIR)) mkdirSync(CONFIG_DIR, { recursive: true });
-  writeFileSync(TOKEN_FILE, token);
+  // Atomic write with permissions set BEFORE the file becomes visible at its
+  // final path: the old write-then-chmod order left a world-readable (umask)
+  // secret on disk for a window between the two calls.
+  const tmpToken = TOKEN_FILE + '.tmp';
+  try { unlinkSync(tmpToken); } catch {}
+  const fd = openSync(tmpToken, 'w', 0o600);
+  try {
+    writeSync(fd, token);
+  } finally {
+    closeSync(fd);
+  }
+  try { chmodSync(tmpToken, 0o600); } catch {}
+  renameSync(tmpToken, TOKEN_FILE);
   // Lock down permissions so other users on a shared machine can't read the PAT.
   // chmod is a no-op on Windows but harmless.
   try {
     chmodSync(CONFIG_DIR, 0o700);
-    chmodSync(TOKEN_FILE, 0o600);
   } catch {
     // Best-effort; ignore on platforms that don't support POSIX modes.
   }
@@ -122,6 +145,11 @@ export function readJson(path, fallback) {
 
 export function writeJson(path, value) {
   if (!existsSync(CONFIG_DIR)) mkdirSync(CONFIG_DIR, { recursive: true });
-  writeFileSync(path, JSON.stringify(value, null, 2));
-  try { chmodSync(path, 0o600); } catch {}
+  // Atomic write (temp + rename): a crash mid-write must never leave a
+  // truncated JSON file — bookmarks/pins/searches would be silently wiped
+  // or quarantined on the next load.
+  const tmp = path + '.tmp';
+  writeFileSync(tmp, JSON.stringify(value, null, 2));
+  try { chmodSync(tmp, 0o600); } catch {}
+  renameSync(tmp, path);
 }

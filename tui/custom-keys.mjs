@@ -73,7 +73,7 @@ function loadBindings() {
  * This prevents a malicious repo name like "foo; rm -rf ~" from being
  * executed as a shell command.
  */
-function shellEscape(value) {
+export function shellEscape(value) {
   if (!value) return "''";
   const str = String(value);
   if (process.platform === 'win32') {
@@ -117,6 +117,11 @@ function contextMatches(binding) {
   if (ctx === 'repo') return !!appState.repoDetails || !!appState.localRepo;
   if (ctx === 'dashboard') {
     return tabState.current === 0 && !appState.showDetail;
+  }
+  // 'files' previously fell through to `return true`, so bindings scoped to
+  // it fired in EVERY context. Gate it on the files pane actually rendering.
+  if (ctx === 'files') {
+    return appState.analyzeView === 'details' && appState.detailsPane === 'files';
   }
   return true;
 }
@@ -166,23 +171,20 @@ function runInternalAction(binding) {
   const actionId = binding.action;
   showMessage('Running: ' + (binding.label || actionId), 'info');
 
-  // Try to find and execute the action via palette
+  // Try to find and execute the action via palette. The single outer
+  // .catch covers BOTH the import and any throw from inside .then — the
+  // old inner `.catch(() => { showMessage('Failed to load action module') })
+  // swallowed real action errors and mislabeled them as module-load failures.
   import('./palette.mjs').then(palette => {
     const actions = palette.filter('');  // Get all actions
     const action = actions.find(a => a.id === actionId);
     if (action && action.run) {
-      try {
-        Promise.resolve(action.run()).catch(e => {
-          showMessage('Action failed: ' + (e.message || 'unknown'), 'error');
-        });
-      } catch (e) {
-        showMessage('Action failed: ' + (e.message || 'unknown'), 'error');
-      }
-    } else {
-      showMessage('Action not found: ' + actionId, 'error');
+      return Promise.resolve(action.run());
     }
-  }).catch(() => {
-    showMessage('Failed to load action module', 'error');
+    showMessage('Action not found: ' + actionId, 'error');
+    return undefined;
+  }).catch(e => {
+    showMessage('Action failed: ' + ((e && e.message) || 'unknown'), 'error');
   });
 
   return true;

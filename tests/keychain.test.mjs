@@ -1,10 +1,11 @@
-import { describe, it, beforeEach, mock } from 'node:test';
+import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 
-// We test the pure logic of keychain.mjs by mocking execSync at the module level.
-// Since we can't easily mock ESM imports in Node's built-in test runner without
-// a loader, we test the observable contract: detectBackend returns a string or null,
-// and the save/load/remove functions return the expected types.
+// No mocking is performed: these tests exercise the REAL OS keychain backend
+// (where present). The suite asserts the observable contract: detectBackend
+// returns a known identifier or null, and the save/load/remove functions
+// return the expected types. Roundtrip tests skip honestly (t.skip) when no
+// backend is available rather than silently passing.
 
 import {
   detectBackend,
@@ -80,29 +81,39 @@ describe('removeTokenSecure', () => {
 describe('save → load → remove roundtrip', () => {
   const TEST_TOKEN = 'ghp_testtoken_keychain_roundtrip_' + Date.now();
 
-  it('round-trips a token through secure storage (skipped when no backend)', () => {
+  it('round-trips a token through secure storage (skipped when no backend)', (t) => {
     const backend = detectBackend();
     if (!backend) {
-      // No keychain available in this environment — skip but do not fail
+      // Record the absence honestly — a silent return would report a pass
+      // while testing nothing at all.
+      t.skip('no keychain backend available in this environment');
       return;
     }
 
-    const saved = saveTokenSecure(TEST_TOKEN);
-    if (!saved) {
-      // Keychain detected but save failed (e.g. sandboxed CI) — acceptable
-      return;
+    // try/finally guarantees the token is removed from the user's keychain
+    // even if an assertion throws — a failing test must not leak a secret
+    // into persistent OS storage.
+    let saved = false;
+    try {
+      saved = saveTokenSecure(TEST_TOKEN);
+      if (!saved) {
+        t.skip('keychain detected but save failed (e.g. sandboxed CI)');
+        return;
+      }
+      const loaded = loadTokenSecure();
+      assert.equal(loaded, TEST_TOKEN, 'loaded token should match saved token');
+
+      const afterRemove = loadTokenSecure();
+      assert.ok(
+        afterRemove !== TEST_TOKEN,
+        'token should no longer be retrievable after removeTokenSecure'
+      );
+    } finally {
+      if (saved) {
+        try { removeTokenSecure(); } catch (e) {
+          console.error('keychain.test: cleanup failed — token may remain in OS keychain:', e && e.message);
+        }
+      }
     }
-
-    const loaded = loadTokenSecure();
-    assert.equal(loaded, TEST_TOKEN, 'loaded token should match saved token');
-
-    // Clean up
-    removeTokenSecure();
-
-    const afterRemove = loadTokenSecure();
-    assert.ok(
-      afterRemove !== TEST_TOKEN,
-      'token should no longer be retrievable after removeTokenSecure'
-    );
   });
 });

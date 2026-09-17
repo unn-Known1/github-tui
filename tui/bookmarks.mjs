@@ -52,7 +52,7 @@ export function enter() {
     openUrl(bm.url).then(res => {
       if (res.ok) showMessage('Opened ' + bm.full_name, 'success');
       else showMessage(res.error || 'Open failed', 'error');
-    });
+    }).catch(e => showMessage('Open failed: ' + (e && e.message || e), 'error'));
   }
   // Don't close overlay — let user open multiple bookmarks.
   render();

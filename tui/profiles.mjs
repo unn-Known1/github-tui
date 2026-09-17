@@ -2,7 +2,7 @@
 // remain in the existing secure token store until a profile-aware keychain
 // backend is selected.
 
-import { existsSync, readFileSync, writeFileSync, mkdirSync, chmodSync } from 'fs';
+import { existsSync, readFileSync, writeFileSync, mkdirSync, chmodSync, renameSync } from 'fs';
 import { join } from 'path';
 import { CONFIG_DIR } from './config.mjs';
 import { normalizeEnterpriseHost } from './recommended-features.mjs';
@@ -23,14 +23,26 @@ export function loadProfiles() {
     const parsed = JSON.parse(readFileSync(PROFILES_FILE, 'utf8'));
     if (!Array.isArray(parsed)) return [];
     return parsed.map(normalizeProfile).filter(Boolean);
-  } catch { return []; }
+  } catch (err) {
+    // A file that exists but doesn't parse is corruption, not an empty list.
+    // Returning [] here would let the next upsertProfile() overwrite the file
+    // and permanently wipe every saved profile.
+    if (err && err.code !== 'ENOENT') {
+      try { renameSync(PROFILES_FILE, PROFILES_FILE + '.corrupt'); } catch {}
+    }
+    return [];
+  }
 }
 
 export function saveProfiles(profiles) {
   if (!existsSync(CONFIG_DIR)) mkdirSync(CONFIG_DIR, { recursive: true });
   const safe = (profiles || []).map(normalizeProfile).filter(Boolean);
-  writeFileSync(PROFILES_FILE, JSON.stringify(safe, null, 2));
-  try { chmodSync(PROFILES_FILE, 0o600); } catch {}
+  // Atomic write: a crash mid-write must never leave a truncated
+  // profiles.json (which loadProfiles would quarantine on next start).
+  const tmp = PROFILES_FILE + '.tmp';
+  writeFileSync(tmp, JSON.stringify(safe, null, 2));
+  try { chmodSync(tmp, 0o600); } catch {}
+  renameSync(tmp, PROFILES_FILE);
   return safe;
 }
 

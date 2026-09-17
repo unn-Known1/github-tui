@@ -3,7 +3,7 @@
 // Strategy: the tool reads from a hardcoded ROOT = dirname(script)/.., which
 // points at the real project. To test the tool's logic without touching the
 // real project, we shell out to `node tools/check-imports.mjs` and verify:
-//   (1) clean state → exit 0, "0 issues"
+//   (1) clean state → exit 0, exactly "0 missed imports found."
 //   (2) broken state → exit 1, mentions the right file+symbol
 //   (3) restore from break → exit 0 again
 //
@@ -12,39 +12,82 @@
 // and excludes `tests/`, `node_modules/`, `tools/`, `.git` — so any file we
 // drop elsewhere in the tree gets audited. We drop fixtures into tui/ (which
 // IS audited), then rm them on teardown. Every fixture has a `try/finally`
-// to guarantee cleanup even on assertion failure.
+// to guarantee cleanup even on assertion failure. A `before` hook prunes
+// orphaned fixtures from previously-crashed runs so the clean-baseline test
+// cannot be poisoned by stale files.
 
-import { test } from 'node:test';
+import { test, before } from 'node:test';
 import { strict as assert } from 'node:assert';
 import { spawnSync } from 'node:child_process';
-import { writeFileSync, unlinkSync } from 'node:fs';
+import { writeFileSync, unlinkSync, readdirSync } from 'node:fs';
 import { join, resolve, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const TOOL = join(ROOT, 'tools', 'check-imports.mjs');
+const TUI_DIR = join(ROOT, 'tui');
+const FIXTURE_PREFIX = '_check_imports_';
 
 function runTool() {
-  return spawnSync(process.execPath, [TOOL], {
+  const result = spawnSync(process.execPath, [TOOL], {
     cwd: ROOT,
     encoding: 'utf8',
     timeout: 30000,
   });
+  // spawnSync failures surface as status=null + signal/error set. Report
+  // those directly instead of letting `assert.equal(result.status, 0)`
+  // print a baffling `null === 0` (or `stderr.includes` throw on null).
+  if (result.error) {
+    throw new Error(`failed to spawn check-imports tool: ${result.error.message}`);
+  }
+  if (result.status === null) {
+    throw new Error(
+      `check-imports tool was killed by signal ${result.signal} before exiting`
+    );
+  }
+  return { ...result, stdout: result.stdout || '', stderr: result.stderr || '' };
 }
 
 // Drop a fixture file and return a teardown function. The fixture is placed
 // in `tui/` (audited) with a recognisable name so teardown is reliable.
+// Teardown failures are surfaced, not swallowed — a file we cannot remove
+// will corrupt the clean-baseline test for every subsequent run.
 function fixture(name, body) {
-  const path = join(ROOT, 'tui', name);
+  const path = join(TUI_DIR, name);
   writeFileSync(path, body);
-  return () => { try { unlinkSync(path); } catch {} };
+  return () => {
+    try {
+      unlinkSync(path);
+    } catch (err) {
+      if (err && err.code !== 'ENOENT') {
+        throw new Error(`failed to remove fixture ${path}: ${err.message}`);
+      }
+    }
+  };
 }
+
+// Prune fixtures left behind by a previously-crashed run. Without this the
+// "clean codebase" test fails spuriously with no hint at the real cause.
+before(() => {
+  let stale;
+  try {
+    stale = readdirSync(TUI_DIR).filter(f => f.startsWith(FIXTURE_PREFIX));
+  } catch (err) {
+    throw new Error(`cannot list ${TUI_DIR} to prune stale fixtures: ${err.message}`);
+  }
+  for (const f of stale) {
+    try { unlinkSync(join(TUI_DIR, f)); } catch { /* best effort */ }
+  }
+});
 
 // ── Test: clean baseline ──────────────────────────────────────────────
 test('check-imports: clean codebase reports 0 issues', () => {
   const result = runTool();
   assert.equal(result.status, 0, `expected exit 0, got ${result.status}\n${result.stderr}`);
-  assert.match(result.stdout, /0 issues/);
+  // Exact summary line, anchored: a loose /0 issues/ would also match
+  // "10 issues" or incidental output. (The broken-state summary on stderr
+  // uses a different string, "N missed imports found.")
+  assert.match(result.stdout, /^check-imports: \d+ files audited against \d+ modules, 0 issues\.$/m);
 });
 
 // ── Test: dropped fixture with unbound reference is detected ──────────
@@ -62,9 +105,21 @@ test('check-imports: catches unbound reference to state.mjs export', () => {
   try {
     const result = runTool();
     assert.equal(result.status, 1, `expected exit 1, got ${result.status}\n${result.stderr}`);
-    assert.match(result.stderr, /_check_imports_fixture\.mjs/);
-    assert.match(result.stderr, /showMessage/);
-    assert.match(result.stderr, /confirm/);
+    // Scope every symbol assertion to the fixture's own diagnostic lines —
+    // a token elsewhere in stderr (usage info, unrelated file) must not
+    // satisfy these.
+    const fixtureLines = result.stderr
+      .split('\n')
+      .filter(l => l.includes('_check_imports_fixture.mjs'));
+    assert.ok(fixtureLines.length >= 2, `expected fixture diagnostics in stderr, got:\n${result.stderr}`);
+    assert.ok(
+      fixtureLines.some(l => /uses `showMessage`/.test(l)),
+      `showMessage not flagged for fixture. stderr:\n${result.stderr}`
+    );
+    assert.ok(
+      fixtureLines.some(l => /uses `confirm`/.test(l)),
+      `confirm not flagged for fixture. stderr:\n${result.stderr}`
+    );
   } finally {
     teardown();
   }
@@ -74,24 +129,34 @@ test('check-imports: catches unbound reference to state.mjs export', () => {
 test('check-imports: no flag when fixture imports the symbol it uses', () => {
   const teardown = fixture('_check_imports_clean.mjs', [
     '// Auto-generated by tests/check-imports.test.mjs — DO NOT EDIT.',
-    'import { showMessage } from "./state.mjs";',
+    "import { showMessage, confirm } from './state.mjs';",
     'export function fixtureFn() {',
     '  showMessage("hi", "info");',
+    '  confirm("ok", () => {}, "label");',
     '}',
     '',
   ].join('\n'));
   try {
     const result = runTool();
+    assert.equal(result.status, 0, `expected exit 0, got ${result.status}\n${result.stderr}`);
     assert.ok(
       !result.stderr.includes('_check_imports_clean.mjs'),
-      `fixture should not be flagged but got: ${result.stderr}`,
+      `clean fixture must not be flagged. stderr:\n${result.stderr}`
     );
   } finally {
     teardown();
   }
 });
 
-// ── Test: typeof defensive check is classified correctly ───────────────
+// ── Test: restore after break → clean again ───────────────────────────
+test('check-imports: restoring the fixture returns to a clean report', () => {
+  // Sanity-guard the reset path: with no fixture present the tool is clean
+  // (covered by the first test, re-checked after teardown-heavy tests).
+  const result = runTool();
+  assert.equal(result.status, 0, `expected exit 0 after cleanup, got ${result.status}\n${result.stderr}`);
+});
+
+// ── Test: typeof X defensive check is NOT flagged as a real bug ───────
 test('check-imports: typeof X defensive check is NOT flagged as a real bug', () => {
   // Use `confirm` (state.mjs export) only inside a typeof check — never
   // call it directly. Tool should NOT classify it as an unbound use.

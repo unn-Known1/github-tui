@@ -279,8 +279,11 @@ process.on('exit', () => {
   if (_cacheDirty) saveEtagCache();
   if (_syncedDirty) saveLastSynced();
 });
-process.on('SIGINT', () => { saveEtagCache(); saveLastSynced(); });
-process.on('SIGTERM', () => { saveEtagCache(); saveLastSynced(); });
+// NOTE: no SIGINT/SIGTERM listeners here. Registering them at module load
+// overrode Node's default terminate-on-signal and could hang the process
+// (saving caches is pointless if the TUI never exits). The CLI entry point
+// (app.mjs) owns signal handling; its shutdown path calls process.exit(0),
+// which fires the 'exit' listener above and persists the caches.
 
 // ── Cache stats ──
 
@@ -743,12 +746,16 @@ export function downloadToFile(url, destPath, token) {
     let bytes = 0;
     let settled = false;
     let cleanupRequested = false;
+    let finished = false; // set when the writer flushed everything to disk
     const removeDestination = () => {
       // A stream can finish opening after destroy() is called. Retry removal
       // on close so failed downloads cannot recreate an empty artifact.
       try { unlinkSync(destPath); } catch {}
     };
     function cleanup() {
+      // After 'finish' the file is complete on disk — a late socket error
+      // (RST after the last byte) must NOT delete a fully-written archive.
+      if (finished) return;
       cleanupRequested = true;
       try { out.destroy(); } catch {}
       // Never leave a misleading partial archive at the requested path.
@@ -795,7 +802,12 @@ export function downloadToFile(url, destPath, token) {
         }
         res.on('data', (chunk) => { bytes += chunk.length; });
         res.pipe(out);
-        out.on('finish', () => out.close(() => settle(() => resolve({ bytes, path: destPath }))));
+        out.on('finish', () => {
+          // All data flushed to the fd — the download succeeded regardless
+          // of what the socket does next.
+          finished = true;
+          out.close(() => settle(() => resolve({ bytes, path: destPath })));
+        });
         out.on('error', (e) => { cleanup(); settle(() => reject(e)); });
         res.on('error', (e) => { cleanup(); settle(() => reject(e)); });
       });

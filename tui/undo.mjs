@@ -17,11 +17,17 @@ export function pushUndo(entry) {
   redoStack.length = 0; // clear redo on new action
 }
 
+// In-flight guard: undo()/redo() are async; a double keypress would pop two
+// entries and race on push, losing entries or corrupting the stacks.
+let _undoBusy = false;
+
 export async function undo() {
+  if (_undoBusy) return false;
   if (undoStack.length === 0) {
     showMessage('Nothing to undo', 'info');
     return false;
   }
+  _undoBusy = true;
   const entry = undoStack.pop();
   try {
     await entry.undo();
@@ -34,14 +40,18 @@ export async function undo() {
     // Push it back since undo failed
     undoStack.push(entry);
     return false;
+  } finally {
+    _undoBusy = false;
   }
 }
 
 export async function redo() {
+  if (_undoBusy) return false;
   if (redoStack.length === 0) {
     showMessage('Nothing to redo', 'info');
     return false;
   }
+  _undoBusy = true;
   const entry = redoStack.pop();
   try {
     await entry.redo();
@@ -53,6 +63,8 @@ export async function redo() {
     showMessage('Redo failed: ' + (e.message || 'unknown'), 'error');
     redoStack.push(entry);
     return false;
+  } finally {
+    _undoBusy = false;
   }
 }
 

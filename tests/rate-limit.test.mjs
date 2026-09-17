@@ -80,6 +80,17 @@ describe('resyncRateLimit authoritative poll', () => {
     assert.equal(lastRateLimit.reset, T0);
   });
 
+  it('ignores a poll whose window is OLDER than the live mirror (skewed body clock)', () => {
+    // Complementary guard: a poll from an earlier window (e.g. its body clock
+    // is an hour behind the core headers) must not drag the live counter
+    // backwards — the mirror keeps the header-derived values.
+    resetRateLimit();
+    updateRateLimit(5000, 4990, T0);
+    resyncRateLimit(5000, 4800, T0 - 3600);
+    assert.equal(lastRateLimit.remaining, 4990);
+    assert.equal(lastRateLimit.reset, T0);
+  });
+
   it('baseline (no stored window) still accepts the poll', () => {
     resetRateLimit();
     resyncRateLimit(5000, 4990, T0);

@@ -118,7 +118,13 @@ export function pageDown(screen) {
 
 export function getFilteredNotifications() {
   if (!_snoozeLoaded) loadSnoozedState();
-  const key = [appState.notifications.length, appState.inboxFilter, appState.inboxTextFilter, appState.inboxHideProcessed, appState.localRepoFilter, appState.inboxGrouped, Object.keys(appState.inboxSnoozed || {}).length, (appState.notifications._mutGen || 0)].join('|');
+  // Cache key includes the snooze-expiry EPOCH BUCKET, not just the key
+  // count: a snooze can expire (active → expired in the filter below)
+  // without any key being added/removed, so a count-only key served stale
+  // "still snoozed" rows until an unrelated bump. Bucketing by minute keeps
+  // the key stable within a tick while guaranteeing eventual expiry.
+  const snoozeSig = Object.entries(appState.inboxSnoozed || {}).map(([id, until]) => id + ':' + Math.floor(until / 60000)).sort().join(',');
+  const key = [appState.notifications.length, appState.inboxFilter, appState.inboxTextFilter, appState.inboxHideProcessed, appState.localRepoFilter, appState.inboxGrouped, snoozeSig, Math.floor(Date.now() / 60000), (appState.notifications._mutGen || 0)].join('|');
   if (_filterCache.key === key && _filterCache.result) return _filterCache.result;
   let list = appState.notifications;
   if (appState.inboxHideProcessed) list = list.filter(n => n.unread);
@@ -203,18 +209,26 @@ export async function markGroupRead() {
   if (!n) return;
   const members = n._groupNotifications && n._groupNotifications.length > 1 ? n._groupNotifications : [n];
   confirm('Mark ' + members.length + ' thread(s) as read?', async () => {
+    // finally-based invalidation: on a mid-loop failure the already-marked
+    // items must still leave the unread filter cache, or the UI lies (shows
+    // them unread) until an unrelated bump happens.
+    let done = 0;
     try {
       for (const m of members) {
         if (m.unread) {
           await markNotificationRead(appState.token, m.id);
           m.unread = false;
+          done++;
         }
       }
-      bumpInboxFilterGen();
       normalizeInboxCursor();
       showMessage('✓ Marked ' + members.length + ' as read', 'success');
+    } catch (e) {
+      showMessage('Failed after ' + done + '/' + members.length + ': ' + e.message, 'error');
+    } finally {
+      bumpInboxFilterGen();
       render();
-    } catch (e) { showMessage('Failed: ' + e.message, 'error'); }
+    }
   }, 'Mark Group Read');
 }
 
@@ -236,20 +250,26 @@ export function markAllRead() {
   }
   confirm('Mark ' + targets.length + ' visible as read? (filtered view; snoozed excluded)', async () => {
     if (!appState.token) return;
+    // Snapshot targets now: the user may navigate away / state may change
+    // while the batch is in flight — members captured earlier stay accurate.
+    const batch = targets.slice();
+    let done = 0;
     try {
-      let count = 0;
-      for (const m of targets) {
+      for (const m of batch) {
         if (m.unread) {
           await markNotificationRead(appState.token, m.id);
           m.unread = false;
-          count++;
+          done++;
         }
       }
-      bumpInboxFilterGen();
       normalizeInboxCursor();
-      showMessage('✓ Marked ' + count + ' as read', 'success');
+      showMessage('✓ Marked ' + done + ' as read', 'success');
+    } catch (e) {
+      showMessage('Failed after ' + done + '/' + batch.length + ': ' + e.message, 'error');
+    } finally {
+      bumpInboxFilterGen();
       render();
-    } catch (e) { showMessage('Failed: ' + e.message, 'error'); }
+    }
   }, 'Mark All Read');
 }
 

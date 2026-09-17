@@ -1,6 +1,6 @@
 // Explore user-repos flow — search users, then list a user's public repos.
 
-import { describe, it } from 'node:test';
+import { describe, it, beforeEach, afterEach } from 'node:test';
 import assert from 'node:assert/strict';
 import { appState } from '../tui/state.mjs';
 import {
@@ -10,6 +10,28 @@ import {
 } from '../tui/tabs/analyze-search.mjs';
 
 describe('Explore user search', () => {
+  // Isolation: every case below mutates the shared appState singleton (and the
+  // sort cases permanently overwrite userRepos/userReposSort/userReposScroll).
+  // Snapshot before each test and restore after, so the "defaults" assertions
+  // no longer depend on execution order.
+  let saved;
+  beforeEach(() => {
+    saved = {
+      searchType: appState.searchType,
+      userRepos: appState.userRepos,
+      userReposSort: appState.userReposSort,
+      userReposScroll: appState.userReposScroll,
+      userReposPage: appState.userReposPage,
+      userReposSelected: appState.userReposSelected,
+      userSearchResults: appState.userSearchResults,
+      codeSearchResults: appState.codeSearchResults,
+      searchResults: appState.searchResults,
+    };
+  });
+  afterEach(() => {
+    Object.assign(appState, saved);
+  });
+
   it('searchType defaults to repos', () => {
     assert.equal(appState.searchType, 'repos');
   });

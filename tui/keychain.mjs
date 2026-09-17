@@ -7,7 +7,7 @@
 // The module never throws — every public function returns a value or null/false
 // so callers can always fall back to plaintext gracefully.
 
-import { execSync } from 'child_process';
+import { execFileSync } from 'child_process';
 import { appendFileSync } from 'fs';
 import { join } from 'path';
 import { platform, homedir } from 'os';
@@ -115,21 +115,21 @@ export function removeTokenSecure() {
 // ── macOS Keychain (security CLI) ───────────────────────────────────
 
 function _saveMacos(token) {
-  // -U updates the entry if it already exists
-  execSync(
-    'security add-generic-password' +
-    ' -s ' + _q(SERVICE) +
-    ' -a ' + _q(ACCOUNT) +
-    ' -w ' + _q(token) +
-    ' -U',
+  // -U updates the entry if it already exists.
+  // argv-array form: the token never passes through a shell and is no
+  // longer quoted into the process command line string.
+  execFileSync(
+    'security',
+    ['add-generic-password', '-s', SERVICE, '-a', ACCOUNT, '-w', String(token), '-U'],
     { stdio: 'pipe', timeout: 5000 }
   );
   return true;
 }
 
 function _loadMacos() {
-  const out = execSync(
-    'security find-generic-password -s ' + _q(SERVICE) + ' -w',
+  const out = execFileSync(
+    'security',
+    ['find-generic-password', '-s', SERVICE, '-w'],
     { stdio: ['pipe', 'pipe', 'pipe'], encoding: 'utf-8', timeout: 5000 }
   ).trim();
   return out || null;
@@ -137,8 +137,9 @@ function _loadMacos() {
 
 function _removeMacos() {
   try {
-    execSync(
-      'security delete-generic-password -s ' + _q(SERVICE),
+    execFileSync(
+      'security',
+      ['delete-generic-password', '-s', SERVICE],
       { stdio: 'pipe', timeout: 5000 }
     );
   } catch { /* entry may not exist — ignore */ }
@@ -147,19 +148,20 @@ function _removeMacos() {
 // ── Linux libsecret (secret-tool) ───────────────────────────────────
 
 function _saveSecretTool(token) {
-  // secret-tool reads the secret from stdin
-  execSync(
-    'secret-tool store --label=' + _q('GitHub TUI Token') +
-    ' service ' + _q(SERVICE) +
-    ' username ' + _q(ACCOUNT),
+  // secret-tool reads the secret from stdin — it never appears on a
+  // command line. Attribute values are separate argv items now.
+  execFileSync(
+    'secret-tool',
+    ['store', '--label=GitHub TUI Token', 'service', SERVICE, 'username', ACCOUNT],
     { input: token, stdio: ['pipe', 'pipe', 'pipe'], encoding: 'utf-8', timeout: 5000 }
   );
   return true;
 }
 
 function _loadSecretTool() {
-  const out = execSync(
-    'secret-tool lookup service ' + _q(SERVICE) + ' username ' + _q(ACCOUNT),
+  const out = execFileSync(
+    'secret-tool',
+    ['lookup', 'service', SERVICE, 'username', ACCOUNT],
     { stdio: ['pipe', 'pipe', 'pipe'], encoding: 'utf-8', timeout: 5000 }
   ).trim();
   return out || null;
@@ -167,8 +169,9 @@ function _loadSecretTool() {
 
 function _removeSecretTool() {
   try {
-    execSync(
-      'secret-tool clear service ' + _q(SERVICE) + ' username ' + _q(ACCOUNT),
+    execFileSync(
+      'secret-tool',
+      ['clear', 'service', SERVICE, 'username', ACCOUNT],
       { stdio: 'pipe', timeout: 5000 }
     );
   } catch { /* entry may not exist — ignore */ }
@@ -177,9 +180,12 @@ function _removeSecretTool() {
 // ── Windows Credential Manager (cmdkey + PowerShell) ────────────────
 
 function _saveWindows(token) {
-  // cmdkey stores the password directly
-  execSync(
-    'cmdkey /generic:' + SERVICE + ' /user:' + ACCOUNT + ' /pass:' + _qWin(token),
+  // cmdkey stores the password directly. argv-array form avoids the
+  // cmd.exe metacharacter escaping dance (_qWin) entirely; the token is
+  // passed as a single argument, never through a shell.
+  execFileSync(
+    'cmdkey',
+    ['/generic:' + SERVICE, '/user:' + ACCOUNT, '/pass:' + String(token)],
     { stdio: 'pipe', timeout: 5000 }
   );
   return true;
@@ -193,8 +199,9 @@ function _loadWindows() {
     `$c = Get-StoredCredential -Target '${safeService}'; ` +
     `if ($c) { $c.GetNetworkCredential().Password }`;
   try {
-    const out = execSync(
-      'powershell -NoProfile -NonInteractive -Command "' + ps.replace(/"/g, '\\"') + '"',
+    const out = execFileSync(
+      'powershell',
+      ['-NoProfile', '-NonInteractive', '-Command', ps],
       { stdio: ['pipe', 'pipe', 'pipe'], encoding: 'utf-8', timeout: 5000 }
     ).trim();
     return out || null;
@@ -207,7 +214,7 @@ function _loadWindows() {
 
 function _removeWindows() {
   try {
-    execSync('cmdkey /delete:' + SERVICE, { stdio: 'pipe', timeout: 5000 });
+    execFileSync('cmdkey', ['/delete:' + SERVICE], { stdio: 'pipe', timeout: 5000 });
   } catch { /* entry may not exist — ignore */ }
 }
 
@@ -216,30 +223,17 @@ function _removeWindows() {
 /** Check if a CLI command exists on PATH without throwing. */
 function _hasCommand(cmd) {
   try {
-    const probe = PLATFORM === 'win32'
-      ? 'where ' + cmd
-      : 'command -v ' + cmd + ' 2>/dev/null';
-    execSync(probe, { stdio: 'pipe', timeout: 3000 });
+    if (PLATFORM === 'win32') {
+      execFileSync('where', [cmd], { stdio: 'pipe', timeout: 3000 });
+    } else {
+      // POSIX: no external binary — use the shell builtin directly.
+      execFileSync('sh', ['-c', 'command -v "$1" >/dev/null 2>&1', '_', cmd],
+        { stdio: 'pipe', timeout: 3000 });
+    }
     return true;
   } catch {
     return false;
   }
-}
-
-/**
- * Shell-escape a string for POSIX shells.
- * Wraps the value in single quotes and escapes embedded single quotes.
- */
-function _q(str) {
-  return "'" + String(str).replace(/'/g, "'\\''") + "'";
-}
-
-/**
- * Escape a string for Windows cmd.exe — wrap in double quotes,
- * escape cmd.exe metacharacters with ^, and escape embedded double quotes.
- */
-function _qWin(str) {
-  return '"' + String(str).replace(/([&|<>^%])/g, '^$1').replace(/"/g, '\\"') + '"';
 }
 
 /** Write debug messages when DEBUG env var is set. */

@@ -146,9 +146,11 @@ async function _toggleStarInner() {
       r.stargazers_count = (r.stargazers_count || 0) + 1;
       showMessage('Starred ' + fullName, 'success');
     }
-    // snapshot pre-mutation state so a post-API throw can roll
-    // back BOTH the count AND the starred-list membership.
-    const preStargazers = r.stargazers_count || 0;
+    // Snapshot pre-mutation state so a post-API throw can roll back BOTH the
+    // count AND the starred-list membership. The count must come from preCount
+    // (captured before the star/unstar API call) — snapshotting it here, after
+    // the count was already mutated, would "roll back" to the wrong value.
+    const preStargazers = preCount;
     const preStarredList = Array.isArray(appState.starred) ? [...appState.starred] : [];
     try {
       // Update stargazers_count in every app state array that may contain this repo.
@@ -371,12 +373,20 @@ export function handleKey(key) {
     if (whichKey.isOpen()) whichKey.close();
   } else {
     // 0a1. Which-Key handles keys when active
+    let skipPrefixCheck = false;
     if (whichKey.isOpen()) {
       if (whichKey.handleKey(key)) return;
+      // handleKey() returned false: it closed the overlay and let this key
+      // through — either a completed sequence re-injecting its motion key
+      // (e.g. 'gg': binding run() returns 'g') or an unbound key. The same
+      // press must NOT fall into the prefix check below, or the injected 'g'
+      // re-opened a new sequence and 'gg' could never reach the main handler
+      // (the g-group re-trigger bug).
+      skipPrefixCheck = true;
     }
 
     // 0a2. Check for prefix keys to start which-key sequence
-    if (!whichKey.isOpen() && whichKey.isPrefixKey(key)) {
+    if (!skipPrefixCheck && !whichKey.isOpen() && whichKey.isPrefixKey(key)) {
       whichKey.startSequence(key);
       return;
     }

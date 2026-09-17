@@ -973,60 +973,35 @@ export function dismissConfirm() {
  */
 export function confirmAsync(message, title = 'Confirm') {
   return new Promise((resolve) => {
-    const origAction = appState.confirmAction;
-    const origMessage = appState.confirmMessage;
-    const origTitle = appState.confirmTitle;
-
     // Guard against stacked confirms
-    if (origAction) {
+    if (appState.confirmAction) {
       showMessage('A confirmation is already pending', 'warning');
       resolve(false);
       return;
     }
 
+    let settled = false;
+    let interval = null;
+    const settle = (value) => {
+      if (settled) return;
+      settled = true;
+      if (interval) clearInterval(interval);
+      appState.confirmAction = null;
+      appState.confirmMessage = '';
+      appState.confirmTitle = 'Confirm';
+      resolve(value);
+    };
+
     appState.confirmMessage = message;
     appState.confirmTitle = title;
-    appState.confirmAction = () => {
-      // Restore original state (in case of nested confirms)
-      appState.confirmAction = origAction;
-      appState.confirmMessage = origMessage;
-      appState.confirmTitle = origTitle;
-      resolve(true);
-    };
+    appState.confirmAction = () => settle(true);
 
-    // Store original dismissConfirm for cleanup
-    const origDismiss = dismissConfirm;
-    const patchedDismiss = () => {
-      // Restore original state
-      appState.confirmAction = origAction;
-      appState.confirmMessage = origMessage;
-      appState.confirmTitle = origTitle;
-      resolve(false);
-    };
-
-    // Override dismissConfirm temporarily
-    // Note: keys.mjs calls dismissConfirm() directly, so we need to
-    // intercept the state change. We'll use a proxy pattern.
-    const checkDismissed = () => {
-      if (appState.confirmAction === null && !resolved) {
-        resolved = true;
-        resolve(false);
-      }
-    };
-
-    let resolved = false;
-
-    // Poll for dismissal (simple approach)
-    const interval = setInterval(() => {
-      if (resolved) {
-        clearInterval(interval);
-        return;
-      }
-      if (appState.confirmAction === null) {
-        resolved = true;
-        clearInterval(interval);
-        resolve(false);
-      }
+    // Dismissal watch: keys.mjs calls dismissConfirm() directly, which nulls
+    // confirmAction without invoking it. The old poller referenced dead
+    // locals (origDismiss/patchedDismiss/checkDismissed) and never settled
+    // false through its own wrapper — this one terminates explicitly.
+    interval = setInterval(() => {
+      if (appState.confirmAction === null) settle(false);
     }, 50);
 
     render();
@@ -1080,7 +1055,7 @@ import { APP_VERSION } from './config.mjs';
 // Pre-release tags sort BEFORE the matching released version ("1.0.0-rc1" < "1.0.0").
 export function compareVersions(a, b) {
   function parse(v) {
-    if (typeof v !== 'string') return { parts: [0, 0, 0], pre: '' };
+    if (typeof v !== 'string') return { parts: [0, 0, 0], preIds: [] };
     const cleaned = v.trim().replace(/^v/i, '');
     const [main, pre = ''] = cleaned.split('-');
     const parts = main.split('.').map(p => {
@@ -1088,7 +1063,11 @@ export function compareVersions(a, b) {
       return isNaN(n) ? 0 : n;
     });
     while (parts.length < 3) parts.push(0);
-    return { parts, pre };
+    // Split pre-release into dot-separated identifiers so numeric segments
+    // compare numerically (semver rule: "rc10" > "rc2", which raw string
+    // < / > got backwards — '1' < '2').
+    const preIds = pre ? pre.split('.').map(id => (/^\d+$/.test(id) ? { n: parseInt(id, 10) } : { s: id })) : [];
+    return { parts, preIds };
   }
   const pa = parse(a);
   const pb = parse(b);
@@ -1099,10 +1078,27 @@ export function compareVersions(a, b) {
     if (av < bv) return -1;
     if (av > bv) return 1;
   }
-  if (pa.pre && !pb.pre) return -1;
-  if (!pa.pre && pb.pre) return 1;
-  if (pa.pre < pb.pre) return -1;
-  if (pa.pre > pb.pre) return 1;
+  if (pa.preIds.length && !pb.preIds.length) return -1;
+  if (!pa.preIds.length && pb.preIds.length) return 1;
+  // Both have pre-release tags: compare identifier-by-identifier (semver).
+  const plen = Math.max(pa.preIds.length, pb.preIds.length);
+  for (let i = 0; i < plen; i++) {
+    const ai = pa.preIds[i];
+    const bi = pb.preIds[i];
+    if (!ai && bi) return -1;   // shorter set sorts first
+    if (ai && !bi) return 1;
+    if (!ai || !bi) continue;
+    if (ai.n !== undefined && bi.n !== undefined) {
+      if (ai.n < bi.n) return -1;
+      if (ai.n > bi.n) return 1;
+    } else if (ai.s !== undefined && bi.s !== undefined) {
+      if (ai.s < bi.s) return -1;
+      if (ai.s > bi.s) return 1;
+    } else {
+      // Numeric identifiers always sort below alphanumeric ones.
+      return ai.n !== undefined ? -1 : 1;
+    }
+  }
   return 0;
 }
 

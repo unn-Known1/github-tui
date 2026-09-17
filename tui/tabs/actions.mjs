@@ -62,8 +62,13 @@ export function followScroll(selected, scroll, maxVisible) { if (selected < scro
 
 function activeRepo() { const snap = appState.actionsActiveRepo; if (snap) { const hit = (appState.actionsRepos || []).find(r => r.full_name === snap); if (hit) return hit; } const repos = getFilteredRepos(); return repos[appState.actionsRepoSelected] || null; }
 
-let _scanCancelled = false;
-export function cancelWorkflowScan() { _scanCancelled = true; }
+// Cancellation is keyed to the in-flight scan generation: a module-level
+// boolean was reset on every scan entry, so starting a new scan wiped the
+// cancel intent of the scan still running (they are never concurrent in a
+// healthy flow, but an [x]-then-[R] sequence hit exactly this window).
+let _cancelledScanGen = null;
+let _currentScanGen = null;
+export function cancelWorkflowScan() { _cancelledScanGen = _currentScanGen; }
 
 export async function loadActionsRepos() {
   if (!appState.token) return;
@@ -92,8 +97,10 @@ export async function loadActionsRepos() {
     const total = appState.repos.length;
     const shown = appState.actionsRepos.length;
     const unscanned = Math.max(0, total - 200);
-    if (_scanCancelled) {
+    if (_cancelledScanGen === gen) {
       showMessage('Scan cancelled — partial results', 'warning', 5000);
+    } else if (appState.actionsScanProbeFailures > 0) {
+      showMessage(shown + ' repos with workflows (' + appState.actionsScanProbeFailures + ' probes failed — those repos stay visible)', 'warning', 6000);
     } else if (total > 200 && shown > 0) {
       showMessage('Showing ' + shown + ' of ' + total + ' repos with workflows (first 200 scanned)', 'success', 5000);
     } else {
@@ -116,10 +123,11 @@ async function scanReposForWorkflows(gen) {
   const capped = repos.slice(0, CAP);
   const noWorkflow = new Set();
   const queue = capped.slice();
-  _scanCancelled = false;
+  _currentScanGen = gen;
+  let probeFailures = 0;
   let done = 0;
   const worker = async () => {
-    while (queue.length > 0 && !isStale(gen) && !_scanCancelled) {
+    while (queue.length > 0 && !isStale(gen) && _cancelledScanGen !== gen) {
       const r = queue.shift();
       if (!r || !r.full_name) { done++; if (done % 5 === 0) { appState.actionsScanProgress = { done, total: queue.length + done }; render(); } continue; }
       const [owner, name] = r.full_name.split('/');
@@ -128,7 +136,12 @@ async function scanReposForWorkflows(gen) {
         const result = await getWorkflows(appState.token, owner, name, gen.signal);
         const workflows = Array.isArray(result) ? result : (result?.workflows || []);
         if (workflows.length === 0) noWorkflow.add(r.full_name);
-      } catch { /* keep repo visible — could not determine */ }
+      } catch {
+        // Keep the repo visible, but stop pretending failures are free:
+        // a 403/rate-limit burst silently bucketed repos wrong. Count them
+        // so the completion toast can surface the uncertainty.
+        probeFailures++;
+      }
       done++;
       if (done % 5 === 0) { appState.actionsScanProgress = { done, total: queue.length + done }; render(); }
     }
@@ -136,10 +149,13 @@ async function scanReposForWorkflows(gen) {
   const count = Math.min(WORKFLOW_SCAN_CONCURRENCY, Math.max(1, queue.length));
   await Promise.all(Array.from({ length: count }, worker));
   appState.actionsScanProgress = null;
-  if (!isStale(gen) && !_scanCancelled) {
+  appState.actionsScanProbeFailures = probeFailures;
+  if (!isStale(gen) && _cancelledScanGen !== gen) {
     appState.actionsNoWorkflowRepos = noWorkflow;
     appState.actionsScanDone = true;
-  } else if (!isStale(gen) && _scanCancelled) {
+  } else if (!isStale(gen)) {
+    // Cancelled (not stale): keep partial results visible, but do not mark
+    // the scan as done so a later rescan can finish the job.
     appState.actionsNoWorkflowRepos = noWorkflow;
   }
 }
@@ -225,7 +241,7 @@ registerInputHandler('actions-dispatch-workflow', (value) => {
   const dispatch = appState.actionsDispatch;
   const workflows = appState.actionsWorkflowList || [];
   const raw = String(value || '').trim();
-  const index = /^\\d+$/.test(raw) ? Number(raw) - 1 : -1;
+  const index = /^\d+$/.test(raw) ? Number(raw) - 1 : -1;
   const workflow = index >= 0 ? workflows[index] : workflows.find(w => String(w.name || w.path || w.id) === raw);
   if (!workflow) { showMessage('Unknown workflow — choose a listed number or exact name', 'warning'); return; }
   dispatch.workflow = workflow;
@@ -269,6 +285,7 @@ export async function loadFailureQueue() {
     // likely-active repos first.
     const candidates = [...appState.actionsRepos].sort((a,b) => Date.parse(b.pushed_at||b.updated_at||0) - Date.parse(a.pushed_at||a.updated_at||0)).slice(0, 20);
     const queue = candidates.slice();
+    let probeFailures = 0;
     const worker = async () => {
       while (queue.length > 0) {
         if (isStale(gen)) return;
@@ -279,7 +296,12 @@ export async function loadFailureQueue() {
         try {
           const result = await getWorkflowRuns(appState.token, owner, name, 1, 10, gen.signal);
           groups.push({ repo: repo.full_name, runs: result?.workflow_runs || [] });
-        } catch { /* preserve partial aggregate */ }
+        } catch {
+          // Preserve the partial aggregate, but count the failure: a 401 or
+          // rate-limit burst must not be indistinguishable from "no failures
+          // found" (the repos simply never got counted into the queue).
+          probeFailures++;
+        }
       }
     };
     const count = Math.min(5, Math.max(1, queue.length));
@@ -288,7 +310,9 @@ export async function loadFailureQueue() {
       appState.actionsFailures = buildFailureQueue(groups);
       const total = appState.actionsRepos.length;
       const scanned = candidates.length;
-      showMessage('Found ' + appState.actionsFailures.length + ' failed runs (scanned ' + scanned + '/' + total + ' repos)', 'info');
+      const failedNote = probeFailures > 0 ? ', ' + probeFailures + ' probes failed' : '';
+      showMessage('Found ' + appState.actionsFailures.length + ' failed runs (scanned ' + scanned + '/' + total + ' repos' + failedNote + ')',
+        probeFailures > 0 ? 'warning' : 'info');
     }
   } finally {
     if (!isStale(gen)) { appState.actionsFailureLoading = false; render(); }
@@ -477,7 +501,7 @@ function renderWorkflowLog(screen, y, h, W) {
   screen.writeStr(Math.max(2, W - 28), y, log?.truncated ? 'TRUNCATED' : 'FULL LOG', log?.truncated ? { fg: 'yellow', bold: true } : { dim: true });
   screen.hline(y + 1, '─', color('dim'));
   if (appState.actionsLoading && !log?.text) { loadingIndicator(screen, 2, y + 3, 'loading log'); return; }
-  const lines = String(log?.text || '(empty log)').split(/\\r?\\n/);
+  const lines = String(log?.text || '(empty log)').split(/\r?\n/);
   const rows = Math.max(1, h - 5);
   const maxScroll = Math.max(0, lines.length - rows);
   appState.actionsLogScroll = Math.max(0, Math.min(maxScroll, appState.actionsLogScroll || 0));
@@ -799,7 +823,7 @@ export function up() {
 
 export function down() {
   if (appState.actionsLog) {
-    const lines = String(appState.actionsLog.text || '').split(/\\r?\\n/);
+    const lines = String(appState.actionsLog.text || '').split(/\r?\n/);
     appState.actionsLogScroll = Math.min(Math.max(0, lines.length - 1), appState.actionsLogScroll + 1);
     render();
   } else if (appState.actionsView === 'failures') {
@@ -829,7 +853,7 @@ export function down() {
 
 export function bottom(screen) {
   if (appState.actionsLog) {
-    const lines = String(appState.actionsLog.text || '').split(/\\r?\\n/);
+    const lines = String(appState.actionsLog.text || '').split(/\r?\n/);
     appState.actionsLogScroll = Math.max(0, lines.length - 1);
   } else if (appState.actionsView === 'repos') {
     const repos = getFilteredRepos();

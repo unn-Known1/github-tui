@@ -33,10 +33,32 @@ describe('getStatCardLayout', () => {
     assert.ok(l.startX > 10);
   });
 
-  it('keeps cardWidth wide enough for the "ACCOUNT AGE" label at all sane widths', () => {
-    for (let w = 60; w <= 220; w += 10) {
+  it('keeps cardWidth wide enough for the "ACCOUNT AGE" label across all widths 60..220', () => {
+    for (let w = 60; w <= 220; w += 1) {
       const l = getStatCardLayout(w);
       assert.ok(l.cardWidth >= 15, `width ${w} cardWidth ${l.cardWidth} < 15`);
+    }
+  });
+
+  it('transitions cleanly at every breakpoint boundary', () => {
+    // Off-by-one probes on both sides of each breakpoint (xs<60, sm<80,
+    // md<100, lg<120): the counts must differ exactly at the boundary and
+    // be equal just inside it.
+    assert.notEqual(getStatCardLayout(59).cardsPerRow, getStatCardLayout(60).cardsPerRow); // xs → sm
+    assert.notEqual(getStatCardLayout(79).cardsPerRow, getStatCardLayout(80).cardsPerRow); // sm → md
+    assert.notEqual(getStatCardLayout(99).cardsPerRow, getStatCardLayout(100).cardsPerRow); // md → lg
+    // lg → xl keeps 5 per row (same branch); cardWidth keeps growing.
+    assert.equal(getStatCardLayout(119).cardsPerRow, getStatCardLayout(120).cardsPerRow);
+    assert.ok(getStatCardLayout(120).cardWidth >= getStatCardLayout(119).cardWidth);
+  });
+
+  it('handles very narrow or degenerate widths without crashing', () => {
+    for (const w of [-10, 0, 1, 10, 30, 40, 50]) {
+      const l = getStatCardLayout(w);
+      assert.ok(l && Number.isFinite(l.cardWidth), `width ${w}: cardWidth must be a finite number`);
+      assert.ok(l.cardWidth >= 1, `width ${w}: cardWidth must be >= 1`);
+      assert.ok(l.cardsPerRow >= 1, `width ${w}: at least one card per row`);
+      assert.ok(l.startX >= 0, `width ${w}: startX must be non-negative`);
     }
   });
 });

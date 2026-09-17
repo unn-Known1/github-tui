@@ -39,7 +39,7 @@ describe('sortRepos', () => {
   });
 
   it('does not mutate original array', () => {
-    const original = [...repos];
+    const original = structuredClone(repos); // deep copy: element refs must not be mutated either
     sortRepos(repos, { field: 'name', asc: true });
     assert.deepEqual(repos, original);
   });
@@ -130,7 +130,7 @@ describe('applyAllFilters', () => {
   });
 
   it('does not mutate original array', () => {
-    const original = [...repos];
+    const original = structuredClone(repos); // deep copy: element refs must not be mutated either
     applyAllFilters(repos, { ...baseFilters, typeFilter: 'forks' });
     assert.deepEqual(repos, original);
   });
@@ -163,7 +163,7 @@ describe('floatPinsToTop', () => {
   });
 
   it('does not mutate original array', () => {
-    const original = [...repos];
+    const original = structuredClone(repos); // deep copy: element refs must not be mutated either
     floatPinsToTop(repos, ['user/alpha']);
     assert.deepEqual(repos, original);
   });

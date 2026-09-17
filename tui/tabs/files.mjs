@@ -810,6 +810,10 @@ async function _saveCurrentFolderImpl() {
           try {
             const txt = await getRepoFile(
               appState.token, owner, name, e.path, appState.filesRef, gen.signal);
+            // Re-check AFTER the await: without this, a user navigating away
+            // or switching branch mid-flight still wrote the fetched file of
+            // the abandoned operation to disk (stale-write).
+            if (isStale(gen) || gen.signal.aborted) return;
             const rel = repoName + '/' + e.path.replace(
               new RegExp('^' + root.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '/?'), '');
             writeFileSafe(rel, txt);
@@ -1199,7 +1203,7 @@ function renderFileHistory(screen, y, maxH) {
     const sha = String(c.sha || '').slice(0, 8);
     const author = c.author?.name || c.commit?.author?.name || c.committer?.login || '?';
     const date = c.commit?.author?.date || c.commit?.committer?.date;
-    const subject = c.commit?.message?.split(/\\r?\\n/)[0] || '(no message)';
+    const subject = c.commit?.message?.split(/\r?\n/)[0] || '(no message)';
     screen.writeStr(2, row, (sel ? '▶ ' : '  ') + sha, sel ? color('selection') : color('accent'));
     screen.writeStr(14, row, truncateToWidth(author, 18, ''), sel ? color('selection') : null);
     screen.writeStr(34, row, truncateToWidth(subject, Math.max(10, W - 50), ''), sel ? color('selection') : null);

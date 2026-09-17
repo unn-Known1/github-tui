@@ -50,9 +50,11 @@ const P = {
 };
 
 // ── Helper: build a full theme from a spec object ──────────────────
-// Every key is a semantic role. Missing keys fall back to the default theme.
+// Every key is a semantic role. Missing keys fall back to the default theme
+// (implemented via the prototype chain: color() finds roles defined on the
+// spec first, and inherited DEFAULT roles otherwise).
 function makeTheme(spec) {
-  return spec;
+  return Object.create(spec);
 }
 
 // ── Default — GitHub dark, professional ───────────────────────────
@@ -241,8 +243,11 @@ export function setTheme(name) {
   if (!THEMES[name]) return false;
   active = name;
   appState.themeName = name;
-  try { writeFileSync(THEME_FILE, name); } catch {}
-  return true;
+  // Persistence is best-effort: report failure (read-only FS, permissions)
+  // instead of claiming success while the theme silently reverts next run.
+  let persisted = true;
+  try { writeFileSync(THEME_FILE, name); } catch { persisted = false; }
+  return persisted;
 }
 
 export function loadTheme() {

@@ -4,7 +4,8 @@
 // pulls bullets from CHANGELOG.md so the "what's new" message stops going
 // stale on every release.
 
-import { appState, render, showMessage, setTab, compareVersions } from '../state.mjs';
+import { appState, render, showMessage, setTab, compareVersions, startAsync, isStale } from '../state.mjs';
+import { debugLog } from '../debug.mjs';
 // Re-export compareVersions so callers (notably the app.mjs version-gate
 // and tests/onboarding.test.mjs) can import it from this module — the
 // onboarding flow is the canonical consumer of "is the user's APP_VERSION
@@ -55,7 +56,10 @@ function readChangelogSync() {
   if (_changelogCache !== null) return _changelogCache;
   try {
     _changelogCache = readFileSync(CHANGELOG_PATH, 'utf8');
-  } catch {
+  } catch (e) {
+    // A missing/unreadable CHANGELOG degrades to "No release notes bundled"
+    // — fine — but log it so a broken package install is diagnosable.
+    debugLog('onboarding: failed to read changelog:', e && e.message);
     _changelogCache = '';
   }
   return _changelogCache;
@@ -89,7 +93,10 @@ export async function probeGhAndInvalidate() {
     const settings = await import('./settings.mjs');
     const ok = await settings.isGhInstalled();
     appState._ghAvailable = ok === true;
-  } catch {
+  } catch (e) {
+    // Default to "not installed" but leave a trail — a persistently failing
+    // probe otherwise shows as a permanent "Detecting login" state.
+    debugLog('onboarding: gh probe failed:', e && e.message);
     appState._ghAvailable = false;
   }
   _stepsDirty = true;
@@ -247,7 +254,11 @@ export function markWelcomeSeen() {
     const dir = dirname(WELCOME_SEEN_FILE);
     if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
     writeFileSync(WELCOME_SEEN_FILE, '1');
-  } catch {}
+  } catch (e) {
+    // Non-fatal (worst case: the welcome overlay shows once more next boot),
+    // but a read-only CONFIG_DIR should be visible when debugging.
+    debugLog('onboarding: failed to persist welcome marker:', e && e.message);
+  }
 }
 
 // Should the "what's new" overlay auto-launch on this boot?
@@ -282,6 +293,28 @@ export function handleOnboardingKey(key) {
     const step = STEPS[stepIdx];
     if (step && step.onEnter) {
       const r = step.onEnter();
+      if (r && typeof r.then === 'function') {
+        // Async onEnter (e.g. gh login): stay on this step until it resolves.
+        // Advancing immediately made Enter skip the login flow entirely; the
+        // modal then closed and markVersionSeen() ran before auth finished.
+        const gen = startAsync('onboarding-enter');
+        r.then(() => {
+          if (isStale(gen)) return;
+          stepIdx++;
+          if (stepIdx >= STEPS.length) {
+            appState.showOnboarding = false;
+            appState.showWelcome = false;
+            markVersionSeen();
+          }
+          render();
+        }).catch(e => {
+          if (isStale(gen)) return;
+          showMessage((e && e.message) || 'Login failed', 'error');
+          render();
+        });
+        render();
+        return true;
+      }
       if (r !== false) stepIdx++;
     } else {
       stepIdx++;

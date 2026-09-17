@@ -170,9 +170,14 @@ export function focusPrev() {
   const zones = FOCUS_ZONES[_focusState.tab] || [];
   if (zones.length === 0) return;
 
-  let prev = _focusState.zoneIndex - 1;
+  // Normalize first: zoneIndex is -1 in the initial dashboard state, and
+  // JS % preserves the sign of the dividend — (-2 - i + n) % n can yield -1
+  // mid-loop, which zones[-1] is undefined and the truly last zone is never
+  // probed. Normalizing into [0, n) fixes both.
+  const cur = _focusState.zoneIndex < 0 ? zones.length - 1 : _focusState.zoneIndex % zones.length;
+  let prev = cur - 1;
   for (let i = 0; i < zones.length; i++) {
-    const idx = (prev - i + zones.length) % zones.length;
+    const idx = ((prev - i) % zones.length + zones.length) % zones.length;
     if (zones[idx].canFocus()) {
       _focusState.zoneIndex = idx;
       syncDashboardFocus();
@@ -225,7 +230,9 @@ export function getFocusedSelection() {
     if (zone.id === 'prs') return { type: 'list', index: appState.dashboardPRSelected, scroll: appState.dashboardPRScroll };
     if (zone.id === 'topRepos') return { type: 'list', index: appState.dashboardTopSelected || 0, scroll: appState.dashboardTopScroll || 0 };
     if (zone.id === 'stale') return { type: 'list', index: appState.dashboardStaleSelected || 0, scroll: appState.dashboardStaleScroll || 0 };
-    if (zone.id === 'custom') return { type: 'custom', section: appState.dashboardCustomSectionSelected, index: appState.dashboardCustomItemSelected };
+    // Guard like every other branch: these fields are undefined until the
+    // user first selects a custom section/item, and consumers index with them.
+    if (zone.id === 'custom') return { type: 'custom', section: appState.dashboardCustomSectionSelected || 0, index: appState.dashboardCustomItemSelected || 0 };
   }
   if (t === 1) {
     if (zone.id === 'list') {

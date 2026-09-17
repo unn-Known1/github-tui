@@ -201,7 +201,12 @@ export function parseBlamePorcelain(output = '') {
 export function validatePluginManifest(manifest) {
   if (!manifest || typeof manifest !== 'object') return { ok: false, error: 'Manifest must be an object' };
   if (typeof manifest.id !== 'string' || !/^[a-z0-9][a-z0-9._-]{1,63}$/.test(manifest.id)) return { ok: false, error: 'Invalid plugin id' };
-  if (typeof manifest.entry !== 'string' || manifest.entry.includes('..')) return { ok: false, error: 'Plugin entry must be a local path' };
+  // Entry must be a relative local path: reject traversal AND absolute
+  // paths (e.g. '/etc/passwd') and Windows-style separators, so a manifest
+  // can never point the loader outside the plugin directory.
+  if (typeof manifest.entry !== 'string' || manifest.entry.includes('..') || manifest.entry.startsWith('/') || manifest.entry.includes('\\')) {
+    return { ok: false, error: 'Plugin entry must be a local path' };
+  }
   if (manifest.capabilities && (!Array.isArray(manifest.capabilities) || manifest.capabilities.some(c => !['read-api', 'render'].includes(c)))) {
     return { ok: false, error: 'Unsupported plugin capability' };
   }

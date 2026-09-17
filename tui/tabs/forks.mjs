@@ -188,13 +188,21 @@ export function renderForks(screen, y, maxH) {
     }
 
     screen.writeStr(nameCol, row, sel ? '▶ ' : '  ', sel ? color('selection') : null);
-    const ownerName = (fork.owner && fork.owner.login) || fork.full_name.split('/')[0];
+    // Guard both fallbacks: fork.full_name may be null/undefined (no .split)
+    // and owner may be missing — a malformed fork must not blank the view.
+    const ownerName = (fork.owner && fork.owner.login)
+      || (typeof fork.full_name === 'string' && fork.full_name.includes('/') ? fork.full_name.split('/')[0] : (fork.full_name || '?'));
     screen.writeStr(nameCol + 2, row, truncate(ownerName, starsCol - nameCol - 4), sel ? color('selection') : null);
     const statStyle = sel ? color('selection') : color('dim');
     screen.writeStr(starsCol, row, String(fork.stargazers_count || 0), statStyle);
     screen.writeStr(forksCol, row, String(fork.forks_count || 0), statStyle);
     if (pushedCol + 12 < W) {
-      screen.writeStr(pushedCol, row, new Date(fork.pushed_at).toISOString().split('T')[0], statStyle);
+      // new Date(undefined).toISOString() throws RangeError — guard it.
+      const pushedTs = fork.pushed_at ? new Date(fork.pushed_at).getTime() : NaN;
+      const pushedText = Number.isFinite(pushedTs)
+        ? new Date(pushedTs).toISOString().split('T')[0]
+        : '—';
+      screen.writeStr(pushedCol, row, pushedText, statStyle);
     }
     if (fork._aheadBehind && aheadCol + 8 < W) {
       if (fork._aheadBehind.ok === false) {

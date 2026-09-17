@@ -28,6 +28,10 @@ export async function loadReleaseAssets(silent = false) {
         }
       }
     }
+    // TOCTOU guard: a newer load may have started (and reset state to [])
+    // while our last per-release await was in flight — without this check
+    // the stale result would overwrite the newer call's fresh state.
+    if (isStale(gen, 'analyze-packages')) { finishLoading(gen); return; }
     appState.repoReleaseAssets = allAssets;
   } catch (e) {
     if (!isStale(gen, 'analyze-packages')) showMessage('Failed to load release assets', 'error');

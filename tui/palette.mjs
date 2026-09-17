@@ -21,7 +21,7 @@ function insertPasteChars(str) {
   }
   if (out) {
     appState.paletteQuery = (appState.paletteQuery || '') + out;
-    appState.paletteCursor = 0;
+    moveCursorToItem(0);
   }
   render();
 }
@@ -107,13 +107,72 @@ export function filterGrouped(query) {
   return result;
 }
 
+// ── Slot model ─────────────────────────────────────────────────────
+// In grouped mode (empty query) the rendered list interleaves category
+// headers and action items. paletteCursor addresses *slots* (rendered
+// rows); only item slots are selectable/executable. Flat mode (with a
+// query) renders one item per slot, so the mapping degenerates to the
+// identity. Render, key navigation, execSelected, and mouse handlers
+// all share this mapping — do not compare the cursor against filter()
+// indices anywhere else.
+
+export function getSlotRows() {
+  const q = appState.paletteQuery;
+  if (q) return filter(q).map(a => ({ type: 'item', a }));
+  const rows = [];
+  for (const [cat, items] of filterGrouped(q)) {
+    rows.push({ type: 'header', label: cat });
+    for (const a of items) rows.push({ type: 'item', a });
+  }
+  return rows;
+}
+
+function firstItemSlot() {
+  const i = getSlotRows().findIndex(r => r.type === 'item');
+  return i;
+}
+
+/**
+ * Nearest selectable slot at or after `slot` (skips headers). Falls back to
+ * the first selectable slot; returns -1 when nothing is selectable.
+ * Exported for the mouse handlers so clicks/hovers on a header row snap to
+ * the first item under it instead of landing on an unselectable slot.
+ */
+export function nearestItemSlot(slot) {
+  const rows = getSlotRows();
+  if (slot >= 0 && slot < rows.length && rows[slot].type === 'item') return slot;
+  for (let i = Math.max(0, slot); i < rows.length; i++) {
+    if (rows[i].type === 'item') return i;
+  }
+  return firstItemSlot();
+}
+
+function lastItemSlot() {
+  const rows = getSlotRows();
+  for (let i = rows.length - 1; i >= 0; i--) {
+    if (rows[i].type === 'item') return i;
+  }
+  return -1;
+}
+
+function moveCursorToItem(slot) {
+  // Snap to the nearest selectable slot; keep 0 when nothing is selectable.
+  const rows = getSlotRows();
+  if (slot >= 0 && slot < rows.length && rows[slot].type === 'item') {
+    appState.paletteCursor = slot;
+    return;
+  }
+  const first = firstItemSlot();
+  appState.paletteCursor = first >= 0 ? first : 0;
+}
+
 let _paletteFocusToken = null;
 
 export function open(manageFocus = true) {
   if (appState.showPalette) return;
   appState.showPalette = true;
   appState.paletteQuery = '';
-  appState.paletteCursor = 0;
+  moveCursorToItem(0);
   _pasteActive = false;
   _pasteBuf = '';
   if (manageFocus) _paletteFocusToken = saveFocus();
@@ -130,8 +189,9 @@ export function close() {
   _paletteFocusToken = null;
 }
 export function execSelected() {
-  const matches = filter(appState.paletteQuery);
-  const a = matches[appState.paletteCursor];
+  const rows = getSlotRows();
+  const slot = rows[appState.paletteCursor];
+  const a = slot && slot.type === 'item' ? slot.a : null;
   if (!a) { close(); return; }
   close();
   try { Promise.resolve(a.run()).catch(e => showMessage(e.message, 'error')); }
@@ -170,21 +230,28 @@ export function handleKey(key) {
   if (key === '\x1b') { close(); return true; }
   if (key === '\x7f' || key === '\b') {
     appState.paletteQuery = appState.paletteQuery.slice(0, -1);
-    appState.paletteCursor = 0;
+    moveCursorToItem(0);
     render(); return true;
   }
   if (key === '\x1b[A' || key === 'k') {
-    appState.paletteCursor = Math.max(0, appState.paletteCursor - 1);
+    // Walk up to the nearest item slot above the cursor (skips headers).
+    const rows = getSlotRows();
+    let i = appState.paletteCursor - 1;
+    while (i >= 0 && (i >= rows.length || rows[i].type !== 'item')) i--;
+    if (i >= 0) appState.paletteCursor = i;
     render(); return true;
   }
   if (key === '\x1b[B' || key === 'j') {
-    const max = Math.max(0, filter(appState.paletteQuery).length - 1);
-    appState.paletteCursor = Math.min(max, appState.paletteCursor + 1);
+    // Walk down to the nearest item slot below the cursor (skips headers).
+    const rows = getSlotRows();
+    let i = appState.paletteCursor + 1;
+    while (i < rows.length && rows[i].type !== 'item') i++;
+    if (i < rows.length) appState.paletteCursor = i;
     render(); return true;
   }
   if (key.length === 1 && key.charCodeAt(0) >= 32) {
     appState.paletteQuery += key;
-    appState.paletteCursor = 0;
+    moveCursorToItem(0);
     render(); return true;
   }
   return true;
@@ -228,6 +295,11 @@ export function renderPalette(screen) {
   }
 
   const maxVisible = boxH - 5;
+  // Slot model: paletteCursor indexes rows (headers included) in both modes;
+  // only item slots are selectable. Cursor-anchored scrolling keeps the
+  // selected row visible without counting list indices separately.
+  const rows = getSlotRows();
+  if (appState.paletteCursor >= rows.length) appState.paletteCursor = lastItemSlot() >= 0 ? lastItemSlot() : 0;
   let scrollOff = 0;
   if (appState.paletteCursor >= maxVisible) {
     scrollOff = appState.paletteCursor - maxVisible + 1;
@@ -235,49 +307,36 @@ export function renderPalette(screen) {
 
   if (useGrouped) {
     // Grouped display with category headers
-    const grouped = filterGrouped(q);
-    let itemIndex = 0;
     let rendered = 0;
-    
-    for (const [cat, items] of grouped) {
-      if (rendered >= maxVisible) break;
-      
-      // Render category header
-      if (scrollOff <= itemIndex && itemIndex < scrollOff + maxVisible) {
-        const row = y + 3 + (itemIndex - scrollOff);
-        if (row < y + boxH - 2) {
-          screen.writeStr(x + 2, row, cat.toUpperCase(), { fg: 'cyan', bold: true });
-          rendered++;
+
+    for (let slot = scrollOff; slot < rows.length && rendered < maxVisible; slot++) {
+      const entry = rows[slot];
+      const row = y + 3 + (slot - scrollOff);
+      if (row >= y + boxH - 2) break;
+
+      if (entry.type === 'header') {
+        screen.writeStr(x + 2, row, entry.label.toUpperCase(), { fg: 'cyan', bold: true });
+        rendered++;
+        continue;
+      }
+
+      const a = entry.a;
+      const sel = slot === appState.paletteCursor;
+
+      if (sel) {
+        for (let xx = x + 1; xx < x + boxW - 1; xx++) {
+          screen.styleBuf[row][xx] = color('selection');
         }
       }
-      itemIndex++;
-      
-      // Render items in category
-      for (const a of items) {
-        if (rendered >= maxVisible) break;
-        if (itemIndex >= scrollOff && itemIndex < scrollOff + maxVisible) {
-          const row = y + 3 + (itemIndex - scrollOff);
-          if (row < y + boxH - 2) {
-            const sel = itemIndex === appState.paletteCursor;
-            
-            if (sel) {
-              for (let xx = x + 1; xx < x + boxW - 1; xx++) {
-                screen.styleBuf[row][xx] = color('selection');
-              }
-            }
-            
-            screen.writeStr(x + 3, row, sel ? '▶' : ' ', sel ? color('selection') : null);
-            screen.writeStr(x + 5, row, truncate(a.label, boxW - 36), sel ? color('selection') : null);
-            if (a.hint) {
-              const hintText = truncate(a.hint, 12);
-              screen.writeStr(x + boxW - hintText.length - 3, row,
-                ' ' + hintText, sel ? color('selection') : { fg: 'cyan', dim: true });
-            }
-            rendered++;
-          }
-        }
-        itemIndex++;
+
+      screen.writeStr(x + 3, row, sel ? '▶' : ' ', sel ? color('selection') : null);
+      screen.writeStr(x + 5, row, truncate(a.label, boxW - 36), sel ? color('selection') : null);
+      if (a.hint) {
+        const hintText = truncate(a.hint, 12);
+        screen.writeStr(x + boxW - hintText.length - 3, row,
+          ' ' + hintText, sel ? color('selection') : { fg: 'cyan', dim: true });
       }
+      rendered++;
     }
   } else {
     // Flat display with search query
@@ -304,8 +363,21 @@ export function renderPalette(screen) {
 
   const totalCount = list.length;
   if (totalCount > maxVisible) {
-    const s = (scrollOff + 1) + '-' + Math.min(scrollOff + maxVisible, totalCount) +
-      ' of ' + totalCount;
+    // Visible item range: map the visible slots to their indices within the
+    // flat item list so the range stays meaningful in grouped mode (where
+    // scrollOff counts slots, not items).
+    let firstItemIdx = null, lastItemIdx = null, ii = 0;
+    for (let s = 0; s < rows.length; s++) {
+      if (rows[s].type !== 'item') continue;
+      if (s >= scrollOff && s < scrollOff + maxVisible) {
+        if (firstItemIdx === null) firstItemIdx = ii;
+        lastItemIdx = ii;
+      }
+      ii++;
+    }
+    const first = (firstItemIdx ?? 0) + 1;
+    const last = (lastItemIdx ?? Math.min(maxVisible, totalCount) - 1) + 1;
+    const s = first + '-' + last + ' of ' + totalCount;
     screen.writeStr(x + 2, y + boxH - 2, s, color('dim'));
     const hint = '↑↓ navigate   ⏎ run   Esc close';
     screen.writeStr(x + boxW - hint.length - 3, y + boxH - 2, hint, color('dim'));

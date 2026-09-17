@@ -20,7 +20,8 @@ export async function loadTraffic() {
   render();
   try {
     const [owner, name] = repo.full_name.split('/');
-    const safe = (p) => p.catch(() => null);
+    const safe = (p) => p.catch((e) => { loadErrors.push(e); return null; });
+    const loadErrors = [];
     const [views, clones, paths, referrers] = await Promise.all([
       safe(getRepoTrafficViews(appState.token, owner, name, gen.signal)),
       safe(getRepoTrafficClones(appState.token, owner, name, gen.signal)),
@@ -32,6 +33,12 @@ export async function loadTraffic() {
     appState.repoTrafficClones = clones;
     appState.repoTrafficPopularPaths = Array.isArray(paths) ? paths : [];
     appState.repoTrafficPopularReferrers = Array.isArray(referrers) ? referrers : [];
+    // Surface total failure: safe() previously converted every rejection to
+    // null and the user saw a silent empty pane for 401/403/rate-limit.
+    if (loadErrors.length === 4) {
+      const first = loadErrors[0];
+      showMessage('Traffic unavailable: ' + (first && first.message || 'all endpoints failed'), 'error');
+    }
   } catch (e) {
     if (!isStale(gen)) showMessage('Failed to load traffic: ' + e.message, 'error');
   }
@@ -58,7 +65,12 @@ export function renderTrafficPane(screen, y, maxH) {
     return;
   }
 
-  if (!views || (views.count === 0 && (!clones || clones.count === 0))) {
+  // Treat the two endpoints independently: the old short-circuit
+  // (!views || (views.count === 0 && ...)) bailed out when views was null
+  // even when valid CLONES data was present, hiding it entirely.
+  const viewsEmpty = !views || views.count === 0;
+  const clonesEmpty = !clones || clones.count === 0;
+  if (viewsEmpty && clonesEmpty) {
     screen.writeStr(2, y++, 'No traffic data yet — stats appear once a repo has visitors', { dim: true });
     screen.writeStr(2, y++, 'Press [T] to retry', { fg: 'cyan' });
     return;

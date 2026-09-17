@@ -84,8 +84,12 @@ export function renderToasts(screen) {
   if (toasts.length === 0) return;
 
   const W = screen.width;
+  const H = screen.height;
+  if (!Number.isFinite(W) || !Number.isFinite(H) || W <= 0 || H <= 0) return;
   const startY = 2;  // Start below header
-  const startX = W - 42;  // Right-aligned
+  // Clamp for narrow terminals: a negative startX produced a bogus boxW and
+  // garbled rendering below 42 columns.
+  const startX = Math.max(0, W - 42);  // Right-aligned
   const maxVisible = Math.min(5, toasts.length);  // Max 5 visible toasts
 
   for (let i = 0; i < maxVisible; i++) {

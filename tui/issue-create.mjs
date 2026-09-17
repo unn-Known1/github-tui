@@ -58,6 +58,12 @@ export function startCreateIssue() {
   const repos = appState.repos;
   if (!appState.token) { showMessage('Login first', 'warning'); return; }
   if (repos.length === 0) { showMessage('No repos loaded', 'warning'); return; }
+  // Reset any stale draft from an abandoned flow (user dismissed the title/
+  // body prompt midway): without this the next invocation silently reused
+  // the old title and could post to the wrong repo.
+  _issueRepoIndex = 0;
+  _issueTitle = '';
+  _issueBody = '';
   const shown = repos.slice(0, 8);
   const names = shown.map((r, i) => i + ':' + r.name).join(' · ');
   const more = repos.length > 8 ? ' …+' + (repos.length - 8) + ' more' : '';

@@ -227,8 +227,10 @@ export function render(screen) {
 
   const lines = getHelpLines(q);
 
-  // Pad to boxH-3 to allow for footer.
-  const maxLines = boxH - 4;
+  // Interior rows: title (y0), search (y0+1), separator (y0+2), content,
+  // footer (y0+boxH-2), bottom border (y0+boxH-1) → boxH - 5 content rows.
+  // boxH - 4 drew the last content line on top of the footer.
+  const maxLines = Math.max(1, boxH - 5);
   let scrollOffset = appState.helpCursor || 0;
   if (scrollOffset > lines.length - maxLines) {
     scrollOffset = Math.max(0, lines.length - maxLines);
@@ -273,8 +275,13 @@ export function getHelpLines(q) {
     const globalCat = CATEGORIES.find(c => c.id === 'global');
     const others = CATEGORIES.filter(c => c.id !== currentCat && c.id !== 'global');
 
+    // De-dup: when the active tab has no category (or an out-of-range tab
+    // index), currentCat falls back to 'global' and current === globalCat —
+    // the spread below rendered GLOBAL twice, once mislabeled "current".
+    const seenCats = new Set();
     for (const cat of [current, globalCat, ...others]) {
-      if (!cat) continue;
+      if (!cat || seenCats.has(cat.id)) continue;
+      seenCats.add(cat.id);
       const isCurrent = cat.id === currentCat;
       lines.push({ kind: 'header', text: isCurrent ? cat.name + ' (current)' : cat.name });
       for (const s of cat.shortcuts) {

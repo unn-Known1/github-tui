@@ -21,7 +21,7 @@ import { loadBookmarks, loadSavedSearches, loadPins, loadInboxFilters, loadRepoP
 import { getRateLimit, resyncRateLimit, resetRateLimit, getUserRepositories, getNotifications, getWorkflowRuns } from './tui/github.mjs';
 import { exportPortableConfig, importPortableConfig } from './tui/portability.mjs';
 
-import { readFileSync, appendFileSync, writeFileSync } from 'fs';
+import { readFileSync, appendFileSync, writeFileSync, mkdirSync } from 'fs';
 import { fileURLToPath } from 'url';
 import { dirname, join } from 'path';
 import { homedir } from 'os';
@@ -40,7 +40,12 @@ function debug(...args) {
   if (!DEBUG) return;
   // Use async append to avoid blocking the event loop in debug mode.
   const line = `[${new Date().toISOString()}] ${args.join(' ')}\n`;
-  appendFileSync(_debugLogPath, line); // kept sync for crash handlers (safe — debug only)
+  try {
+    // Ensure the config dir exists (fresh machine / CI) — a logging failure
+    // must never propagate out of a crash handler.
+    mkdirSync(dirname(_debugLogPath), { recursive: true });
+    appendFileSync(_debugLogPath, line); // kept sync for crash handlers (safe — debug only)
+  } catch {}
 }
 // Non-blocking debug for hot paths — fire-and-forget writeStream.
 function debugAsync(...args) {
@@ -127,7 +132,7 @@ async function runCliCommand(args) {
     if (format === 'markdown') {
       const bundle = (await import('./tui/portability.mjs')).buildPortableConfig();
       const lines = ['# GitHub TUI configuration', '', '- Schema: ' + bundle.schemaVersion, '- App version: ' + bundle.appVersion, '- Exported: ' + bundle.exportedAt, '', '## Counts', '', '- Bookmarks: ' + bundle.bookmarks.length, '- Saved searches: ' + bundle.savedSearches.length, '- Pins: ' + bundle.pins.length, '- Custom sections: ' + bundle.sections.length, ''];
-      writeFileSync(path, lines.join('\\n'));
+      writeFileSync(path, lines.join('\n'));
       console.log(path);
     } else console.log(exportPortableConfig(path));
     return true;
@@ -363,11 +368,9 @@ if (process.platform === 'win32') {
 // pending toast timer so the terminal isn't left in a weird state.
 main().catch(err => {
   debug('Fatal:', err.message, err.stack);
-  try {
-    runShutdownCallbacks();
-  } catch {}
-  try {  if (!process.argv.includes('--no-mouse')) disableMouse(); } catch {}
-  try { disableBracketedPaste(); } catch {}
+  // Delegate to shutdown() so timers are cleared, mouse/paste modes are
+  // disabled, and prefs are persisted — same cleanup as a normal exit.
+  try { shutdown(); } catch {}
   try {
     process.stdout.write('\x1b[?25h');
     process.stdout.write('\x1b[2J\x1b[H');

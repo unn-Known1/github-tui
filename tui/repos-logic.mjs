@@ -15,7 +15,16 @@ export function sortRepos(repos, sort) {
       case 'stars':   va = a.stargazers_count || 0; vb = b.stargazers_count || 0; break;
       case 'forks':   va = a.forks_count || 0; vb = b.forks_count || 0; break;
       case 'issues':  va = a.open_issues_count || 0; vb = b.open_issues_count || 0; break;
-      case 'updated': va = new Date(a.updated_at).getTime(); vb = new Date(b.updated_at).getTime(); break;
+      case 'updated': {
+        // NaN from missing/invalid dates silently clustered repos as equal
+        // (every NaN comparison is false → comparator 0). Sort invalid dates
+        // deterministically to the oldest end instead.
+        const ta = new Date(a.updated_at).getTime();
+        const tb = new Date(b.updated_at).getTime();
+        va = Number.isFinite(ta) ? ta : (sort.asc ? Number.POSITIVE_INFINITY : Number.NEGATIVE_INFINITY);
+        vb = Number.isFinite(tb) ? tb : (sort.asc ? Number.POSITIVE_INFINITY : Number.NEGATIVE_INFINITY);
+        break;
+      }
       default: va = 0; vb = 0;
     }
     if (va < vb) return sort.asc ? -1 : 1;
@@ -27,7 +36,9 @@ export function sortRepos(repos, sort) {
 
 export function parseRepoQuery(q) {
   const out = { text: '', stars: null, forks: null, issues: null, lang: null };
-  if (q == null) return out;
+  // Strict equality per project style rule (loose == null is the one
+  // documented exception nowhere — be explicit instead).
+  if (q === null || q === undefined) return out;
   const s = String(q);
   if (!s.trim()) return out;
   const tokens = s.split(/\s+/).filter(t => t.length > 0);
@@ -85,7 +96,14 @@ export function applyAllFilters(repos, filters) {
 
   if (staleOnly) {
     const cutoff = Date.now() - _STALE_DAYS * 86400000;
-    out = out.filter(r => new Date(r.pushed_at || r.updated_at).getTime() < cutoff);
+    out = out.filter(r => {
+      const ts = new Date(r.pushed_at || r.updated_at).getTime();
+      // Missing/invalid dates: NaN < cutoff is false, so such repos were
+      // silently never stale — masking data-integrity issues. Treat them as
+      // stale so they remain visible in this diagnostic view.
+      if (!Number.isFinite(ts)) return true;
+      return ts < cutoff;
+    });
   }
 
   if (textFilter) {

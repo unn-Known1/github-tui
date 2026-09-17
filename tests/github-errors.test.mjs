@@ -3,6 +3,7 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { GitHubApiError } from '../tui/github.mjs';
+import { shellEscape } from '../tui/custom-keys.mjs';
 
 describe('GitHubApiError', () => {
   it('is an instance of Error', () => {
@@ -38,12 +39,8 @@ describe('GitHubApiError', () => {
   });
 });
 
-// ── Shell-escape logic (mirrors custom-keys.mjs) ──
-
-function shellEscape(value) {
-  if (!value) return "''";
-  return "'" + String(value).replace(/'/g, "'\\''") + "'";
-}
+// ── Shell-escape logic — imported from custom-keys.mjs so these tests
+// guard the LIVE implementation, not a copy that silently drifts.
 
 describe('shellEscape (custom-keys placeholder safety)', () => {
   it('wraps simple value in single quotes', () => {

@@ -25,6 +25,40 @@ export function registerInputHandler(context, fn) {
   handlers[context] = fn;
 }
 
+// ── Pure word-motion helpers (exported for tests) ──
+// Shared by the Ctrl-Left / Ctrl-Right / Ctrl-W handlers below. Kept
+// side-effect-free so tests exercise the LIVE implementation directly
+// instead of copying the algorithm inline (which could drift silently).
+
+// Move cursor back to the start of the previous word.
+export function inputWordBack(buf, cur) {
+  let i = cur;
+  while (i > 0 && buf[i - 1] === ' ') i--;
+  while (i > 0 && buf[i - 1] !== ' ') i--;
+  return i;
+}
+
+// Move cursor forward past the current word and any trailing spaces.
+export function inputWordForward(buf, cur) {
+  let i = cur;
+  while (i < buf.length && buf[i] !== ' ') i++;
+  while (i < buf.length && buf[i] === ' ') i++;
+  return i;
+}
+
+// Delete the word before the cursor. Returns { buf, cur }; the input array
+// is not mutated.
+export function inputDeleteWordBefore(buf, cur) {
+  if (cur === 0) return { buf: [...buf], cur: 0 };
+  const i = inputWordBack(buf, cur - 1);
+  return { buf: [...buf.slice(0, i), ...buf.slice(cur)], cur: i };
+}
+
+// Optional hook fired when an active input is cancelled (Esc) — lets a
+// multi-step flow (e.g. the section editor) clear its module-level draft.
+let _cancelHook = null;
+export function setCancelHook(fn) { _cancelHook = typeof fn === 'function' ? fn : null; }
+
 export function startInput(prompt, context, mask = false, initialValue = '') {
   appState.inputMode = 'input';
   appState.inputBuffer = String(initialValue == null ? '' : initialValue);
@@ -50,6 +84,9 @@ export function cancelInput() {
   // Clear paste state so a cancelled paste can't bleed into the next modal.
   _pasting = false;
   _pasteBuffer = '';
+  if (wasActive && _cancelHook) {
+    try { _cancelHook(); } catch { /* never let cleanup break the cancel */ }
+  }
   if (wasActive) showMessage('Cancelled', 'info');
   else render();
 }
@@ -107,8 +144,16 @@ export function handleInputKey(key) {
   };
 
   // 1) Already mid-paste: keep buffering until we see the END sequence,
-  //    even if the same chunk also contains trailing key bytes.
+  //    even if the same chunk also contains trailing key bytes. Cancel
+  //    bytes (Esc / Ctrl-C) terminate the paste and are NOT swallowed as
+  //    content — without this the user cannot abort a paste into a
+  //    password prompt.
   if (_pasting) {
+    if (key === '\x1b' || key === '\x03') {
+      _pasting = false;
+      _pasteBuffer = '';
+      return handleInputKey(key); // cancelInput / quit path
+    }
     const endIdx = key.indexOf(PASTE_END);
     if (endIdx === -1) {
       _pasteBuffer += key;
@@ -116,8 +161,30 @@ export function handleInputKey(key) {
     }
     _pasteBuffer += key.slice(0, endIdx);
     flushPasteIntoInput();
-    const remainder = key.slice(endIdx + PASTE_END.length);
-    if (remainder.length > 0) return handleInputKey(remainder);
+    // Iterate instead of recursing: a chunk can contain many back-to-back
+    // paste sequences, and unbounded recursion risks stack overflow.
+    let rest = key.slice(endIdx + PASTE_END.length);
+    while (rest.length > 0) {
+      const nextStart = rest.indexOf(PASTE_START);
+      const nextEnd = rest.indexOf(PASTE_END);
+      if (nextStart !== -1 && (nextEnd === -1 || nextStart < nextEnd)) {
+        // New paste begins: emit what came before it, then buffer until END.
+        if (nextStart > 0) {
+          handleInputKey(rest.slice(0, nextStart));
+        }
+        rest = rest.slice(nextStart + PASTE_START.length);
+        _pasting = true;
+        _pasteBuffer = '';
+        const end2 = rest.indexOf(PASTE_END);
+        if (end2 === -1) return true; // unterminated — keep buffering
+        _pasteBuffer += rest.slice(0, end2);
+        flushPasteIntoInput();
+        rest = rest.slice(end2 + PASTE_END.length);
+      } else {
+        if (rest.length > 0) handleInputKey(rest);
+        return true;
+      }
+    }
     return true;
   }
 
@@ -144,7 +211,13 @@ export function handleInputKey(key) {
   //    the printable chars and drop the control chars. Single-character
   //    chunks and all-printable chunks fall through to the normal
   //    per-key branches below.
-  if (key.length >= 3 && !key.includes('\x1b')) {
+  //    The guard rejects only REAL escape sequences (CSI `\x1b[…` / SS3
+  //    `\x1bO…`), not any chunk containing a bare \x1b: a lone ESC among
+  //    other control bytes is paste noise from a terminal that ignores
+  //    bracketed-paste mode, and letting it fall through used to insert
+  //    NUL/ETX/EOT/SUB/ESC literally into the buffer (filterPrintableChars
+  //    strips them all — ESC is charCode 27 < 32).
+  if (key.length >= 3 && !/\x1b[\[O]/.test(key)) {
     let hasControl = false;
     for (let i = 0; i < key.length; i++) {
       const c = key.charCodeAt(i);
@@ -218,13 +291,9 @@ export function handleInputKey(key) {
   if (key === '\x17') {
     const buf = Array.from(appState.inputBuffer);
     const cur = appState.inputCursor != null ? appState.inputCursor : buf.length;
-    if (cur === 0) { render(); return true; }
-    let i = cur - 1;
-    while (i > 0 && buf[i - 1] === ' ') i--;
-    while (i > 0 && buf[i - 1] !== ' ') i--;
-    buf.splice(i, cur - i);
-    appState.inputBuffer = buf.join('');
-    appState.inputCursor = i;
+    const res = inputDeleteWordBefore(buf, cur);
+    appState.inputBuffer = res.buf.join('');
+    appState.inputCursor = res.cur;
     render();
     return true;
   }
@@ -248,11 +317,9 @@ export function handleInputKey(key) {
   // Ctrl-Left (word back) — \x1b[1;5D or \x1bb (Alt-b).
   if (key === '\x1b[1;5D' || key === '\x1b[5D' || key === '\x1bb') {
     const buf = Array.from(appState.inputBuffer);
-    let cur = appState.inputCursor != null ? appState.inputCursor : buf.length;
+    const cur = appState.inputCursor != null ? appState.inputCursor : buf.length;
     // Skip trailing spaces, then skip word chars
-    while (cur > 0 && buf[cur - 1] === ' ') cur--;
-    while (cur > 0 && buf[cur - 1] !== ' ') cur--;
-    appState.inputCursor = cur;
+    appState.inputCursor = inputWordBack(buf, cur);
     render();
     return true;
   }
@@ -260,11 +327,9 @@ export function handleInputKey(key) {
   // Ctrl-Right (word forward) — \x1b[1;5C or \x1bf (Alt-f).
   if (key === '\x1b[1;5C' || key === '\x1b[5C' || key === '\x1bf') {
     const buf = Array.from(appState.inputBuffer);
-    let cur = appState.inputCursor != null ? appState.inputCursor : buf.length;
+    const cur = appState.inputCursor != null ? appState.inputCursor : buf.length;
     // Skip current word chars, then skip spaces
-    while (cur < buf.length && buf[cur] !== ' ') cur++;
-    while (cur < buf.length && buf[cur] === ' ') cur++;
-    appState.inputCursor = cur;
+    appState.inputCursor = inputWordForward(buf, cur);
     render();
     return true;
   }

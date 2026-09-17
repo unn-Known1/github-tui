@@ -9,7 +9,7 @@
 
 import { describe, it, before, after } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdirSync, rmSync } from 'fs';
+import { mkdirSync, rmSync, readFileSync } from 'fs';
 import { join } from 'path';
 import { tmpdir } from 'os';
 import { safeCwdJoin, writeFileSafe } from '../tui/utils.mjs';
@@ -90,8 +90,12 @@ describe('safeCwdJoin — defensive guarantees', () => {
   });
 
   it('writeFileSafe creates parent dir and writes file', () => {
-    const target = writeFileSafe('created.txt', 'hello');
-    assert.ok(target.endsWith('created.txt'));
+    // Nested target so the recursive mkdir is actually exercised (the old
+    // version wrote to CWD where the parent already existed), and read back
+    // so the write itself is verified, not just the return value.
+    const target = writeFileSafe('new-dir/sub/created.txt', 'hello');
+    assert.ok(target.endsWith(join('new-dir', 'sub', 'created.txt')));
+    assert.equal(readFileSync(target, 'utf-8'), 'hello');
   });
 
   it('writeFileSafe refuses to escape CWD', () => {

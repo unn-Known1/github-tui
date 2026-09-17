@@ -177,6 +177,17 @@ describe('input paste handling — bulk-raw fallback (terminals without \x1b[?20
     assert.equal(appState.inputMode, 'input');
   });
 
+  it('long chunk with NUL / ETX / EOT / SUB / ESC embedded is filtered', () => {
+    // Bytes with side effects if they leak into handleInputKey: \x00 NUL,
+    // \x03 ETX (Ctrl-C), \x04 EOT (Ctrl-D / EOF), \x1a SUB (SIGTSTP on some
+    // terminals), and a bare \x1b ESC (would cancel the modal). None may
+    // survive a paste, and the paste must end cleanly in input mode.
+    handleInputKey('tok\x00\x03\x04\x1a\x1ben\r\n');
+    assert.equal(appState.inputBuffer, 'token');
+    assert.equal(appState.inputMode, 'input');
+    assert.equal(isPasting(), false); // paste flag fully cleared
+  });
+
   it('short 2-char chunk is NOT treated as a paste (still inserts normally)', () => {
     handleInputKey('hi');
     assert.equal(appState.inputBuffer, 'hi');

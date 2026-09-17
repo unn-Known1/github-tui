@@ -152,9 +152,23 @@ function findBoundNames(text) {
   // Local declarations.
   const declRe = /(?:^|\n)\s*(?:export\s+)?(?:const|let|var|function|class|async\s+function)\s+(\w+)/g;
   while ((m = declRe.exec(text)) !== null) bound.add(m[1]);
-  // Function parameters.
-  const paramRe = /(?:function\s*\w*|\(\s*|=\s*)\s*\(?([A-Za-z_$][\w$]*)\s*[,)=]/g;
-  while ((m = paramRe.exec(text)) !== null) bound.add(m[1]);
+  // Function parameters. Match any parenthesized list that is directly
+  // followed by `=>` (arrow body) or `{` (function/method body), then bind
+  // the first identifier of each comma-separated element. This covers every
+  // parameter — the old prefix-anchored regex (`function f(a, b)`) only ever
+  // bound the FIRST one, so later params named like an audit export could
+  // be falsely reported as "used but not imported".
+  // Control-flow heads (`if (…) {`, `for (…) {`, …) are excluded so their
+  // condition expressions are not mistaken for parameter lists.
+  const paramListRe = /\(([^(){}]*)\)\s*(?:=>|\{)/g;
+  while ((m = paramListRe.exec(text)) !== null) {
+    const before = text.slice(Math.max(0, m.index - 24), m.index);
+    if (/\b(if|for|while|switch|catch|with)\s*$/.test(before)) continue;
+    for (const part of m[1].split(',')) {
+      const id = part.trim().replace(/^\.\.\./, '').match(/^[A-Za-z_$][\w$]*/);
+      if (id) bound.add(id[0]);
+    }
+  }
   // Destructured patterns.
   const destructureRe = /(?:const|let|var)\s*\{([^}]+)\}\s*=/g;
   while ((m = destructureRe.exec(text)) !== null) {

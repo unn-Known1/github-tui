@@ -86,8 +86,10 @@ export async function loadDashboardWidgets(force = false) {
         }
       }
     }
-    appState.dashboardWidgetErrorCount = failCount;
-    appState.dashboardLastFetched = Date.now();
+    // Stale check BEFORE the freshness/error-count writes: writing them
+    // first made the "Updated Xm ago" badge show "just now" for a fetch
+    // that a newer refresh had already superseded, and could inflate the
+    // failure banner from a superseded generation.
     if (isStale(gen, 'dashboard-widgets')) {
       setWidgetLoading('events', false, gen);
       setWidgetLoading('trending', false, gen);
@@ -99,6 +101,8 @@ export async function loadDashboardWidgets(force = false) {
       finishLoading(gen);
       return;
     }
+    appState.dashboardWidgetErrorCount = failCount;
+    appState.dashboardLastFetched = Date.now();
     // Preserve the last known good value when one widget fails. A transient
     // network error must not turn a populated widget into a false empty state.
     if (results[0].status === 'fulfilled') {

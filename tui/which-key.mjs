@@ -80,6 +80,13 @@ export function getPrefix() {
  * @param {string} prefix - The prefix key pressed
  */
 export function startSequence(prefix) {
+  // Guard against re-entry while the overlay is already open: saving focus
+  // again would overwrite _focusToken and the prior focus context would
+  // never be restored (leak).
+  if (_active) {
+    _prefix = prefix;
+    return;
+  }
   _active = true;
   _prefix = prefix;
   _focusToken = saveFocus();

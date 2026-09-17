@@ -677,6 +677,13 @@ export const keys = {
     const pr = appState.detailData;
     const branch = pr.head && pr.head.ref;
     if (!branch) { showMessage('No branch info available', 'warning'); return; }
+    // Branch names are PR-creator-controlled. A leading '-' would be parsed
+    // by git as an OPTION (e.g. --upload-pack=...); reject before it reaches
+    // any argv. Refspecs are also limited to sane characters.
+    if (branch.startsWith('-') || /[\s\r\n\t;|&$`<>\\"]/.test(branch)) {
+      showMessage('Refusing unsafe branch name: ' + JSON.stringify(branch), 'error');
+      return;
+    }
 
     const baseRepo = pr.base && pr.base.repo && pr.base.repo.full_name;
     const localFullName = appState.localRepo ? (appState.localRepo.owner + '/' + appState.localRepo.repo).toLowerCase() : '';
@@ -695,10 +702,14 @@ export const keys = {
         if (ghResult.status === 0) {
           success = true;
         } else {
-          // 2. Fall back: fetch PR head ref then checkout — args array avoids shell injection
-          const fetch = spawnSync('git', ['fetch', 'origin', 'pull/' + pr.number + '/head'], opts);
+          // 2. Fall back: fetch PR head ref then checkout — args array avoids
+          // shell injection; '--' ends option parsing so a branch name can
+          // never be misread as a git option; pr.number is validated numeric.
+          const prNum = Number(pr.number);
+          if (!Number.isInteger(prNum) || prNum <= 0) throw new Error('Invalid PR number');
+          const fetch = spawnSync('git', ['fetch', 'origin', 'pull/' + prNum + '/head', '--'], opts);
           if (fetch.status !== 0) throw new Error(fetch.stderr && fetch.stderr.toString());
-          const checkout = spawnSync('git', ['checkout', '-B', branch, 'FETCH_HEAD'], opts);
+          const checkout = spawnSync('git', ['checkout', '-B', branch, 'FETCH_HEAD', '--'], opts);
           if (checkout.status !== 0) throw new Error(checkout.stderr && checkout.stderr.toString());
           success = true;
         }

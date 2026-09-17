@@ -13,6 +13,7 @@ import * as settings from './tabs/settings.mjs';
 import * as inbox from './tabs/inbox.mjs';
 import { focusDashboardZone } from './focus.mjs';
 import * as quickSettings from './quick-settings.mjs';
+import * as paletteMod from './palette.mjs';
 
 // ── Text-selection helpers for README / file viewer ──
 
@@ -447,8 +448,12 @@ function _hoverPalette(sx, sy) {
     scrollOff = appState.paletteCursor - maxVisible + 1;
   }
   const rowIdx = itemY + scrollOff;
-  if (itemY >= 0 && itemY < maxVisible && rowIdx !== appState.paletteCursor) {
-    appState.paletteCursor = rowIdx;
+  // Slot model (see palette.mjs getSlotRows): a hovered row may be a category
+  // header (not selectable) — snap to the nearest item slot instead of
+  // parking the cursor on an unselectable row.
+  const selSlot = paletteMod.nearestItemSlot(rowIdx);
+  if (itemY >= 0 && itemY < maxVisible && selSlot >= 0 && selSlot !== appState.paletteCursor) {
+    appState.paletteCursor = selSlot;
     render();
   }
 }
@@ -477,7 +482,8 @@ function _clickPalette(sx, sy) {
   }
   const rowIdx = itemY + scrollOff;
   if (itemY >= 0 && itemY < maxVisible) {
-    appState.paletteCursor = rowIdx;
+    const selSlot = paletteMod.nearestItemSlot(rowIdx);
+    if (selSlot >= 0) appState.paletteCursor = selSlot;
     render();
   }
   import('./palette.mjs').then(m => m.execSelected()).catch(() => {});
@@ -1274,7 +1280,7 @@ function dispatchAnalyzeClick(sx, sy) {
               'error', 8000,
             );
           }
-        });
+        }).catch((e) => showMessage('Open failed: ' + (e && e.message || e), 'error'));
         return;
       }
     }
@@ -1459,7 +1465,7 @@ function dispatchSettingsClick(sx, sy) {
     import('../utils.mjs').then(m => m.openUrl(urlBounds.url)).then(r => {
       if (r.ok) showMessage('Opened project page', 'success');
       else showMessage(r.error || 'Open failed', 'error');
-    });
+    }).catch((e) => showMessage('Open failed: ' + (e && e.message || e), 'error'));
     render();
     return;
   }

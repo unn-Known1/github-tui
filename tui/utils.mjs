@@ -1,5 +1,7 @@
-// Pure helper functions used across the app. No I/O, no state, no terminal.
-// Easy to unit-test in isolation.
+// Shared helper functions used across the app. Most are pure and easy to
+// unit-test in isolation; the clipboard/openUrl/command helpers at the
+// bottom DO perform I/O, and the clipboard helpers carry module-local
+// state (kept off globalThis so interleaved calls can't trample it).
 
 // Format a Date / ISO string as a short relative time: "3h", "2d", "5w".
 export function relTime(iso) {
@@ -246,11 +248,28 @@ export function padRight(s, n) {
   return str + ' '.repeat(missing);
 }
 
+// Strip terminal control sequences from untrusted text before it reaches
+// the screen buffer. The screen renderer copies string chars into charBuf
+// but a future renderer change (or an accidental raw write) could otherwise
+// let a hostile README/file re-emit CSI/OSC sequences — clearing the screen,
+// restyling everything, or rewriting arbitrary cells.
+const ANSI_RE = /\x1b\[[0-9;?]*[ -/]*[@-~]|\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)|\x1b[PX^_].*?\x1b\\|[\x00-\x08\x0b\x0c\x0e-\x1a\x1c-\x1f]/g;
+export function stripAnsi(s) {
+  return String(s ?? '').replace(ANSI_RE, '');
+}
+
 // Format number with k / M suffix: 12345 → '12.3k', 1500000 → '1.5M'.
 export function shortNum(n) {
   if (n == null) return '0';
   if (n < 1000) return String(n);
-  if (n < 1_000_000) return `${(n / 1000).toFixed(n < 10000 ? 1 : 0)}k`;
+  if (n < 1_000_000) {
+    const d = n < 10000 ? 1 : 0;
+    const s = (n / 1000).toFixed(d);
+    // Rounding carried across the suffix boundary (999_999 → "1000k"):
+    // promote to the M branch instead of printing an impossible value.
+    if (parseFloat(s) >= 1000) return `${(n / 1_000_000).toFixed(1)}M`;
+    return `${s}k`;
+  }
   return `${(n / 1_000_000).toFixed(n < 10_000_000 ? 1 : 0)}M`;
 }
 
@@ -284,9 +303,19 @@ export async function openUrl(url) {
       cmd = 'open';
       args = [url];
     } else if (platform === 'win32') {
-      const cleanUrl = url.replace(/"/g, '%22');
+      // cmd.exe re-parses its command line and treats &, |, <, >, ^, %VAR%
+      // as metacharacters — quoting is not sufficient. Validate the URL and
+      // reject anything that could carry metacharacters through.
+      let parsed;
+      try { parsed = new URL(url); } catch { return { ok: false, error: 'Invalid URL' }; }
+      if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
+        return { ok: false, error: 'Unsupported URL scheme' };
+      }
+      if (/["^&|<>%]/.test(url)) {
+        return { ok: false, error: 'URL contains unsupported characters' };
+      }
       cmd = 'cmd.exe';
-      args = ['/c', `start "" "${cleanUrl}"`];
+      args = ['/c', 'start', '', url];
       opts.windowsVerbatimArguments = true;
     } else {
       cmd = 'xdg-open';
@@ -325,11 +354,17 @@ export async function openUrl(url) {
 // caller can trust that the clipboard is populated before returning.
 // Priority: OSC-52 → tmux load-buffer → pbcopy (macOS) → xclip/xsel (Linux X11)
 //           → wl-copy (Wayland) → /tmp file.
+// Module-local clipboard state (NOT on globalThis — interleaved copy
+// calls previously trampled each other's metadata before any consumer
+// could read it back).
+let _lastClipboardTempFile = null;
+let _lastClipboardMethod = null;
+
 export function copyToClipboard(text) {
   if (!text) return false;
   const str = String(text);
-  globalThis._lastClipboardTempFile = null;
-  globalThis._lastClipboardMethod = null;
+  _lastClipboardTempFile = null;
+  _lastClipboardMethod = null;
   let success = false;
 
   // 1. OSC-52 — synchronous escape sequence to the terminal. Works in most
@@ -341,7 +376,7 @@ export function copyToClipboard(text) {
       // stdout.flush() is not part of Node's portable stream API. The write
       // above is synchronous from the caller's perspective; avoid throwing
       // after emitting a valid OSC-52 sequence and incorrectly falling back.
-      globalThis._lastClipboardMethod = 'osc52';
+      _lastClipboardMethod = 'osc52';
       success = true;
     } catch { /* fall through */ }
   }
@@ -357,7 +392,7 @@ export function copyToClipboard(text) {
         input: str, stdio: ['pipe', 'ignore', 'ignore'], encoding: 'utf-8',
       });
       if (r.status === 0) {
-        globalThis._lastClipboardMethod = 'tmux';
+        _lastClipboardMethod = 'tmux';
         return true;
       }
     } catch {}
@@ -365,11 +400,11 @@ export function copyToClipboard(text) {
 
   // 3. Native clipboard tools — synchronous so paste immediately after copy works.
   if (_tryNativeClipboardSync(str)) {
-    if (!globalThis._lastClipboardMethod) globalThis._lastClipboardMethod = 'native';
+    if (!_lastClipboardMethod) _lastClipboardMethod = 'native';
     return true;
   }
 
-  globalThis._lastClipboardMethod = success ? 'osc52' : 'none';
+  _lastClipboardMethod = success ? 'osc52' : 'none';
   return success;
 }
 
@@ -398,8 +433,8 @@ function _tryNativeClipboardSync(str) {
   try {
     const tmpFile = join(tmpdir(), 'github-tui-clipboard.txt');
     writeFileSync(tmpFile, str, 'utf-8');
-    globalThis._lastClipboardTempFile = tmpFile;
-    globalThis._lastClipboardMethod = 'temp-file';
+    _lastClipboardTempFile = tmpFile;
+    _lastClipboardMethod = 'temp-file';
     return true;
   } catch {
     return false;
@@ -407,11 +442,11 @@ function _tryNativeClipboardSync(str) {
 }
 
 export function getClipboardTempFilePath() {
-  return globalThis._lastClipboardTempFile || null;
+  return _lastClipboardTempFile || null;
 }
 
 export function getLastClipboardMethod() {
-  return globalThis._lastClipboardMethod || null;
+  return _lastClipboardMethod || null;
 }
 
 // Map a GitHub event type to icon + color + short label.

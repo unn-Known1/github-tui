@@ -29,10 +29,16 @@ describe('state.mjs — async generation guard', () => {
 
     it('keeps scopes independent', () => {
       const a = startAsync('test-iso-A');
-      const b = startAsync('test-iso-B');
+      startAsync('test-iso-B'); // bump scope B — must not touch scope A
       // Bumping B must not stale A's gen.
       assert.equal(isStale(a), false);
-      assert.equal(isStale(b), false);
+      // Re-bumping A DOES stale the earlier A handle: proves the first
+      // assertion passed because of scope isolation, not because nothing
+      // was ever bumped (the old version never bumped either scope and was
+      // vacuously true even with a single global scope).
+      const a2 = startAsync('test-iso-A');
+      assert.equal(isStale(a), true);
+      assert.equal(isStale(a2), false);
     });
   });
 
