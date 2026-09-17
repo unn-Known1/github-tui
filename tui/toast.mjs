@@ -38,6 +38,10 @@ export function showToast({ message, variant = 'info', duration = 3000, title })
   };
 
   toasts.push(toast);
+  // Cap the queue: duration: 0 toasts never auto-dismiss, so a long session
+  // could otherwise grow the array without bound.
+  const MAX_TOASTS = 8;
+  while (toasts.length > MAX_TOASTS) toasts.shift();
 
   // Auto-dismiss
   if (duration > 0) {
@@ -121,10 +125,15 @@ export function renderToasts(screen) {
     screen.writeStr(startX + boxW - 2, y, dismissText, { ...toastStyle, dim: true });
   }
 
-  // Show count if more than visible
+  // Show count if more than visible — bounds-checked so the overflow text
+  // can't be painted off the bottom/right edge of a short terminal.
   if (toasts.length > maxVisible) {
     const countText = '+' + (toasts.length - maxVisible) + ' more';
-    screen.writeStr(startX, startY + maxVisible * 3, countText, { dim: true });
+    const overflowY = startY + maxVisible * 3;
+    if (overflowY < screen.height && startX >= 0
+        && startX + countText.length < screen.width) {
+      screen.writeStr(startX, overflowY, countText, { dim: true });
+    }
   }
 }
 

@@ -75,18 +75,29 @@ async function loadDetail() {
     if (isStale(gen, 'detail')) { finishLoading(gen); appState.detailLoading = false; return; }
     appState.detailData = data;
 
-    const safe = (p) => p.catch(() => null);
+    // Track partial failures so "(no comments yet)" is never shown when the
+    // request actually FAILED — the old silent null coercion masked
+    // auth/rate-limit/network errors as empty data.
+    const partialErrors = [];
+    const safe = (label, p) => p.catch((e) => {
+      partialErrors.push(label + ': ' + ((e && e.message) || 'failed'));
+      return null;
+    });
     const [comments, reviews, files] = await Promise.all([
-      safe(getIssueComments(appState.token, owner, repo, number, 1, 20, gen.signal)),
-      type === 'pull_request' ? safe(getPullRequestReviews(appState.token, owner, repo, number, gen.signal)) : Promise.resolve([]),
-      type === 'pull_request' ? safe(getPullRequestFiles(appState.token, owner, repo, number, 1, 30, gen.signal)) : Promise.resolve([]),
+      safe('comments', getIssueComments(appState.token, owner, repo, number, 1, 20, gen.signal)),
+      type === 'pull_request' ? safe('reviews', getPullRequestReviews(appState.token, owner, repo, number, gen.signal)) : Promise.resolve([]),
+      type === 'pull_request' ? safe('files', getPullRequestFiles(appState.token, owner, repo, number, 1, 30, gen.signal)) : Promise.resolve([]),
     ]);
     if (isStale(gen, 'detail')) { finishLoading(gen); appState.detailLoading = false; return; }
     appState.detailComments = Array.isArray(comments) ? comments : [];
     appState.detailReviews = Array.isArray(reviews) ? reviews : [];
     appState.detailFiles = Array.isArray(files) ? files : [];
     appState.detailLoading = false;
-    showMessage('Loaded #' + number, 'success');
+    if (partialErrors.length) {
+      showMessage('Loaded #' + number + ' (partial: ' + partialErrors.join('; ') + ')', 'warning', 6000);
+    } else {
+      showMessage('Loaded #' + number, 'success');
+    }
   } catch (e) {
     if (!isStale(gen, 'detail')) {
       // Keep the popup OPEN with an inline error instead of silently
@@ -748,6 +759,12 @@ export function up() {
   }
   if (appState.detailTab === 'files' && !appState.detailDiffView) {
     appState.detailFileCursor = Math.max(0, appState.detailFileCursor - 1);
+    // Keep the cursor inside the visible window (renderFiles paints from
+    // detailScroll — without this the selection silently scrolled out of
+    // view on long PRs).
+    if (appState.detailFileCursor < appState.detailScroll) {
+      appState.detailScroll = appState.detailFileCursor;
+    }
     render();
     return;
   }
@@ -771,6 +788,12 @@ export function down() {
   if (appState.detailTab === 'files' && !appState.detailDiffView) {
     const max = Math.max(0, appState.detailFiles.length - 1);
     appState.detailFileCursor = Math.min(max, appState.detailFileCursor + 1);
+    // Scroll-follow: the visible height for the files pane (mirrors the
+    // renderFiles loop length h); keep the cursor at or above the bottom.
+    const visibleH = Math.max(1, appState.detailFiles.length ? Math.min(appState.detailFiles.length, appState.detailDiffVisibleH || appState.detailFiles.length) : 1);
+    if (appState.detailFileCursor >= appState.detailScroll + visibleH) {
+      appState.detailScroll = appState.detailFileCursor - visibleH + 1;
+    }
     render();
     return;
   }

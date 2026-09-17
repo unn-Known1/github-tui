@@ -161,15 +161,28 @@ export function truncate(s, n) {
 // Slice a string using terminal-cell columns rather than UTF-16 indices.
 // This is used by mouse text selection, where columns come from terminal
 // coordinates and may point into CJK, emoji, or combining-mark content.
+// Zero-width chars (combining marks, ZWJ) share their base glyph's position:
+// they belong to the selection iff the PREVIOUS base cell was selected, so
+// `lastBaseEnd` tracks where the last non-zero-width glyph ended.
 export function sliceByDisplayColumns(value, start = 0, end = Infinity) {
   const chars = Array.from(String(value ?? ''));
   const lo = Math.max(0, Number.isFinite(start) ? start : 0);
   const hi = Number.isFinite(end) ? Math.max(lo, end) : Infinity;
   let cell = 0;
+  let lastBaseStart = 0;
+  let lastBaseEnd = 0;
   let out = '';
   for (const ch of chars) {
     const w = displayWidth(ch);
-    const selected = w === 0 ? cell >= lo && cell < hi : cell < hi && cell + w > lo;
+    let selected;
+    if (w === 0) {
+      // Attach to the base glyph: selected iff the base's cell range is.
+      selected = lastBaseEnd > lo && lastBaseStart < hi;
+    } else {
+      selected = cell < hi && cell + w > lo;
+      lastBaseStart = cell;
+      lastBaseEnd = cell + w;
+    }
     if (selected) out += ch;
     cell += w;
   }

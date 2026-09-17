@@ -91,10 +91,13 @@ export function startSequence(prefix) {
   _prefix = prefix;
   _focusToken = saveFocus();
   
-  // Auto-close after 2 seconds of inactivity
+  // Auto-close after 2 seconds of inactivity. The callback nulls the handle
+  // via close() itself; re-checking _active here is belt-and-braces against
+  // a close() that raced this timer firing.
   if (_timeout) clearTimeout(_timeout);
   _timeout = setTimeout(() => {
-    close();
+    _timeout = null;
+    if (_active) close();
   }, 2000);
   
   appRender();
@@ -146,9 +149,11 @@ export function handleKey(key) {
     }
   }
 
-  // Unknown key — close and let it propagate
+  // Unknown key — dismiss the overlay but EAT the key. Letting it propagate
+  // meant a fat-fingered press both closed the overlay AND fired whatever
+  // action that key performs (e.g. 'q' quitting the app) — never intended.
   close();
-  return false;
+  return true;
 }
 
 /**

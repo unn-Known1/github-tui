@@ -124,7 +124,14 @@ const FOCUS_ZONES = {
 let _focusState = { tab: 0, zoneIndex: -1 };
 
 function syncDashboardFocus() {
-  if (_focusState.tab !== 0) return;
+  if (_focusState.tab !== 0) {
+    // Clear the dashboard flags when focus moves to another tab — the old
+    // early-return left them stale until the next resetFocus(0), and an
+    // interim dashboard render read inconsistent state.
+    appState.dashboardCardsFocus = false;
+    appState.dashboardFocusZone = null;
+    return;
+  }
   const zone = getFocusZone();
   appState.dashboardCardsFocus = zone?.id === 'cards';
   if (zone?.id) appState.dashboardFocusZone = zone.id;

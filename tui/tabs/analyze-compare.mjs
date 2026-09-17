@@ -37,7 +37,12 @@ export async function loadCompare(base, head) {
   if (!base || !head) { showMessage('Use base...head, for example main...feature', 'warning'); return; }
   const repo = appState.repoDetails;
   if (!repo) return;
-  const [owner, name] = repo.full_name.split('/');
+  const parts = String(repo.full_name || '').split('/');
+  if (parts.length !== 2 || !parts[0] || !parts[1]) {
+    showMessage('Invalid repository identifier', 'error');
+    return;
+  }
+  const [owner, name] = parts;
   const gen = startAsync('analyze-compare');
   beginLoading(gen);
   appState.compareBase = base;

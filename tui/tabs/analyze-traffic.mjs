@@ -96,11 +96,15 @@ export function renderTrafficPane(screen, y, maxH) {
 
   y++;
 
-  // Popular paths
+  // Popular paths — single-list scroll model over [paths, referrers].
+  // Clamp `start` against the combined total first: a stale detailsScroll
+  // larger than both arrays previously produced an oversize/negative refOff.
   const paths = appState.repoTrafficPopularPaths || [];
   const referrers = appState.repoTrafficPopularReferrers || [];
-  const pathOff = Math.min(start, paths.length);
-  const refOff = start >= paths.length ? Math.min(start - paths.length, referrers.length) : 0;
+  const total = paths.length + referrers.length;
+  const clampedStart = Math.max(0, Math.min(start, Math.max(0, total - 1)));
+  const pathOff = Math.min(clampedStart, paths.length);
+  const refOff = clampedStart >= paths.length ? Math.min(clampedStart - paths.length, referrers.length) : 0;
   if (paths.length > 0) {
     sectionHeader(screen, 2, y, 'Popular Paths');
     y++;

@@ -280,7 +280,10 @@ export async function unsubscribeCurrent() {
   confirm('Unsubscribe from "' + truncate(title, 40) + '"?', async () => {
     try {
       await unsubscribeNotification(appState.token, n.id);
-      n.unread = false;
+      // NOTE: unsubscribe does NOT mark the thread read on GitHub — the old
+      // `n.unread = false` diverged local state from the server and made the
+      // unread filters / header count underreport until the next sync.
+      n._unsubscribed = true; // local-only visual cue
       bumpInboxFilterGen();
       normalizeInboxCursor();
       showMessage('Unsubscribed from thread', 'success');

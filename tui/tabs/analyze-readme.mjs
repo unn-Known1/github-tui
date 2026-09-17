@@ -127,8 +127,12 @@ export function renderReadmePane(screen, y, maxH) {
       const lineEndCol = Math.min(innerW,
         visRow === selEnd.row ? selEnd.col : innerW);
       if (lineEndCol <= lineStartCol) continue;
-      for (let x = lineStartCol; x < lineEndCol; x++) {
-        screen.styleBuf[row][x + 2] = color('selection');
+      // Bounds guard: during a resize race styleBuf may lack the row (or the
+      // row may be shorter than expected) — one throw here aborts the render.
+      const rowBuf = screen.styleBuf && screen.styleBuf[row];
+      if (!rowBuf) continue;
+      for (let x = lineStartCol; x < lineEndCol && x + 2 < rowBuf.length; x++) {
+        rowBuf[x + 2] = color('selection');
       }
     }
   }

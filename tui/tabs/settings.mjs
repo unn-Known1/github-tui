@@ -5,7 +5,7 @@ import { appState, render, startAsync, isStale, showMessage, confirm,
   beginLoading, finishLoading, setManualLoading, resetAccountState } from '../state.mjs';
 import {
   APP_VERSION, CONFIG_DIR, TOKEN_FILE, saveToken, removeToken,
-  tokenStorageBackend,
+  getTokenStorageBackend,
 } from '../config.mjs';
 import {
   getAuthenticatedUser, getUserRepositories,
@@ -104,18 +104,18 @@ export async function submitLogin(value) {
       // we NEVER set the in-memory token — fail loudly so the user knows
       // their next session won't be logged in.
       const tokenBackend = saveToken(token);
+      // Warn on EVERY platform: the keychain write can fail on macOS
+      // (headless, denied prompt) and Windows (locked Credential Manager)
+      // too, silently falling back to the chmod 600 plaintext file.
       if (!tokenBackend || tokenBackend === 'plaintext') {
-        // saveToken throws on hard failure, but returns 'plaintext' only when
-        // the keychain write succeeded and plaintext is the fallback for read.
-        // We treat any plaintext-only result as a soft success on macOS/Windows
-        // and a hard fail on Linux (no libsecret available).
-        if (process.platform === 'linux') {
-          showMessage(
-            'Login OK, but no OS keychain (libsecret) is available. ' +
-            'Token is kept in the chmod 600 plaintext fallback file for future sessions. Install gnome-keyring or KWallet for OS encryption.',
-            'warning', 8000
-          );
-        }
+        const hint = process.platform === 'linux'
+          ? 'Install gnome-keyring or KWallet for OS encryption.'
+          : 'Check your OS keychain settings — the token could not be stored there.';
+        showMessage(
+          'Login OK, but the OS keychain is unavailable. ' +
+          'Token is kept in the chmod 600 plaintext fallback file for future sessions. ' + hint,
+          'warning', 8000
+        );
       }
       appState.token = token;
       appState.user = user;
@@ -137,9 +137,11 @@ export async function submitLogin(value) {
 }
 registerInputHandler('login', submitLogin);
 
-export async function handleLogout() {
+export function handleLogout() {
   // Clear account-scoped cache/freshness metadata before dropping the token;
   // otherwise a later session can inherit misleading ages or cached bodies.
+  // clearAccountCache is synchronous (in-memory Map cleanup) so no await is
+  // needed — the old `async` + un-awaited call pair was misleading.
   const oldToken = appState.token;
   if (oldToken) clearAccountCache(oldToken);
   // One account epoch invalidates every active/paginated request, including
@@ -447,7 +449,7 @@ function renderSystemLines(screen, y, W, screenW) {
 }
 
 function buildSystemLines(screenW) {
-  const backend = tokenStorageBackend || 'plaintext';
+  const backend = getTokenStorageBackend() || 'plaintext';
   const storageLabel =
     backend === 'macos-keychain'      ? 'macOS Keychain' :
     backend === 'secret-tool'         ? 'Linux libsecret' :
@@ -671,7 +673,7 @@ export function enter() {
     case 7:
       if (isLoggedIn) confirm(
         'Wipe token and log out?\n\n' +
-        'Current storage backend: ' + (tokenStorageBackend || 'plaintext') + '\n' +
+        'Current storage backend: ' + (getTokenStorageBackend() || 'plaintext') + '\n' +
         'This will remove the token from OS keychain (if available) ' +
         'and the plaintext fallback file.',
         () => {

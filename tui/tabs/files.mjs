@@ -25,6 +25,7 @@ import {
   openUrl,
 } from '../utils.mjs';
 import { startInput, registerInputHandler } from '../input.mjs';
+import { debugLog } from '../debug.mjs';
 import { color } from '../theme.mjs';
 import { join, resolve } from 'path';
 import { detectLanguage, tokenizeLine, parseBlamePorcelain } from '../recommended-features.mjs';
@@ -499,6 +500,10 @@ export async function openFilePath(path) {
     const clean = path.trim().replace(/^\.\/+/, '').replace(/^\/+/, '');
     if (!clean) { showMessage('Invalid file path', 'warning'); return; }
     const parts = clean.split('/').filter(Boolean);
+    // Reject `..` traversal — the string flows into the Contents API and
+    // getFilteredEntries/drillInto; a future write path through `rel` would
+    // otherwise become a traversal sink.
+    if (parts.some(p => p === '..')) { showMessage('Invalid file path: ' + path, 'warning'); return; }
     const base = parts.pop();
     const dir = parts.join('/');
     if (!base) { showMessage('Invalid file path: ' + path, 'warning'); return; }
@@ -798,6 +803,7 @@ async function _saveCurrentFolderImpl() {
       showMessage('Downloading ' + seenFiles.length + ' files…', 'info');
       render();
       let cursor = 0;
+      let writeFailures = 0;
       const nextFile = () => {
         if (cursor >= seenFiles.length) return null;
         return seenFiles[cursor++];
@@ -816,7 +822,16 @@ async function _saveCurrentFolderImpl() {
             if (isStale(gen) || gen.signal.aborted) return;
             const rel = repoName + '/' + e.path.replace(
               new RegExp('^' + root.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '/?'), '');
-            writeFileSafe(rel, txt);
+            // A single disk write failure (EACCES/ENOSPC) previously escaped
+            // this try, aborted Promise.all, and mislabeled the run
+            // "Folder save failed" — continue like fetch failures do.
+            try {
+              writeFileSafe(rel, txt);
+            } catch (werr) {
+              debugLog('folder-save: write failed for ' + rel, werr && werr.message);
+              writeFailures++;
+              continue;
+            }
             count++;
             bytes += (typeof txt === 'string' ? Buffer.byteLength(txt) : (txt.length || 0));
             if (count % 5 === 0) {
@@ -832,8 +847,10 @@ async function _saveCurrentFolderImpl() {
         const truncatedNote = abortedAt > 0
           ? ' (truncated — folder had ' + abortedAt + ' files)'
           : '';
+        const failedNote = writeFailures > 0 ? ' · ' + writeFailures + ' write failure(s)' : '';
         showMessage('Saved ' + count + ' files (' + formatBytes(bytes) +
-          ') → ./' + repoName + '/' + truncatedNote, abortedAt > 0 ? 'warning' : 'success');
+          ') → ./' + repoName + '/' + truncatedNote + failedNote,
+          (abortedAt > 0 || writeFailures > 0) ? 'warning' : 'success');
       }
     }
   } catch (e) {

@@ -218,13 +218,17 @@ async function refetchPane(pane) {
   const owner = parts[0];
   const name = parts[1];
   if (!owner || !name) return;
-  const gen = startAsync('analyze-issues');
+  // Per-pane generation keys: a shared key meant rapidly switching
+  // issues<->PRs cancelled the first refetch mid-flight (its finally was
+  // skipped by the staleness check), leaving the loading flag stuck.
+  const scopeKey = pane === 'issues' ? 'analyze-issues-refetch' : 'analyze-prs-refetch';
+  const gen = startAsync(scopeKey);
   beginLoading(gen);
   render();
   try {
     if (pane === 'issues') {
       const issues = await getRepositoryIssues(appState.token, owner, name, 1, 100, appState.issueStateFilter, gen.signal);
-      if (isStale(gen, 'analyze-issues')) { finishLoading(gen); return; }
+      if (isStale(gen, scopeKey)) { finishLoading(gen); return; }
       appState.repoIssues = Array.isArray(issues) ? issues.filter(i => !i.pull_request) : [];
       appState.repoIssuesPage = 1;
       appState.repoIssuesHasMore = Array.isArray(issues) && issues.length >= 100;
@@ -232,7 +236,7 @@ async function refetchPane(pane) {
       appState.detailsScroll = 0;
     } else {
       const prs = await getRepositoryPullRequests(appState.token, owner, name, 1, 100, appState.issueStateFilter, gen.signal);
-      if (isStale(gen, 'analyze-issues')) { finishLoading(gen); return; }
+      if (isStale(gen, scopeKey)) { finishLoading(gen); return; }
       appState.repoPullRequests = Array.isArray(prs) ? prs : [];
       appState.repoPullRequestsPage = 1;
       appState.repoPullRequestsHasMore = Array.isArray(prs) && prs.length >= 100;
@@ -240,10 +244,10 @@ async function refetchPane(pane) {
       appState.detailsScroll = 0;
     }
   } catch (e) {
-    if (!isStale(gen, 'analyze-issues')) showMessage(e.message || ('Failed to reload ' + pane), 'error');
+    if (!isStale(gen, scopeKey)) showMessage(e.message || ('Failed to reload ' + pane), 'error');
   } finally {
     finishLoading(gen);
-    if (!isStale(gen, 'analyze-issues')) render();
+    if (!isStale(gen, scopeKey)) render();
   }
 }
 
@@ -338,7 +342,7 @@ export async function loadRepoDetails(owner, name) {
   if (!isStale(gen, 'analyze-details')) render();
   // Silently pre-load release assets for overview + packages pane
   if (appState.repoReleaseAssets.length === 0 && appState.repoReleases.length > 0) {
-    loadReleaseAssets(true);
+    loadReleaseAssets(true).catch(err => showMessage((err && err.message) || 'Failed to load release assets', 'error'));
   }
 }
 

@@ -120,7 +120,9 @@ export function applyAllFilters(repos, filters) {
       if (parsed.stars) out = out.filter(r => _cmpCount(r.stargazers_count || 0, parsed.stars.op, parsed.stars.n));
       if (parsed.forks) out = out.filter(r => _cmpCount(r.forks_count || 0, parsed.forks.op, parsed.forks.n));
       if (parsed.issues) out = out.filter(r => _cmpCount(r.open_issues_count || 0, parsed.issues.op, parsed.issues.n));
-      if (parsed.lang) out = out.filter(r => (r.language || '') === parsed.lang);
+      // Case-insensitive: `lang:javascript` should match `JavaScript`,
+      // consistent with the substring search on the same field below.
+      if (parsed.lang) out = out.filter(r => (r.language || '').toLowerCase() === String(parsed.lang).toLowerCase());
       if (parsed.text) {
         const q = parsed.text.toLowerCase();
         out = out.filter(r =>

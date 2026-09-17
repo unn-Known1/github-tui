@@ -17,8 +17,13 @@ const USER_REPOS_PER_PAGE = 20;
 // How many result rows fit in the given content height (rows above/below the
 // list: search header, hint, section header, hline, count + hint rows).
 // Single source of truth shared by the renderer, keyboard nav, and mouse.
-export function maxVisibleResults(contentH) {
-  return Math.max(1, contentH - 8);
+export function maxVisibleResults(contentH, { hasHintRow = false } = {}) {
+  // 8 = fixed chrome rows above the list (header, hint, section header,
+  // hline, count row…). Renderers that also paint a hint row below the
+  // list pass hasHintRow so keyboard nav and the painted list can never
+  // disagree by one row on short viewports.
+  const footerRows = hasHintRow ? 2 : 1;
+  return Math.max(1, contentH - 8 - (footerRows - 1));
 }
 
 // ── Explore base-view landing ─────────────────────────────────────

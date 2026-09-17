@@ -11,6 +11,22 @@ import { truncate, sectionHeader, relTime, openUrl, displayWidth } from '../util
 import { color } from '../theme.mjs';
 import { scrollIndicators, loadingIndicator } from '../render.mjs';
 
+// Raw GitHub API error messages can leak internals (exact missing scope,
+// rate-limit reset timing, 404-vs-403 distinctions useful for probing
+// access). Map to coarse, user-safe categories; the raw message goes to the
+// opt-in debug log only.
+import { debugLog } from '../debug.mjs';
+function safeSecurityError(prefix, e) {
+  const msg = String((e && e.message) || '');
+  debugLog('security-pane:', prefix, msg);
+  if (e && e.status === 403) return prefix + ": not permitted with this token's scopes";
+  if (e && e.status === 404) return prefix + ': not available for this repository';
+  if (e && e.status === 401) return prefix + ': sign in again';
+  if (e && e.status === 0) return prefix + ': network error';
+  return prefix + ': request failed — try again later';
+}
+
+
 const SECURITY_SUB_PANES = ['dependabot', 'secret', 'codescan', 'advisories', 'branch', 'deps'];
 const SECURITY_SUB_LABELS = {
   dependabot: 'Dependabot', secret: 'Secret Scanning', codescan: 'Code Scanning',
@@ -42,7 +58,13 @@ export async function loadSecurity() {
   beginLoading(gen);
   render();
   try {
-    const [owner, name] = repo.full_name.split('/');
+    const [owner, name] = String(repo.full_name || '').split('/');
+    if (!owner || !name) {
+      appState.securityError = 'Invalid repository details';
+      finishLoading(gen);
+      render();
+      return;
+    }
     if (sub === 'dependabot') {
       const state = apiState;
       const alerts = await getRepoDependabotAlerts(appState.token, owner, name, state, gen.signal);
@@ -73,7 +95,7 @@ export async function loadSecurity() {
       } catch (e) {
         if (isStale(gen, 'analyze-security')) { finishLoading(gen); return; }
         appState.branchProtection = null;
-        appState.securityError = 'Branch protection unavailable: ' + (e.message || 'token may lack repo administration scope');
+        appState.securityError = safeSecurityError('Branch protection unavailable', e);
       }
     } else if (sub === 'deps') {
       // SBOM export — read-accessible (works on any public repo). The old
@@ -88,12 +110,12 @@ export async function loadSecurity() {
       } catch (e) {
         if (isStale(gen, 'analyze-security')) { finishLoading(gen); return; }
         appState.dependencyPackages = [];
-        appState.securityError = 'Dependency SBOM unavailable: ' + (e.message || 'enable dependency graph or check token scopes');
+        appState.securityError = safeSecurityError('Dependency SBOM unavailable', e);
       }
     }
   } catch (e) {
     if (!isStale(gen, 'analyze-security')) {
-      appState.securityError = 'Security request failed: ' + (e.message || 'check repository access and token scopes');
+      appState.securityError = safeSecurityError('Security request failed', e);
       showMessage(appState.securityError, 'error');
     }
   }

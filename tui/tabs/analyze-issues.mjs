@@ -17,7 +17,8 @@ export function cycleIssueStateFilter() {
   showMessage('Issues/PRs state filter: ' + appState.issueStateFilter, 'info', 1500);
   const repo = appState.repoDetails;
   if (!repo) return;
-  const [owner, name] = repo.full_name.split('/');
+  const [owner, name] = String(repo.full_name || '').split('/');
+  if (!owner || !name) { showMessage('Invalid repository details', 'error'); return; }
   const gen = startAsync('analyze-issues');
   beginLoading(gen);
   render();

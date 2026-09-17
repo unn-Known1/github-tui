@@ -17,7 +17,6 @@ import { sortRepos as _sortRepos, applyAllFilters as _applyAllFilters, floatPins
 import { showError } from '../error-recovery.mjs';
 
 const REPOS_PER_PAGE = 30;
-import { STALE_DAYS } from '../repos-logic.mjs';
 
 export const REPO_SORT_OPTIONS = [
   { field: 'name',    label: 'Name',    key: 'n' },
@@ -44,7 +43,6 @@ export function toggleRepoSort(field) {
 // Starred-view sort override (module-local by contract — no appState fields).
 // Null = API order (zero behavior change unless the user sorts in starred view).
 let starredSortOverride = null;
-let _starredView = null; // last sorted starred list produced by render
 export function getStarredSort() { return starredSortOverride; }
 export function starredViewList() {
   const base = appState.starred || [];
@@ -389,7 +387,6 @@ function renderStarredList(screen, y, h) {
   // Sorted ONCE per render; selection/mouse must resolve through
   // starredViewList() so indexes match this order.
   const list = starredViewList();
-  _starredView = list;
 
   screen.writeStr(2, y, 'STARRED REPOSITORIES', color('title') || { fg: 'white', bold: true });
   const countText = list.length + ' repos';
@@ -709,31 +706,39 @@ export async function toggleStarRepo(r) {
   const [owner, name] = fullName.split('/');
   try {
     const already = await isStarred(appState.token, owner, name);
+    // Track every mutated copy so a failed API round-trip can roll the
+    // optimistic count back — previously a mid-flight failure left a fake
+    // count rendered in every view with no generation guard to clean it up.
+    const touched = [];
     const applyCount = (count) => {
-      r.stargazers_count = count;
+      const setCount = (obj) => {
+        if (!obj || obj.full_name !== fullName) return;
+        if (!touched.includes(obj)) touched.push(obj);
+        obj.stargazers_count = count;
+      };
+      setCount(r);
       for (const arr of [appState.repos, appState.searchResults,
                          appState.trending, appState.forks, appState.actionsRepos]) {
         if (!Array.isArray(arr)) continue;
-        for (let i = 0; i < arr.length; i++) {
-          if (arr[i] && arr[i].full_name === fullName) arr[i].stargazers_count = count;
-        }
+        for (const item of arr) setCount(item);
       }
-      if (appState.repoDetails && appState.repoDetails.full_name === fullName) {
-        appState.repoDetails.stargazers_count = count;
-      }
+      setCount(appState.repoDetails);
       if (Array.isArray(appState.starred)) {
-        for (const s of appState.starred) {
-          if (s && s.full_name === fullName) s.stargazers_count = count;
-        }
+        for (const s of appState.starred) setCount(s);
       }
     };
+    const rollback = () => {
+      const prev = preCount;
+      for (const obj of touched) obj.stargazers_count = prev;
+    };
+    const preCount = (r.stargazers_count || 0);
     if (already) {
       await unstarRepo(appState.token, owner, name);
-      applyCount(Math.max(0, (r.stargazers_count || 0) - 1));
+      applyCount(Math.max(0, preCount - 1));
       showMessage('Unstarred ' + fullName, 'success');
     } else {
       await starRepo(appState.token, owner, name);
-      applyCount((r.stargazers_count || 0) + 1);
+      applyCount(preCount + 1);
       showMessage('Starred ' + fullName, 'success');
     }
     // upsertEntity keeps appState.starred + the entity cache in sync
@@ -747,6 +752,9 @@ export async function toggleStarRepo(r) {
     });
     render();
   } catch (e) {
+    // API call failed after (possibly) applying the optimistic count —
+    // restore every copy we touched.
+    try { rollback(); } catch {}
     showMessage((e && e.message) || 'Star toggle failed', 'error');
     render();
   }

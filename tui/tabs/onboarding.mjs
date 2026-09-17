@@ -36,10 +36,14 @@ export function parseReleaseNotes(text) {
   const sections = [];
   let cur = null;
   for (const ln of text.split('\n')) {
-    const m = /^##\s*\[([^\]]+)\]\s*-?\s*(.*)$/.exec(ln);
+    // Accept both `## [1.2.3] - date` (keep-a-changelog) and the common
+    // `## 1.2.3` / `## v1.2.3` bare-heading style — sections that drifted
+    // from the bracketed format previously vanished from "what's new".
+    const m = /^##\s*\[([^\]]+)\]\s*-?\s*(.*)$/.exec(ln)
+      || /^##\s*(v?\d+\.\d+(?:\.\d+)?[^\s]*)(?:\s+-?\s*(.*))?$/.exec(ln);
     if (m) {
       if (cur) sections.push(cur);
-      cur = { version: m[1].trim(), date: m[2].trim(), bullets: [] };
+      cur = { version: m[1].trim(), date: (m[2] || '').trim(), bullets: [] };
     } else if (cur && /^\s*-\s+/.test(ln)) {
       cur.bullets.push(ln.replace(/^\s*-\s+/, '').trim());
     } else if (cur && /^\s*###\s+/.test(ln) && !cur.subheader) {
@@ -245,8 +249,13 @@ export function startWelcome() {
 }
 
 export function isFirstRun() {
-  if (!appState.token && !existsSync(WELCOME_SEEN_FILE)) return true;
-  return false;
+  // Single source of truth: appState.lastSeenVersion, which markVersionSeen()
+  // keeps in lockstep with the legacy WELCOME_SEEN_FILE. The old dual-track
+  // check (token presence + raw file existence) could disagree with the
+  // persisted version when the file write failed or the token loaded late.
+  if (appState.lastSeenVersion) return false;
+  if (existsSync(WELCOME_SEEN_FILE)) return false;
+  return true;
 }
 
 export function markWelcomeSeen() {

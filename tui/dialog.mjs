@@ -176,7 +176,10 @@ function syncLegacyState() {
       if (type.stateKey === 'confirmAction') {
         appState[type.stateKey] = dialog._confirmAction || true;
       } else if (type.stateKey === 'inputMode') {
-        appState[type.stateKey] = 'input';
+        // Restore the dialog's captured mode rather than a hardcoded
+        // literal, so future non-'input' modes (numeric/search/path) sync
+        // correctly.
+        appState[type.stateKey] = dialog.mode || 'input';
       } else {
         appState[type.stateKey] = true;
       }

@@ -54,7 +54,8 @@ export async function loadChecks() {
   appState.repoCheckSuites = [];
   render();
   try {
-    const [owner, name] = repo.full_name.split('/');
+    const [owner, name] = String(repo.full_name || '').split('/');
+    if (!owner || !name) throw new Error('Invalid repository details');
     const runs = await getRepoCheckRuns(appState.token, owner, name, repo.default_branch, gen.signal);
     if (isStale(gen)) { finishLoading(gen); return; }
     appState.repoCheckRuns = (runs && runs.check_runs) ? runs.check_runs : [];
@@ -123,7 +124,10 @@ export function renderChecksPane(screen, y, maxH) {
     const status = run.status === 'completed' ? (run.conclusion || 'completed') : run.status;
     screen.writeStr(2, y, icon);
     screen.writeStr(5, y, name, { fg: 'white' });
-    if (37 + status.length < W) {
+    // Off-by-one fix: writeStr(37, …) occupies [37, 37+len), so the no-
+    // overflow condition is <=, not < — statuses fitting exactly at the
+    // right edge were previously hidden.
+    if (37 + status.length <= W) {
       screen.writeStr(37, y, status, { dim: true });
     }
     y++;

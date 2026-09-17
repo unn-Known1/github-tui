@@ -41,8 +41,14 @@ export const SECTIONS_FILE = join(CONFIG_DIR, 'sections.json');
 export const KEYBINDINGS_FILE = join(CONFIG_DIR, 'keybindings.json');
 
 // Track which storage backend is actually in use (set during loadToken / saveToken).
-// Exposed so the Settings UI can display the storage method.
-export let tokenStorageBackend = detectBackend() || 'plaintext';
+// Exposed so the Settings UI can display the storage method. Accessor pair
+// instead of `export let`: reassignment from concurrent loadToken/saveToken/
+// migration paths previously raced the raw binding (torn/stale reads in the
+// Settings UI mid-migration). Reads/writes now go through one variable with
+// no intermediate publication.
+let _tokenStorageBackend = detectBackend() || 'plaintext';
+export function getTokenStorageBackend() { return _tokenStorageBackend; }
+export function setTokenStorageBackend(v) { _tokenStorageBackend = String(v || 'plaintext'); }
 
 // One-shot guard for the background plaintext→keychain migration. Without
 // it, every concurrent loadToken() scheduled its own migration: duplicate
@@ -54,7 +60,7 @@ let _migrationScheduled = false;
 export function loadToken() {
   const secure = loadTokenSecure();
   if (secure) {
-    tokenStorageBackend = detectBackend() || 'plaintext';
+    setTokenStorageBackend(detectBackend() || 'plaintext');
     return secure;
   }
 
@@ -62,7 +68,7 @@ export function loadToken() {
   try {
     const legacy = readFileSync(TOKEN_FILE, 'utf-8').trim();
     if (legacy) {
-      tokenStorageBackend = 'plaintext';
+      setTokenStorageBackend('plaintext');
       // Silently migrate to keychain in the background — non-blocking, once.
       if (!_migrationScheduled) {
         _migrationScheduled = true;
@@ -73,7 +79,7 @@ export function loadToken() {
             const current = readFileSync(TOKEN_FILE, 'utf-8').trim();
             if (current && saveTokenSecure(current)) {
               try { unlinkSync(TOKEN_FILE); } catch {}
-              tokenStorageBackend = detectBackend() || 'plaintext';
+              setTokenStorageBackend(detectBackend() || 'plaintext');
             }
           } catch {}
         });
@@ -90,14 +96,14 @@ export function saveToken(token) {
 
   const saved = saveTokenSecure(token);
   if (saved) {
-    tokenStorageBackend = detectBackend() || 'plaintext';
+    setTokenStorageBackend(detectBackend() || 'plaintext');
     // Remove legacy plaintext file if it exists (clean migration)
     try { if (existsSync(TOKEN_FILE)) unlinkSync(TOKEN_FILE); } catch {}
     return tokenStorageBackend;
   }
 
   // 2. Fall back to plaintext with strict permissions
-  tokenStorageBackend = 'plaintext';
+  setTokenStorageBackend('plaintext');
   if (!existsSync(CONFIG_DIR)) mkdirSync(CONFIG_DIR, { recursive: true });
   // Atomic write with permissions set BEFORE the file becomes visible at its
   // final path: the old write-then-chmod order left a world-readable (umask)
@@ -127,7 +133,7 @@ export function removeToken() {
   removeTokenSecure();
   // Always also remove plaintext file for clean state
   try { if (existsSync(TOKEN_FILE)) unlinkSync(TOKEN_FILE); } catch {}
-  tokenStorageBackend = detectBackend() || 'plaintext';
+  setTokenStorageBackend(detectBackend() || 'plaintext');
 }
 
 // Re-export detectBackend so settings UI can call it without importing keychain directly

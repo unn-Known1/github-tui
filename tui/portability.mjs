@@ -142,9 +142,15 @@ export function importPortableConfig(path, { merge = true } = {}) {
   if (next.repoPreferences !== undefined) writeConfigFile(REPO_PREFS_FILE, next.repoPreferences);
   if (next.sections !== undefined) writeConfigFile(SECTIONS_FILE, next.sections);
   if (next.keybindings !== undefined) writeConfigFile(KEYBINDINGS_FILE, next.keybindings);
-  // Theme is a raw string file (not JSON) — route through the same atomic,
-  // 0600 write as every other imported file (it was previously world-readable).
-  if (next.theme) writeConfigFile(THEME_FILE, String(next.theme));
+  // Theme is a RAW string file (theme.mjs reads it with trim(), no JSON
+  // parsing) — write it as a bare string, not through writeConfigFile's
+  // JSON.stringify. Same atomicity + 0600 guarantee, hand-rolled here.
+  if (next.theme) {
+    const tmp = THEME_FILE + '.tmp.' + process.pid;
+    writeFileSync(tmp, String(next.theme));
+    try { chmodSync(tmp, 0o600); } catch {}
+    renameSync(tmp, THEME_FILE);
+  }
   if (next.session) writeConfigFile(SESSION_FILE, next.session);
   return next;
 }

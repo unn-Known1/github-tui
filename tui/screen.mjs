@@ -449,12 +449,16 @@ export class Screen {
 
   fillRect(x, y, w, h, ch, style = null) {
     for (let yy = y; yy < y + h; yy++) {
-      if (yy < 0 || yy >= this.height) continue;
+      // Route through mapViewportY like every other write API — the raw row
+      // index previously landed the rectangle in the wrong rows whenever a
+      // scrollable viewport was active.
+      const mapped = this.mapViewportY(yy);
+      if (mapped < 0 || mapped >= this.height) continue;
       for (let xx = x; xx < x + w; xx++) {
         if (xx < 0 || xx >= this.width) continue;
-        this.charBuf[yy][xx] = ch;
-        this.styleBuf[yy][xx] = style;
-        this.linkBuf[yy][xx] = null;
+        this.charBuf[mapped][xx] = ch;
+        this.styleBuf[mapped][xx] = style;
+        this.linkBuf[mapped][xx] = null;
       }
     }
   }
@@ -518,7 +522,9 @@ export class Screen {
   // e.g. " Python ✕ " or "[Python]"
   chip(x, y, text, opts = {}) {
     const { active = false, dismissible = false, style = null, dim = false } = opts;
-    const s = active ? style : (dim ? { dim: true } : { dim: true });
+    // Fix the identical-branch ternary: an inactive non-dim chip previously
+    // rendered dimmed anyway.
+    const s = active ? style : (dim ? { dim: true } : null);
     const label = text;
     const dismiss = dismissible ? ' ✕' : '';
     const txt = ' ' + label + dismiss + ' ';
@@ -613,10 +619,12 @@ export class Screen {
         const previousCompiled = FORCE_COLOR === false ? null : compileStyle(pSt);
 
         if (ch === pCh && compiled === previousCompiled && link === pLink) {
-          // Skipped: the terminal already shows exactly this cell, so sync
-          // the link tracker without emitting (otherwise a later changed
-          // cell could miss its close/open or emit a redundant one).
-          curLink = link;
+          // Skipped: the terminal already shows exactly this cell — including
+          // whatever OSC 8 state was actually emitted for it last frame
+          // (pLink). Advancing curLink to the model's `link` here previously
+          // desynced the tracker from the terminal and later emitted a
+          // LINK_CLOSE for an id the terminal never had open.
+          curLink = pLink;
           continue;
         }
 

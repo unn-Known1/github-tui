@@ -191,7 +191,9 @@ export async function loadDashboardWidgets(force = false) {
     }
 
     if (results[2].status === 'fulfilled' && appState.starred.length >= 100) {
-      loadDashboardStarredPages(gen).catch(() => {});
+      loadDashboardStarredPages(gen).catch((e) => {
+        if (!isStale(gen)) showError((e && e.message) || 'Background starred pagination failed', 'Dashboard stars');
+      });
     }
     render();
   } catch (e) {
@@ -390,7 +392,9 @@ function matchesLocalRepo(item) {
 
 export function getDashboardRepos() {
   const local = localRepoName();
-  return local ? (appState.repos || []).filter(r => r.full_name === local) : (appState.repos || []);
+  // Defensive copy in the unfiltered case too — a caller sorting/splicing
+  // the result in place previously corrupted the central appState.repos store.
+  return local ? (appState.repos || []).filter(r => r.full_name === local) : [...(appState.repos || [])];
 }
 
 export function getDashboardEvents() {
@@ -1649,7 +1653,7 @@ export function getFilteredTrending() {
     if (!q) return true;
     const haystack = [
       r.full_name, r.name, r.description, r.language,
-      r.owner && (r.owner.login || r.owner.login),
+      r.owner && (r.owner.login || r.owner.name || r.owner.display_login),
       ...(Array.isArray(r.topics) ? r.topics : []),
     ].filter(Boolean).join(' ').toLowerCase();
     return haystack.includes(q);

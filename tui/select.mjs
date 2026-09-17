@@ -131,11 +131,19 @@ export function createSelect(options = {}) {
           for (let xx = x + 1; xx < x + boxW - 1; xx++) screen.styleBuf[row][xx] = color('selection');
         }
         screen.writeStr(x + 3, row, selected ? '▶' : ' ', selected ? color('selection') : null);
-        screen.writeStr(x + 5, row, truncate(entry.item.label, Math.max(0, boxW - 16)), selected ? color('selection') : null);
+        const labelWidth = Math.max(0, boxW - 16);
+        screen.writeStr(x + 5, row, truncate(entry.item.label, labelWidth), selected ? color('selection') : null);
         if (entry.item.hint) {
+          // Anchor the hint AFTER the label's full reserved width and truncate
+          // it to the remaining room — the old right-anchored position
+          // collided with the label on narrow boxes/long hints.
           const hint = String(entry.item.hint);
-          screen.writeStr(x + Math.max(5, boxW - hint.length - 3), row, hint,
-            selected ? color('selection') : { fg: 'cyan', dim: true });
+          const hintStart = x + 5 + labelWidth + 1;
+          const maxHintWidth = Math.max(0, x + boxW - 3 - hintStart);
+          if (maxHintWidth > 0) {
+            screen.writeStr(hintStart, row, truncate(hint, maxHintWidth),
+              selected ? color('selection') : { fg: 'cyan', dim: true });
+          }
         }
       }
     } else {
