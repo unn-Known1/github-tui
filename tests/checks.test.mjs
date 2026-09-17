@@ -17,12 +17,17 @@ describe('checkRunIcon', () => {
     assert.equal(checkRunIcon({ status: 'completed', conclusion: 'cancelled' }), '⚠️');
   });
 
-  it('maps non-binary conclusions instead of unknown', () => {
-    assert.equal(checkRunIcon({ status: 'completed', conclusion: 'neutral' }), '➖');
-    assert.equal(checkRunIcon({ status: 'completed', conclusion: 'skipped' }), '➖');
-    assert.equal(checkRunIcon({ status: 'completed', conclusion: 'timed_out' }), '⏱️');
-    assert.equal(checkRunIcon({ status: 'completed', conclusion: 'action_required' }), '❗');
-    assert.equal(checkRunIcon({ status: 'completed', conclusion: 'stale' }), '📦');
+  it('maps non-binary conclusions to a non-empty icon distinct from unknown', () => {
+    // We assert stability (non-empty + never falls through to ❓) rather
+    // than pinning exact glyphs — glyphs may change for UX reasons without
+    // breaking behavior. Critical paths (success/failure/pending) keep
+    // strict equality because they are user-facing meaning-bearers.
+    const nonBinary = ['neutral', 'skipped', 'timed_out', 'action_required', 'stale'];
+    for (const conclusion of nonBinary) {
+      const icon = checkRunIcon({ status: 'completed', conclusion });
+      assert.ok(typeof icon === 'string' && icon.length > 0, `${conclusion} should map to a non-empty icon`);
+      assert.notEqual(icon, '❓', `${conclusion} should not fall through to the unknown icon`);
+    }
   });
 
   it('falls back to unknown for unrecognized conclusions', () => {

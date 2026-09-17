@@ -37,6 +37,13 @@ describe('GitHubApiError', () => {
     assert.equal(e.status, 0);
     assert.equal(e.endpoint, '');
   });
+
+  it('preserves stack and name for diagnostics and IPC', () => {
+    const e = new GitHubApiError('boom', 404, '/x');
+    assert.equal(e.name, 'GitHubApiError');
+    assert.equal(e.constructor.name, 'GitHubApiError');
+    assert.ok(typeof e.stack === 'string' && e.stack.includes('GitHubApiError'));
+  });
 });
 
 // ── Shell-escape logic — imported from custom-keys.mjs so these tests
@@ -51,16 +58,21 @@ describe('shellEscape (custom-keys placeholder safety)', () => {
     assert.equal(shellEscape("it's"), "'it'\\''s'");
   });
 
-  it('escapes semicolons (prevents command injection)', () => {
-    // The semicolon itself is safe inside single quotes in POSIX sh
+  it('wraps values containing shell metacharacters so they are treated as literals', () => {
+    // Wraps a payload containing ';' so POSIX sh treats it as a literal,
+    // not a command separator. Single-quote wrapping neutralizes ALL
+    // metacharacters; name the test after the mechanism, not one case.
     const result = shellEscape('foo; rm -rf ~');
     assert.equal(result, "'foo; rm -rf ~'");
-    // The shell will treat this as the literal string "foo; rm -rf ~"
-  });
-
-  it('escapes backticks', () => {
-    const result = shellEscape('foo`whoami`');
-    assert.equal(result, "'foo`whoami`'");
+    // Confirms backticks and $() are also neutralized (same wrapping).
+    const result2 = shellEscape('foo`whoami`');
+    assert.equal(result2, "'foo`whoami`'");
+    // Newlines would break the prompt line; wrapping keeps them literal.
+    const result3 = shellEscape('a\nb');
+    assert.equal(result3, "'a\nb'");
+    // $() substitution is prevented by wrapping.
+    const result4 = shellEscape('a$(id)b');
+    assert.equal(result4, "'a$(id)b'");
   });
 
   it('returns empty string literal for null', () => {

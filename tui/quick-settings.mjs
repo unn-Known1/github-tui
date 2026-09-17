@@ -40,7 +40,7 @@ const SETTINGS = [
         appState.autoRefreshEnabled = false;
       } else {
         appState.autoRefreshEnabled = true;
-        appState.autoRefreshIntervalMs = parseInt(value) * 60000;
+        appState.autoRefreshIntervalMs = parseInt(value, 10) * 60000;
       }
       if (globalThis._startAutoRefresh) globalThis._startAutoRefresh();
     },

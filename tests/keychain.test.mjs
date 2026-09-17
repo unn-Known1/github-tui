@@ -48,10 +48,14 @@ describe('saveTokenSecure', () => {
     assert.equal(typeof result, 'boolean');
   });
 
-  it('returns false for empty/falsy token', () => {
+  it('returns false (not undefined/throw) for empty/falsy token', () => {
+    // Contract: zero/false/null/undefined must coerce to a boolean false
+    // so callers (`if (!saveTokenSecure(token)) fallback()`) work reliably.
     assert.equal(saveTokenSecure(''), false);
     assert.equal(saveTokenSecure(null), false);
     assert.equal(saveTokenSecure(undefined), false);
+    assert.equal(saveTokenSecure(false), false);
+    assert.equal(saveTokenSecure(0), false);
   });
 });
 

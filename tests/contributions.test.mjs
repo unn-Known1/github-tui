@@ -39,7 +39,7 @@ describe('loadContributionEvents', () => {
     let calls = 0;
     const fetchPage = async (t, u, perPage, signal, page) => {
       calls++;
-      if (page === 1) return makePage(100, 1); // recent ~7 days
+      if (page === 1) return makePage(100, 1); // recent ~1 day
       return makePage(100, CONTRIB_DAYS + 30); // all older than window
     };
     const events = await loadContributionEvents('t', 'u', null, fetchPage);

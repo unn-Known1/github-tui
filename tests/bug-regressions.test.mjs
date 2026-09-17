@@ -250,7 +250,13 @@ describe('audit regressions', () => {
         if (markerExisted) writeFileSync(marker, markerContents);
         else unlinkSync(marker);
         if (!configExisted) rmdirSync(CONFIG_DIR);
-      } catch {}
+      } catch (err) {
+        // ENOENT on unlink/rmdir is expected when the file/dir was created
+        // by this test and then removed by a prior cleanup attempt; re-throw
+        // anything else so unexpected failures surface rather than silently
+        // polluting disk state for the next test run.
+        if (err.code !== 'ENOENT') throw err;
+      }
     }
   });
 });

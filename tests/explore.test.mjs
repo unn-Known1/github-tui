@@ -19,17 +19,18 @@ import {
   lastModKey, getLastMod, setLastMod, lastModText, lastChangeLine,
 } from '../tui/tabs/files.mjs';
 
-// Keys this file mutates — restored after every test.
+// Keys this file mutates — restored after every test via deep snapshot so
+// in-place pushes/splices to nested arrays can't leak across tests.
 const TOUCHED = [
   'trending', 'savedSearches', 'recentRepos',
   'repoIssuesFilter', 'repoPRsFilter', 'exploreLandingScroll',
   'filesLastMod',
 ];
 const saved = {};
-for (const k of TOUCHED) saved[k] = appState[k];
+for (const k of TOUCHED) saved[k] = JSON.parse(JSON.stringify(appState[k]));
 
 afterEach(() => {
-  for (const k of TOUCHED) appState[k] = saved[k];
+  for (const k of TOUCHED) appState[k] = JSON.parse(JSON.stringify(saved[k]));
 });
 
 const forksFixture = () => ([
