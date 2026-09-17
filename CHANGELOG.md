@@ -2,6 +2,74 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.7.6] - 2026-09-17
+
+### Security
+- `sanitizeExportState`: recursive case-insensitive scrub for secrets at all object depths
+- Keychain: macOS reads PAT from stdin (`-w bare`), token invisible to `ps`; Windows cmdkey limitation documented; backend cache resets on ENOENT
+- `shellEscape(0/false)` null guard added; empty-command guard; dead getActionRegistry removed
+- Store: write-then-cache prevents cache/disk divergence on failed writes; loaders return defensive copies; `removeBookmark` uses id-match preference
+- Undo: lazy token resolution via `liveToken()`; failed entries dropped instead of re-queued; unsubscribe restores prior watch level
+
+### Fixed
+- Release actions: first-pipe split preserves JSON containing `|`; single `requireRepoAuth` guard
+- Repos: background paging resumes at `reposPage+1` eliminating duplicate fetch after cap; `Array.isArray` guards; PR probe paginates 3 pages; `ownViewList()` memoized sort chain
+- Inbox: `_inboxMoreInflight` race guard; id-deduplication; memoized snooze count; by-repo panel routing; pruned state persisted to disk
+- Dialog: `_confirmAction` payload no longer clobbered with `true`
+- Palette: paste buffer capped at 1MB; `Esc` cancels stuck paste; `filter()` memoized and invalidated on register
+- OSC-52 clipboard gated on `stdout.isTTY`; static `spawn` import; non-async executors
+- `renderFocusLoad` failure now surfaces loudly instead of silently
+
+### Performance
+- `analyze-packages.mjs`: sequential per-release awaits → `Promise.allSettled` parallel (3→1 round-trip)
+- `security-aggregate.mjs`: secondary sort by repo+alert id for deterministic ordering
+
+### Architecture
+- `analyze-traffic.mjs`: `writeSummaryRow()` / `writePopularSection()` shared helpers; Views/Clones and Paths/Referrers blocks deduped
+- `analyze-issues.mjs`: `PANE_COLS` shared constant; `hasMore()` callback replaces brittle footer equality check
+- `analyze.mjs`: `resultsCursor()` map + helper consolidates 8 copy-pasted cursor branches into one
+- `mouse.mjs`: `overlayBox()` helper centralizes centered-overlay geometry (4× inline re-computation eliminated)
+- Layout: `contentHeight` floored `>=0`; `cardsPerRow`/`cardWidth` clamped `>=1`; detail popup height floored `>=1`
+- Work-queue: null/non-array channel guards on all 4 channels; falsy items skipped
+- Organizations: row-existence guard on `styleBuf[y+3+i]` write
+- Select: null-safe `screen.styleBuf` access in backdrop loop
+- Toast: null-screen early return; per-row `screen.styleBuf[y]` guard
+
+### Developer Experience
+- `check-imports.mjs`: reports 0 issues across 58 files
+- `theme.mjs`: internal `DEFAULT` renamed `DARK_THEME` (unrelated to the `'default'` theme key)
+- `help.mjs`: `scrollHelp(delta, screen?)` uses current `screen.height` instead of stale `process.stdout.rows`; dead `export const keys = {}` removed
+- `analyze-readme.mjs`: `paneTopY` uses `HEADER_HEIGHT` constant from render.mjs instead of magic number
+- `quick-settings.mjs`: `parseInt(value)` → `parseInt(value, 10)` (explicit radix)
+
+### Tests
+- 416 suite, 416 pass, 0 fail, 0 pre-existing skips
+- `checks.test.mjs`: non-binary conclusion icons loosened from exact-emoji to stability assertion
+- `github-errors.test.mjs`: shellEscape test covers newlines, `$()`, backticks; GitHubApiError stack/name assertions added
+- `contributions.test.mjs`: corrected "~7 days" comment to "~1 day"
+- `explore.test.mjs`: deep-snapshot (`JSON.parse(JSON.stringify())`) state restoration prevents cross-test mutations
+- `keychain.test.mjs`: `saveTokenSecure` covers `false` and `0` in addition to `''`/`null`/`undefined`
+- `layout.test.mjs`: exact `deepEqual` with `startX` replaced by individual field assertions
+- `bug-regressions.test.mjs`: bare `catch {}` in marker cleanup now re-throws non-ENOENT errors
+
+### Removed Dead Code
+- Unused imports: `dashboard`, `issue-create`, `quick-settings`, `toast`, `which-key`, `render`, `confirm`, `sectionHeader`, `STALE_DAYS`, `truncateToWidth`, `getUnreadCount`, `submitLogin`, `TOKEN_FILE`, `createRequire`, `beforeEach`, `mock`, `getActionRegistry`, `resolve`
+- `.gitignore` / `.npmignore` hardened
+
+## [0.7.5] - 2026-09-14
+
+### Fixed
+- Error recovery: safe string coercion; dead `action`/`message` fields removed from `RECOVERY_PATTERNS`
+- `analyze-issues.mjs`: `ISSUES_PER_PAGE` constant; `(+) ` suffix added; `full_name` guard on repo split
+- Detail pane: `mergeable === null` shows explicit message; `data.state` guard on status
+- Select: surrogate-safe backspace handling
+- State: duplicate `fileHistory`/`dashboardContrib` keys removed; `GITHUB_TUI_HOME` override for data paths
+- Files: `Number.isFinite` size check on file metadata
+- `git-context.mjs`: `maxBuffer` on `execFileSync`
+
+### Verification
+- Full suite 396 / 396 pass.
+
 ## [0.7.4] - 2026-09-10
 
 ### Fixed

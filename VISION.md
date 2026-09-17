@@ -2,7 +2,7 @@
 
 > *The fastest way to live in GitHub without a browser tab — discovery, triage, review, and CI in one terminal.*
 
-**Current version:** v0.7.4
+**Current version:** v0.7.6
 
 ---
 
@@ -47,13 +47,11 @@
 | **Traffic/Milestones/Labels/Checks panes** | ✅ |
 | **Modular architecture** — focused modules with one file per tab and feature helpers | ✅ |
 | **Zero dependencies** — just `node app.mjs` | ✅ |
-| **269 tests** — Node built-in test runner, zero deps | ✅ |
-| **329 tests** — Node built-in test runner, zero deps (v0.7.2) | ✅ |
-| **396 tests** — Node built-in test runner, zero deps (v0.7.4) | ✅ |
+| **416+ tests** — Node built-in test runner, zero deps (v0.7.6) | ✅ |
 | **OSC 8 hyperlinks** — truncated URLs display short but open complete (v0.7.4) | ✅ |
 | **Graceful shutdown** — atomic handlers, raw mode restore, crash logging | ✅ |
 | **Cross-platform rendering** — ASCII box fallback, FORCE_COLOR/NO_COLOR | ✅ |
-| **Input cursor movement** — arrow keys, Home/End, Ctrl-A/E/U/W | ✅ |
+| **Input cursor movement** — arrow keys, Home/End, Ctrl-A/E/U/W in all text inputs |
 | **Context-aware help** — current tab shortcuts shown first | ✅ |
 | **Mouse hover on all lists** — Repos, Inbox, Actions tabs | ✅ |
 | **Pure business logic** — testable repos-logic.mjs decoupled from state | ✅ |
@@ -79,7 +77,7 @@
 
 ---
 
-### v0.7 — "CI Cockpit" ✅ core implemented, unreleased
+### v0.7 — "CI Cockpit" ✅ shipped
 
 | Feature | Why |
 |---|---|
@@ -241,7 +239,7 @@
 | Plugin system | 🎯 v2.0 |
 | Release automation | 🟡 partial in unreleased v0.7; full assistant remains 🎯 v2.0 |
 | Offline + disk cache | ✅ v0.6 |
-| Test suite (329 tests) | ✅ shipped |
+| Test suite (416+ tests) | ✅ shipped |
 | Graceful shutdown + crash logging | ✅ shipped |
 
 ---
