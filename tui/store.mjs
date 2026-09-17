@@ -25,6 +25,11 @@ export function saveBookmarks(list) {
 }
 
 export function addBookmark(repo, tags = []) {
+  // Defensive shape check: a null/partial record would otherwise throw a
+  // raw TypeError deep inside a TUI event handler.
+  if (!repo || typeof repo.full_name !== 'string' || !repo.full_name.includes('/')) {
+    throw new TypeError('addBookmark: repo with a valid full_name string is required');
+  }
   const list = loadBookmarks();
   if (list.some(b => b.full_name === repo.full_name)) return { added: false, list };
   list.unshift({
@@ -129,6 +134,14 @@ export function saveInboxFilters(filters) {
 }
 export function addInboxFilter(label, filter) {
   const list = loadInboxFilters().filter(f => f.label !== label);
-  list.unshift({ id: 'if_' + Date.now(), label, filter, createdAt: new Date().toISOString() });
-  return saveInboxFilters(list.slice(0, 30));
+  // Same id format as bookmarks/other entities — 'if_' + Date.now() alone
+  // collided when two filters were added in the same millisecond and the
+  // second silently overwrote the first.
+  list.unshift({
+    id: `if_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+    label, filter, createdAt: new Date().toISOString(),
+  });
+  const truncated = list.length > 30;
+  const saved = saveInboxFilters(list.slice(0, 30));
+  return truncated ? { ...saved, truncated: true } : saved;
 }

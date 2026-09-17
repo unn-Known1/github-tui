@@ -20,19 +20,24 @@ export function calculateViewport(totalItems, selectedItem, scrollOffset, viewpo
   if (!Number.isFinite(itemHeight) || itemHeight <= 0) itemHeight = 1;
   if (!Number.isFinite(viewportHeight) || viewportHeight <= 0) viewportHeight = 1;
 
-  const maxScroll = Math.max(0, totalItems - Math.floor(viewportHeight / itemHeight));
+  // One rounding policy for rows-per-page: floor everywhere. The old mix of
+  // floor (scroll math) and ceil (visible window) rendered the last item
+  // past the scroll bound when viewportHeight wasn't a multiple of itemHeight.
+  const rowsPerPage = Math.max(1, Math.floor(viewportHeight / itemHeight));
+
+  const maxScroll = Math.max(0, totalItems - rowsPerPage);
 
   let scroll = Math.max(0, Math.min(scrollOffset, maxScroll));
 
   const selectedRow = Math.floor(selectedItem / itemHeight);
   if (selectedRow < scroll) {
     scroll = selectedRow;
-  } else if (selectedRow >= scroll + Math.floor(viewportHeight / itemHeight)) {
-    scroll = selectedRow - Math.floor(viewportHeight / itemHeight) + 1;
+  } else if (selectedRow >= scroll + rowsPerPage) {
+    scroll = selectedRow - rowsPerPage + 1;
   }
 
   const startItem = Math.max(0, Math.floor(scroll) - overscan);
-  const visibleItems = Math.ceil(viewportHeight / itemHeight) + overscan * 2;
+  const visibleItems = rowsPerPage + overscan * 2;
   const endItem = Math.min(totalItems, startItem + visibleItems);
 
   const offsetY = (startItem - scroll) * itemHeight;

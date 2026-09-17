@@ -46,13 +46,22 @@ export function tokenizeLine(line = '', language = 'text') {
   const push = (start, end, kind) => {
     if (end > start) spans.push({ text: text.slice(start, end), kind });
   };
+  // Comment detection. `#`-style comments must start at column 0 or after
+  // whitespace and be followed by whitespace/EOL to count: an unanchored
+  // /#.*/ used to swallow `x = "# not a comment"` or `echo "issue #123"`.
+  // Same idea for `--` (SQL) and `//` (must not eat `http://…` — the second
+  // slash requires a preceding word boundary so URLs stay intact).
   const comment = language === 'python' || language === 'shell' || language === 'yaml'
-    ? /#.*/g
-    : language === 'sql' ? /--.*/g
-    : /\/\/.*|\/\*.*?\*\//g;
+    ? /(^|\s)#(\s|$).*/g
+    : language === 'sql' ? /(^|\s)--(\s|$).*/g
+    : /(^|\s)\/\/(\s|$).*/g;
   const comments = [];
   let match;
-  while ((match = comment.exec(text))) comments.push([match.index, match.index + match[0].length]);
+  while ((match = comment.exec(text))) {
+    // Keep the whitespace that triggered the match out of the comment span.
+    const start = match.index + (match[1] ? match[1].length : 0);
+    comments.push([start, match.index + match[0].length]);
+  }
   const isComment = (i) => comments.some(([a, b]) => i >= a && i < b);
   let cursor = 0;
   const re = /(['"`])(?:\\.|(?!\1).)*\1|\b\d+(?:\.\d+)?\b|\b(?:async|await|class|const|def|else|export|for|fn|from|function|if|import|impl|interface|let|new|package|pub|return|static|struct|throw|try|type|var|while|yield|SELECT|FROM|WHERE|INSERT|UPDATE|DELETE|CREATE|DROP|JOIN|ORDER|GROUP|BY)\b/g;
@@ -80,8 +89,12 @@ export function validateWorkflowInputs(workflow, ref, inputs = {}) {
   if (!r) return { ok: false, error: 'A branch or tag is required' };
   if (r.length > 255) return { ok: false, error: 'The ref is too long' };
   const declared = workflow?.inputs || workflow?.workflow_dispatch?.inputs || {};
+  const declaredKeys = Object.keys(declared);
   for (const key of Object.keys(inputs || {})) {
-    if (Object.keys(declared).length && !Object.prototype.hasOwnProperty.call(declared, key)) {
+    // "No inputs block declared" means NO inputs allowed — the old
+    // `declaredKeys.length &&` guard let arbitrary leftover keys through
+    // to the dispatch endpoint for workflows that simply omit the block.
+    if (!declaredKeys.length || !Object.prototype.hasOwnProperty.call(declared, key)) {
       return { ok: false, error: 'Unknown workflow input: ' + key };
     }
     if (String(inputs[key]).length > 1000) return { ok: false, error: 'Input is too long: ' + key };

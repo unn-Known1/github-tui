@@ -193,9 +193,19 @@ export function execSelected() {
   const slot = rows[appState.paletteCursor];
   const a = slot && slot.type === 'item' ? slot.a : null;
   if (!a) { close(); return; }
+  // Capture the action, then run it BEFORE closing: actions may introspect
+  // palette state, and error messages must surface while the palette's
+  // focus context is still intact (close() hands focus back to the
+  // previous widget).
+  try {
+    const result = Promise.resolve(a.run());
+    // Sync throw already handled above; async rejection surfaces after the
+    // close but is still attributed to the action.
+    result.catch(e => showMessage((e && e.message) || 'Command failed', 'error'));
+  } catch (e) {
+    showMessage((e && e.message) || 'Command failed', 'error');
+  }
   close();
-  try { Promise.resolve(a.run()).catch(e => showMessage(e.message, 'error')); }
-  catch (e) { showMessage(e.message, 'error'); }
 }
 
 export function handleKey(key) {
@@ -267,10 +277,12 @@ export function renderPalette(screen) {
     }
   }
 
-  const boxW = Math.min(80, W - 4);
-  const boxH = Math.min(20, H - 4);  // Slightly taller for categories
-  const x = Math.floor((W - boxW) / 2);
-  const y = Math.floor((H - boxH) / 2);
+  // Clamp against tiny terminals: W-4/H-4 going negative previously made
+  // the box, centering math, and fill loops use nonsense coordinates.
+  const boxW = Math.max(8, Math.min(80, W - 4));
+  const boxH = Math.max(6, Math.min(20, H - 4)); // Slightly taller for categories
+  const x = Math.max(0, Math.floor((W - boxW) / 2));
+  const y = Math.max(0, Math.floor((H - boxH) / 2));
 
   for (let yy = y; yy < y + boxH; yy++) {
     for (let xx = x; xx < x + boxW; xx++) screen.setCell(xx, yy, ' ', null);
@@ -280,8 +292,12 @@ export function renderPalette(screen) {
   const q = appState.paletteQuery;
   const inputStyle = color('inputBox');
   screen.writeStr(x + 2, y + 1, '>', { fg: 'cyan', bold: true });
-  screen.writeStr(x + 4, y + 1, truncate(q, boxW - 8), inputStyle);
-  screen.writeStr(x + 4 + q.length, y + 1, '█', { fg: 'cyan' });
+  const shown = truncate(q, boxW - 8);
+  screen.writeStr(x + 4, y + 1, shown, inputStyle);
+  // Cursor tracks the TRUNCATED query, not the raw length — otherwise it
+  // drifts past the visible area and can collide with the right border.
+  const cursorX = Math.min(x + 4 + shown.length, x + boxW - 3);
+  screen.writeStr(cursorX, y + 1, '█', { fg: 'cyan' });
 
   screen.hline(y + 2, '─', color('dim'));
 

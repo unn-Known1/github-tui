@@ -499,11 +499,23 @@ export function request(path, opts) {
           // resource — our problem, not its problem. Re-issue the GET
           // without `If-None-Match` so the server sends a fresh body,
           // then re-cache it normally. Cap at one retry so a pathological
-          // server can't loop; second 304 falls through to normal error.
-          etagCache.delete(cacheKey);
+          // server can't loop.
+          // Keep the entry until the retry SUCCEEDS: the retry deliberately
+          // omits If-None-Match, so a second 304 can't actually happen — but
+          // if the retry fails for another reason, deleting first would
+          // throw away a body the caller may still want on a later call.
           if (!o._retried304) {
-            return resolve(request(path, { ...o, _retried304: true }));
+            resolve(request(path, { ...o, _retried304: true }))
+              .catch(() => etagCache.delete(cacheKey)); // only drop it if the retry also fails
+            return;
           }
+          // Pathological server answered 304 twice: a benign "cache is
+          // actually fresh" case, NOT an API failure. Report it distinctly
+          // so callers/UI don't render it as a hard error.
+          reject(Object.assign(new GitHubApiError(
+            'GitHub API returned 304 after refetch (cached copy is current)', 304, path
+          ), { benign: true }));
+          return;
         }
         if (res.statusCode === 403 && rrParsed === 0) {
           const resetDate = new Date((rsParsed || 0) * 1000);

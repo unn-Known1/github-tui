@@ -25,7 +25,13 @@ export async function loadSecurityAggregate() {
   const gen = startAsync('security-aggregate');
   const alerts = [];
   for (const repo of repos) {
-    if (isStale(gen)) return alerts;
+    if (isStale(gen)) {
+      // A newer scan superseded this one — clear the loading flag or the UI
+      // shows 'Scanning…' until some future call resets it.
+      appState.securityAggregateLoading = false;
+      render();
+      return alerts;
+    }
     const [owner, name] = String(repo.full_name || '').split('/');
     if (!owner || !name) continue;
     const calls = [
@@ -45,7 +51,13 @@ export async function loadSecurityAggregate() {
   }
   if (!isStale(gen)) {
     appState.securityAggregate = alerts.sort((a, b) => {
-      const rank = { critical: 4, high: 3, medium: 2, low: 1 };
+      // Covers Dependabot (critical/high/medium/low), code scanning
+      // (error/warning/note), and secret scanning (no level) so every
+      // alert source sorts meaningfully instead of collapsing to rank 0.
+      const rank = {
+        critical: 8, high: 7, error: 6, medium: 5, warning: 4,
+        low: 3, note: 2, informational: 1, none: 1,
+      };
       return (rank[String(b.severity || b.rule?.security_severity_level || '').toLowerCase()] || 0) -
         (rank[String(a.severity || a.rule?.security_severity_level || '').toLowerCase()] || 0);
     });

@@ -195,18 +195,33 @@ function runInternalAction(binding) {
  */
 function runShellCommand(binding) {
   const cmd = resolvePlaceholders(binding.command);
+  // Unresolved placeholders collapse to '' — a command like git checkout ''
+  // would fail with a cryptic shell error, so validate the interesting
+  // substitutions up front and abort with a clear message.
+  if (/\{number\}|\{branch\}/.test(binding.command) && !appState.detailData) {
+    showMessage('This command needs an issue/PR open in the detail view', 'warning');
+    return true;
+  }
+  if (/\{owner\}|\{repo\}/.test(binding.command)
+      && !appState.repoDetails && !appState.localRepo) {
+    showMessage('This command needs an open repository', 'warning');
+    return true;
+  }
   showMessage('Running: ' + (binding.label || cmd), 'info');
 
   try {
-    const child = spawn(cmd, [], { shell: true, timeout: 30000, stdio: 'ignore' });
+    // stdio: pipe so failures are diagnosable (ignore previously discarded
+    // stderr); kill()'d on timeout below so a SIGTERM-ignoring child can't
+    // leak past the 30s window.
+    const child = spawn(cmd, [], { shell: true, timeout: 30000, stdio: ['ignore', 'pipe', 'pipe'] });
     child.on('error', (e) => showMessage('Command failed: ' + (e.message || 'unknown'), 'error'));
+    if (typeof child.kill === 'function') child.on('timeout', () => { try { child.kill('SIGKILL'); } catch {} });
     child.on('exit', (code) => {
       showMessage(
         code === 0 ? '✓ ' + (binding.label || 'Command') + ' complete'
                    : 'Command exited with code ' + code,
         code === 0 ? 'success' : 'error'
       );
-      render();
     });
   } catch (e) {
     showMessage('Failed: ' + (e.message || 'unknown'), 'error');

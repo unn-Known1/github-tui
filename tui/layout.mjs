@@ -7,21 +7,40 @@
  * @returns {Array<number>} Actual column widths
  */
 export function calculateColumns(terminalWidth, columns) {
-  const totalRatio = columns.reduce((sum, col) => sum + (col.ratio || 1), 0);
-  const availableWidth = terminalWidth - (columns.length + 1); // Account for separators
+  const cols = Array.isArray(columns) ? columns : [];
+  if (cols.length === 0) return [];
+  // A malformed spec (min > max) would silently discard the min intent below;
+  // normalize so the stricter bound wins predictably.
+  const normalized = cols.map(col => ({
+    ...col,
+    min: col.min && col.max ? Math.min(col.min, col.max) : col.min,
+  }));
+  const totalRatio = normalized.reduce((sum, col) => sum + (col.ratio || 1), 0) || 1;
+  // On a terminal narrower than the separator overhead the available width
+  // goes negative — floor at 0 so widths can't overflow the screen.
+  const availableWidth = Math.max(0, terminalWidth - (cols.length + 1)); // Account for separators
 
-  let widths = columns.map(col => Math.floor((availableWidth * (col.ratio || 1)) / totalRatio));
+  let widths = normalized.map(col => Math.floor((availableWidth * (col.ratio || 1)) / totalRatio));
 
-  for (let i = 0; i < columns.length; i++) {
-    const col = columns[i];
+  for (let i = 0; i < normalized.length; i++) {
+    const col = normalized[i];
     if (col.min && widths[i] < col.min) widths[i] = col.min;
     if (col.max && widths[i] > col.max) widths[i] = col.max;
   }
 
+  // Spread positive slack onto the last column, and — when the min-clamps
+  // pushed the total PAST the available width (remaining < 0) — shrink the
+  // widest column so the layout never paints past the right edge.
   const totalUsed = widths.reduce((sum, w) => sum + w, 0);
   const remaining = availableWidth - totalUsed;
-  if (remaining > 0) {
-    widths[widths.length - 1] += remaining;
+  if (remaining !== 0) {
+    const last = widths.length - 1;
+    if (remaining > 0) {
+      widths[last] += remaining;
+    } else {
+      const widest = widths.indexOf(Math.max(...widths));
+      widths[widest] = Math.max(0, widths[widest] + remaining);
+    }
   }
 
   return widths;
@@ -48,12 +67,15 @@ export function getBreakpoint(width) {
  * @returns {{ left: number, right: number, splitX: number }}
  */
 export function splitLayout(terminalWidth, leftRatio = 0.3, minWidth = 20) {
-  const leftWidth = Math.max(minWidth, Math.floor(terminalWidth * leftRatio));
-  const rightWidth = terminalWidth - leftWidth - 1; // Account for separator
+  // Clamp the left pane so it can never consume the separator + right pane:
+  // leftWidth ≤ terminalWidth - 1 keeps rightWidth ≥ 0 even on tiny terminals.
+  const leftMax = Math.max(0, terminalWidth - 1);
+  const leftWidth = Math.max(Math.min(minWidth, leftMax), Math.min(leftMax, Math.floor(terminalWidth * leftRatio)));
+  const rightWidth = Math.max(0, terminalWidth - leftWidth - 1); // Account for separator
   return {
     left: leftWidth,
     right: rightWidth,
-    splitX: leftWidth + 1,
+    splitX: Math.min(leftWidth + 1, Math.max(0, terminalWidth)),
   };
 }
 

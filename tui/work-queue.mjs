@@ -18,5 +18,14 @@ export function buildMyWorkQueue({ notifications = [], pullRequests = [], issues
     const key = item.kind + ':' + item.repo + ':' + item.id;
     if (seen.has(key)) return false;
     seen.add(key); return true;
-  }).sort((a, b) => String(b.updated_at || '').localeCompare(String(a.updated_at || '')));
+  }).sort((a, b) => {
+    const byDate = String(b.updated_at || '').localeCompare(String(a.updated_at || ''));
+    if (byDate !== 0) return byDate;
+    // Deterministic tie-breaker: items without updated_at all collapsed to
+    // '' and flickered at the bottom of the queue whenever input ordering
+    // varied between reloads.
+    const ka = a.kind + ':' + a.repo + ':' + a.id;
+    const kb = b.kind + ':' + b.repo + ':' + b.id;
+    return ka < kb ? -1 : ka > kb ? 1 : 0;
+  });
 }

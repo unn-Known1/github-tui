@@ -120,6 +120,10 @@ export async function loadActionsRepos() {
 async function scanReposForWorkflows(gen) {
   const repos = Array.isArray(appState.repos) ? appState.repos : [];
   const CAP = 200;
+  // Exposed so the render-side scanLabel reports the SAME count the scan
+  // actually probes (users with >200 repos saw "Scanning 500 repos…" while
+  // only 200 were scanned).
+  appState.actionsScanCap = Math.min(repos.length, CAP);
   const capped = repos.slice(0, CAP);
   const noWorkflow = new Set();
   const queue = capped.slice();
@@ -435,7 +439,9 @@ export async function rerunSelected() {
     try {
       await rerunWorkflow(appState.token, owner, name, run.id);
       showMessage('Re-queued run #' + run.id, 'success');
-      loadWorkflowRuns();
+      // Await so a failure here is caught below (and not mis-attributed to
+      // the re-run itself as an unhandled rejection).
+      await loadWorkflowRuns();
     } catch (e) {
       showMessage(e.message || 'Re-run failed', 'error');
     }
@@ -456,7 +462,7 @@ export async function cancelSelected() {
     try {
       await cancelWorkflowRun(appState.token, owner, name, run.id);
       showMessage('Cancelled run #' + run.id, 'success');
-      loadWorkflowRuns();
+      await loadWorkflowRuns(); // same unhandled-rejection fix as rerun
     } catch (e) {
       showMessage(e.message || 'Cancel failed', 'error');
     }
@@ -560,7 +566,7 @@ function renderRepoList(screen, y, h, W) {
     const prog = appState.actionsScanProgress;
     scanLabel = prog
       ? 'Scanning ' + prog.done + '/' + prog.total + ' repos…' + filterHint
-      : 'Scanning ' + (appState.repos?.length || 0) + ' repos for GitHub workflows…' + filterHint;
+      : 'Scanning ' + (appState.actionsScanCap || appState.repos?.length || 0) + ' repos for GitHub workflows…' + filterHint;
   } else {
     scanLabel = 'Select a repo to view workflow runs:' + filterHint;
   }

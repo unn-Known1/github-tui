@@ -21,7 +21,10 @@ const RECOVERY_PATTERNS = [
     recovery: 'Verify the repository or resource exists',
   },
   {
-    pattern: /ENOTFOUND|ECONNREFUSED|network|fetch/i,
+    // System error codes and specific phrases only — the old /network|fetch/i
+    // matched any error text containing those English words ("Failed to fetch
+    // user preferences") and produced the wrong recovery hint.
+    pattern: /ENOTFOUND|ECONNREFUSED|EAI_AGAIN|getaddrinfo|fetch failed|network request failed/i,
     message: 'Network error',
     recovery: 'Check your internet connection',
   },
@@ -89,8 +92,15 @@ export function withErrorRecovery(context, fn, options = {}) {
     } catch (e) {
       const message = e?.message || String(e);
       showError(message, context, { retry: options.retry ? () => options.retry(...args) : undefined });
-      if (options.onError) options.onError(e);
-      throw e;
+      // Guard onError: if it throws, that exception must not replace the
+      // original error below.
+      if (options.onError) {
+        try { options.onError(e); } catch { /* keep the original error */ }
+      }
+      // Swallow after notifying: most callers here are fire-and-forget
+      // (keypress handlers awaiting an unawaited promise) — rethrowing
+      // turned every notified failure into an unhandled rejection.
+      // Callers that need the failure signal can pass options.onError.
     }
   };
 }

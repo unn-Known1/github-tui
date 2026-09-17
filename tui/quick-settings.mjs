@@ -78,7 +78,10 @@ const SETTINGS = [
       const current = appState.repoSort && typeof appState.repoSort === 'object'
         ? appState.repoSort
         : { field: 'updated', asc: false };
-      appState.repoSort = { field: value, asc: value === current.field ? !!current.asc : value === 'name' };
+      // Explicit direction rule: re-selecting the same field flips; a NEW
+      // field always starts descending (consistent list UX — previously
+      // 'name' silently started ascending while everything else descended).
+      appState.repoSort = { field: value, asc: value === current.field ? !current.asc : false };
     },
   },
   {
@@ -147,6 +150,7 @@ export function close() {
   _active = false;
   if (_focusToken) restoreFocus(_focusToken);
   _focusToken = null;
+  appRender(); // repaint immediately — otherwise the modal lingers until an unrelated redraw
 }
 
 function getValue(setting) {
@@ -207,10 +211,16 @@ export function handleKey(key) {
     return true;
   }
 
-  // Number keys 1-11 for direct selection
+  // Number shortcuts: 1-9 select directly, '0' selects the 10th. The list
+  // has 11 entries — beyond 10 the user navigates with arrows, so the
+  // renderer omits the hint for indices it can't express (see renderQuickSettings).
   if (key >= '1' && key <= '9') {
-    const idx = parseInt(key) - 1;
+    const idx = parseInt(key, 10) - 1;
     if (idx < SETTINGS.length) activateAt(idx);
+    return true;
+  }
+  if (key === '0') {
+    if (SETTINGS.length >= 10) activateAt(9);
     return true;
   }
 
@@ -254,8 +264,11 @@ export function renderQuickSettings(screen) {
       }
     }
 
-    // Number hint
-    screen.writeStr(x + 2, row, '[' + (i + 1) + ']', { fg: 'cyan', bold: true });
+    // Number hint — only when the shortcut actually exists (1-9, 0 for 10).
+    const shortLabel = i < 9 ? String(i + 1) : i === 9 ? '0' : null;
+    if (shortLabel !== null) {
+      screen.writeStr(x + 2, row, '[' + shortLabel + ']', { fg: 'cyan', bold: true });
+    }
 
     // Label
     screen.writeStr(x + 6, row, truncate(setting.label, boxW - 20),

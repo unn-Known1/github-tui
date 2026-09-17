@@ -64,8 +64,12 @@ export function deleteCurrent() {
   // Bookmarks are persisted to disk under ~/.github-tui/. Confirm
   // before removing so a stray `d` keystroke doesn't blow away
   // something the user curated.
-  confirm('Delete bookmark "' + bm.full_name + '"?', () => {
-    removeBookmark(bm.id || bm.full_name);
+  confirm('Delete bookmark "' + (bm.full_name || bm.url || bm.id || 'unnamed') + '"?', () => {
+    const key = bm.id || bm.full_name;
+    // A bookmark with neither field would make removeBookmark(undefined) a
+    // silent no-op, leaving the cursor pointing at a phantom entry.
+    if (!key) { showMessage('Bookmark has no identifier; cannot delete', 'error'); render(); return; }
+    removeBookmark(key);
     appState.bookmarks = loadBookmarks();
     appState.bookmarksCursor = Math.min(appState.bookmarksCursor, Math.max(0, appState.bookmarks.length - 1));
     showMessage('Removed bookmark: ' + bm.full_name, 'info');
@@ -83,7 +87,12 @@ export function copyUrl() {
 export function exportMarkdown() {
   const bm = appState.bookmarks;
   if (bm.length === 0) { showMessage('No bookmarks to export', 'warning'); return; }
-  const md = '# Bookmarks\n\n' + bm.map(b => `- [${b.full_name}](${b.url})`).join('\n');
+  // Defensive fallbacks: a partially-persisted bookmark previously rendered
+  // as "[undefined](undefined)" in the exported Markdown.
+  const md = '# Bookmarks\n\n' + bm.map(b => {
+    const name = b.full_name || b.url || b.id || 'unnamed';
+    return b.url ? `- [${name}](${b.url})` : `- ${name}`;
+  }).join('\n');
   if (copyToClipboard(md)) showMessage('Copied bookmarks as Markdown', 'success');
   else showMessage('Clipboard copy failed', 'error');
 }

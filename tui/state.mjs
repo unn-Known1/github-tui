@@ -317,19 +317,23 @@ export const TABS = [
   { key: '1', label: 'Dash',
     // Dashboard refresh must refresh repository metadata first so aggregate
     // cards, stale counts, and language totals share one freshness boundary.
-    refresh: () => import('./tabs/dashboard.mjs').then(m => m.refreshDashboard()) },
+    refresh: () => import('./tabs/dashboard.mjs').then(m => m.refreshDashboard())
+      .catch(err => { showMessage('Dashboard refresh failed: ' + ((err && err.message) || err), 'error'); }) },
   { key: '2', label: 'Repos',
-    refresh: () => import('./tabs/repos.mjs').then(m => m.loadUserData()) },
+    refresh: () => import('./tabs/repos.mjs').then(m => m.loadUserData())
+      .catch(err => { showMessage('Repos refresh failed: ' + ((err && err.message) || err), 'error'); }) },
   { key: '3', label: 'Explore',
     // Explore is user-driven (search/drill-in). Skip refresh to avoid
     // clobbering in-progress loads. Users can press 'r'.
     refresh: null },
   { key: '4', label: 'Actions',
-    refresh: () => appState.actionsView === 'runs' && appState.actionsRepos.length > 0
+    refresh: () => (appState.actionsView === 'runs' && appState.actionsRepos.length > 0
       ? import('./tabs/actions.mjs').then(m => m.loadWorkflowRuns())
-      : import('./tabs/actions.mjs').then(m => m.loadActionsRepos()) },
+      : import('./tabs/actions.mjs').then(m => m.loadActionsRepos())
+    ).catch(err => { showMessage('Actions refresh failed: ' + ((err && err.message) || err), 'error'); }) },
   { key: '5', label: 'Inbox',
-    refresh: () => import('./tabs/inbox.mjs').then(m => m.loadNotifications()) },
+    refresh: () => import('./tabs/inbox.mjs').then(m => m.loadNotifications())
+      .catch(err => { showMessage('Inbox refresh failed: ' + ((err && err.message) || err), 'error'); }) },
   { key: '6', label: 'Settings',
     // Settings has nothing to auto-refresh.
     refresh: null },

@@ -167,17 +167,13 @@ export async function selectAllAndCopy() {
   if (mode === 'readme') {
     const innerW = Math.max(20, W - 6);
     const raw = appState._readmeText || '';
-    try {
-      const { wrapTextWithMap } = await import('./utils.mjs');
-      const wrapped = wrapTextWithMap(raw, innerW);
-      text = wrapped.lines.join('\n');
-      totalRows = wrapped.lines.length;
-      maxCol = innerW;
-    } catch {
-      text = raw;
-      totalRows = raw.split(/\r?\n/).length;
-      maxCol = innerW;
-    }
+    // wrapTextWithMap is statically imported above — the old dynamic
+    // import + try/catch here was dead weight (it can only fail on total
+    // module-resolution failure, where nothing else would work either).
+    const wrapped = wrapTextWithMap(raw, innerW);
+    text = wrapped.lines.join('\n');
+    totalRows = wrapped.lines.length;
+    maxCol = innerW;
   } else if (mode === 'file') {
     text = appState.fileText || '';
     const logicalLines = text.split(/\r?\n/);
@@ -240,10 +236,17 @@ export function parseMouseEvent(data) {
   // Legacy X10 format: \x1b[M<b+32><c+32><r+32>
   const x10 = data.match(/\x1b\[M(.{3})/s);
   if (x10) {
+    const button = x10[1].charCodeAt(0) - 32;
+    const col = x10[1].charCodeAt(1) - 32;
+    const row = x10[1].charCodeAt(2) - 32;
+    // Sanity: real coordinates are >= 0 (a truncated/malformed escape like
+    // \x1b[M\x00\x00\x00 decodes to -32 and would poison the click-geometry
+    // math downstream), and the button must land in the X10 encoding space.
+    if (col < 0 || row < 0 || button < 0 || button > 127) return null;
     return {
-      button: x10[1].charCodeAt(0) - 32,
-      col: x10[1].charCodeAt(1) - 32,
-      row: x10[1].charCodeAt(2) - 32,
+      button,
+      col,
+      row,
       pressed: true,
     };
   }
@@ -284,7 +287,7 @@ export function handleMouseEvent(event) {
     }
 
     // Dashboard trending list (same filtered rows as the click handler).
-    if (t === 0 && inTrendingSection(sx, sy)) {
+    if (t === 0 && appState._sectionHeaders && inTrendingSection(sx, sy)) {
       const th = appState._sectionHeaders['dashboard:trending'];
       if (th && th.y > 0 && sy > th.y) {
         const listIdx = sy - th.y - 1;
@@ -421,7 +424,9 @@ function _clickQuickSettings(sx, sy) {
   const { boxW, boxH, x: x0, y: y0, rowStart, rowCount } = quickSettings.getLayout(screen);
   const inside = sx >= x0 && sx < x0 + boxW && sy >= y0 && sy < y0 + boxH;
   if (!inside) {
-    import('./quick-settings.mjs').then(m => m.close()).catch(() => {});
+    // Static import — close() is idempotent (guards on its own open state),
+    // so rapid boundary clicks can't double-fire the teardown.
+    quickSettings.close();
     return;
   }
   // Click on a setting row → select and activate it.
@@ -719,7 +724,7 @@ function handleDblClick(sx, sy) {
   }
 
   // Double-click trending repo → open in Analyze
-  if (sx >= rightX && sy >= bodyY) {
+  if (sx >= rightX && sy >= bodyY && appState._sectionHeaders) {
     const th = appState._sectionHeaders['dashboard:trending'];
     if (th && th.y > 0 && sy > th.y) {
       const listIdx = sy - th.y - 1;
@@ -909,11 +914,15 @@ function loadPane(paneId) {
 
 function handleCollapsibleClick(sx, sy) {
   const t = tabState.current;
-  const prefix = ['dashboard', 'repos', 'analyze', 'actions', 'inbox', 'settings'][t] || '';
+  const prefix = ['dashboard', 'repos', 'analyze', 'actions', 'inbox', 'settings'][t];
+  // Unknown tab index → no prefix match. (Falling back to '' would make
+  // startsWith('') match EVERY section in the headers map, so a stale map
+  // from a previous tab could collapse unrelated sections on this one.)
+  if (!prefix) return false;
   const headers = appState._sectionHeaders;
   if (!headers) return false;
   for (const section of Object.keys(headers)) {
-    if (!section.startsWith(prefix)) continue;
+    if (!section.startsWith(prefix + ':')) continue;
     const { x, y, w } = headers[section];
     if (y === sy && sx >= x && sx < x + (w || 10)) {
       toggleCollapse(section);
@@ -1183,7 +1192,14 @@ function reposDblClickOpen(sx, sy) {
   } else {
     appState.repoSelected = hit.index;
   }
-  repos.enter();
+  // enter() does IO/state transitions — a throw here (malformed selection,
+  // missing repo data) would otherwise escape the mouse pipeline and abort
+  // all subsequent handling for the event.
+  try {
+    repos.enter();
+  } catch (e) {
+    showMessage((e && e.message) || 'Failed to open repo', 'error');
+  }
   return true;
 }
 
@@ -1362,7 +1378,7 @@ function dispatchActionsClick(sx, sy) {
       // A second click on the selected row has the same effect as Enter.
       if (appState._actionsClickedIndex === itemIdx) {
         appState._actionsClickedIndex = null;
-        import('./tabs/actions.mjs').then(m => m.enter()).catch(() => {});
+        import('./tabs/actions.mjs').then(m => m.enter()).catch((e) => showMessage((e && e.message) || 'Action failed', 'error'));
       } else {
         appState._actionsClickedIndex = itemIdx;
         render();
@@ -1372,7 +1388,7 @@ function dispatchActionsClick(sx, sy) {
     appState.actionsSelected = itemIdx;
     if (appState._actionsClickedIndex === itemIdx) {
       appState._actionsClickedIndex = null;
-      import('./tabs/actions.mjs').then(m => m.enter()).catch(() => {});
+      import('./tabs/actions.mjs').then(m => m.enter()).catch((e) => showMessage((e && e.message) || 'Action failed', 'error'));
     } else {
       appState._actionsClickedIndex = itemIdx;
       render();
@@ -1385,10 +1401,14 @@ function dispatchActionsClick(sx, sy) {
 function inTrendingSection(sx, sy) {
   const screen = getScreen();
   if (!screen) return false;
+  // Guard: during early render / tab switches _sectionHeaders may not exist
+  // yet, and reading a key off undefined throws inside the mouse pipeline.
+  const headers = appState._sectionHeaders;
+  if (!headers) return false;
   const W = screen.width;
   const splitX = Math.floor(W / 2);
   const rightX = splitX + 2;
-  const th = appState._sectionHeaders['dashboard:trending'];
+  const th = headers['dashboard:trending'];
   return sx >= rightX && th && th.y > 0 && sy > th.y;
 }
 
@@ -1510,7 +1530,7 @@ function dispatchSettingsClick(sx, sy) {
           return;
         }
         appState.settingsCursor = rb.cursor;
-        import('./tabs/settings.mjs').then(m => m.enter());
+        import('./tabs/settings.mjs').then(m => m.enter()).catch((e) => showMessage((e && e.message) || 'Settings action failed', 'error'));
         render();
         return;
       }

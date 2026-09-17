@@ -2,14 +2,30 @@ import { appState, render, showMessage, confirm } from './state.mjs';
 import { createRelease, updateRelease } from './github.mjs';
 import { startInput, registerInputHandler } from './input.mjs';
 
+// The release draft lives on appState so a crash mid-flow leaves no module
+// state behind — but a FAILED submit must clear it too, or the next
+// startReleaseDraft inherits a half-filled draft. `_cancelReleaseDraft()`
+// is the single cleanup point for every early-exit path.
+function _cancelReleaseDraft() {
+  appState._releaseDraft = null;
+}
+
 export function startReleaseDraft() {
   if (!appState.repoDetails || !appState.token) { showMessage('Open a repository and sign in first', 'warning'); return; }
   appState._releaseDraft = {};
   startInput('Release tag (for example v1.2.0): ', 'release-tag');
 }
 registerInputHandler('release-tag', (value) => {
-  appState._releaseDraft.tag_name = String(value || '').trim();
-  if (!appState._releaseDraft.tag_name) { showMessage('Release tag is required', 'warning'); return; }
+  const tag = String(value || '').trim();
+  if (!tag) {
+    // End the flow cleanly: without this the TUI sits mid-flow with an
+    // empty tag_name on the draft and no way forward.
+    showMessage('Release tag is required — flow cancelled', 'warning');
+    _cancelReleaseDraft();
+    render();
+    return;
+  }
+  appState._releaseDraft.tag_name = tag;
   startInput('Release name: ', 'release-name');
 });
 registerInputHandler('release-name', (value) => {
@@ -24,9 +40,14 @@ registerInputHandler('release-body', (value) => {
     try {
       await createRelease(appState.token, owner, name, draft);
       showMessage('Draft release created: ' + draft.tag_name, 'success');
-      appState._releaseDraft = null;
+    } catch (e) {
+      showMessage('Release failed: ' + e.message, 'error');
+    } finally {
+      // Drop the draft on success AND failure so a retry never inherits
+      // the previous attempt's tag/name/body.
+      _cancelReleaseDraft();
       render();
-    } catch (e) { showMessage('Release failed: ' + e.message, 'error'); }
+    }
   }, 'Create draft release');
 });
 
@@ -36,7 +57,13 @@ export function publishRelease() {
 }
 registerInputHandler('release-publish-id', (value) => {
   const id = String(value || '').trim();
-  if (!id) return;
+  if (!id) {
+    // Mirror the tag handler: warn, then close/reset the input so the TUI
+    // isn't left waiting for a follow-up value that will never come.
+    showMessage('Release id is required — flow cancelled', 'warning');
+    render();
+    return;
+  }
   const repo = appState.repoDetails;
   const [owner, name] = repo.full_name.split('/');
   confirm('Publish release ' + id + ' on ' + repo.full_name + '?', async () => {
@@ -55,7 +82,17 @@ registerInputHandler('release-edit', (value) => {
   let patch;
   try { patch = JSON.parse(raw); } catch { showMessage('Release patch must be valid JSON', 'error'); return; }
   const allowed = ['tag_name', 'target_commitish', 'name', 'body', 'draft', 'prerelease'];
+  const rejected = Object.keys(patch).filter(key => !allowed.includes(key));
+  // Surface ignored keys — silently dropping them hides typos in an
+  // explicitly typed interactive command.
+  if (rejected.length) {
+    showMessage('Ignored unsupported patch key(s): ' + rejected.join(', '), 'warning', 5000);
+  }
   patch = Object.fromEntries(Object.entries(patch).filter(([key]) => allowed.includes(key)));
+  if (Object.keys(patch).length === 0) {
+    showMessage('Nothing to update after filtering', 'warning');
+    return;
+  }
   const [owner, name] = appState.repoDetails.full_name.split('/');
   confirm('Update release ' + id.trim() + ' on ' + appState.repoDetails.full_name + '?', async () => {
     try { await updateRelease(appState.token, owner, name, id.trim(), patch); showMessage('Release updated', 'success'); render(); }

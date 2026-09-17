@@ -6,7 +6,9 @@
 // Format a Date / ISO string as a short relative time: "3h", "2d", "5w".
 export function relTime(iso) {
   if (!iso) return '';
-  const d = (Date.now() - new Date(iso).getTime()) / 1000;
+  const t = new Date(iso).getTime();
+  if (!Number.isFinite(t)) return ''; // unparseable input previously rendered literal "NaNs"
+  const d = Math.max(0, (Date.now() - t) / 1000); // clamp future dates (clock skew) to "now"
   if (d < 60) return `${Math.floor(d)}s`;
   if (d < 3600) return `${Math.floor(d / 60)}m`;
   if (d < 86400) return `${Math.floor(d / 3600)}h`;

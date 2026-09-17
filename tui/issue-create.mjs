@@ -13,7 +13,7 @@ registerInputHandler('issue-title', async (value) => {
   const title = (value || '').trim();
   if (!title) { showMessage('Issue title cannot be empty', 'error'); return; }
   _issueTitle = title;
-  const repos = appState.repos;
+  const repos = Array.isArray(appState.repos) ? appState.repos : [];
   const repoName = repos[_issueRepoIndex] ? repos[_issueRepoIndex].full_name : '?';
   startInput('Issue body for ' + repoName + ' (optional, Enter to skip): ', 'issue-body');
 });
@@ -21,10 +21,14 @@ registerInputHandler('issue-title', async (value) => {
 registerInputHandler('issue-body', async (value) => {
   const body = (value || '').trim();
   _issueBody = body;
-  const repos = appState.repos;
+  const repos = Array.isArray(appState.repos) ? appState.repos : [];
   if (!repos[_issueRepoIndex]) { showMessage('No repo selected', 'error'); return; }
   const repo = repos[_issueRepoIndex];
-  const [owner, name] = repo.full_name.split('/');
+  const [owner, name] = String(repo.full_name || '').split('/');
+  if (!owner || !name) {
+    showMessage('Repo has no valid owner/name: ' + (repo.full_name || '<empty>'), 'error');
+    return;
+  }
   try {
     const result = await createIssue(appState.token, owner, name, _issueTitle, _issueBody);
     if (result && result.html_url) {
@@ -33,15 +37,19 @@ registerInputHandler('issue-body', async (value) => {
       showMessage('Issue created on ' + repo.full_name, 'success');
     }
   } catch (e) {
-    showMessage(e.message || 'Failed to create issue', 'error');
+    // Keep the draft title/body on failure — a rate limit or network blip
+    // must not wipe everything and force a full retype.
+    showMessage((e.message || 'Failed to create issue') + ' — draft kept, reopen the flow to retry', 'error');
+    return;
   }
   _issueTitle = '';
   _issueBody = '';
+  _issueRepoIndex = 0;
 });
 
 registerInputHandler('issue-pick-repo', (value) => {
   const idx = parseInt(value, 10);
-  const repos = appState.repos;
+  const repos = Array.isArray(appState.repos) ? appState.repos : [];
   if (isNaN(idx) || idx < 0 || idx >= repos.length) {
     showMessage('Invalid repo number', 'error');
     _issueTitle = '';
