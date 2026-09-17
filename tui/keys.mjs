@@ -457,6 +457,7 @@ export function handleKey(key) {
   // like k/j/g/n/p lets the user search. Previously those letters short-
   // circuited the scroll handlers above, making help search unusable.
   if (appState.showHelp) {
+    const screen = getScreen();
     if (key === '\x1b' || key === 'q') { appState.showHelp = false; render(); return; }
     // Backspace deletes the last char from the search query.
     if (key === '\x7f' || key === '\b') {
