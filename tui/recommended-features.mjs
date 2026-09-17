@@ -170,11 +170,25 @@ export function normalizeEnterpriseHost(value, fallback = 'api.github.com') {
   } catch { return null; }
 }
 
+const SENSITIVE_KEY_RE = /token|passwd|password|secret|api[_-]?key/i;
+const SCRUB_EXACT_RE = /^(cache|etagcache)$/i;
+
+function scrubSensitiveKeys(node, seen = new Set()) {
+  if (!node || typeof node !== 'object' || seen.has(node)) return;
+  seen.add(node);
+  if (Array.isArray(node)) {
+    for (const item of node) scrubSensitiveKeys(item, seen);
+    return;
+  }
+  for (const key of Object.keys(node)) {
+    if (SENSITIVE_KEY_RE.test(key) || SCRUB_EXACT_RE.test(key)) delete node[key];
+    else scrubSensitiveKeys(node[key], seen);
+  }
+}
+
 export function sanitizeExportState(state = {}) {
   const copy = JSON.parse(JSON.stringify(state));
-  for (const key of ['token', 'password', 'secret', 'apiKey']) delete copy[key];
-  delete copy.cache;
-  delete copy.etagCache;
+  scrubSensitiveKeys(copy);
   return { schemaVersion: 1, exportedAt: new Date().toISOString(), state: copy };
 }
 

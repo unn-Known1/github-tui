@@ -5,6 +5,11 @@ import { getRepositoryIssues, getRepositoryPullRequests } from '../github.mjs';
 import { truncate, sectionHeader } from '../utils.mjs';
 import { scrollIndicators, loadingIndicator } from '../render.mjs';
 
+// Single page size for every issues/PRs fetch in this pane. The literal
+// 100 was repeated 8×; a change in one place silently desynced hasMore
+// thresholds from fetch sizes.
+export const ISSUES_PER_PAGE = 100;
+
 export function filterLabel(state) {
   return state === 'all' ? 'ALL' : state === 'closed' ? 'CLOSED' : 'OPEN';
 }
@@ -23,11 +28,11 @@ export function cycleIssueStateFilter() {
   beginLoading(gen);
   render();
   if (appState.detailsPane === 'issues') {
-    getRepositoryIssues(appState.token, owner, name, 1, 100, appState.issueStateFilter, gen.signal).then(issues => {
+    getRepositoryIssues(appState.token, owner, name, 1, ISSUES_PER_PAGE, appState.issueStateFilter, gen.signal).then(issues => {
       if (isStale(gen, 'analyze-issues')) { finishLoading(gen); return; }
       appState.repoIssues = Array.isArray(issues) ? issues.filter(i => !i.pull_request) : [];
       appState.repoIssuesPage = 1;
-      appState.repoIssuesHasMore = Array.isArray(issues) && issues.length >= 100;
+      appState.repoIssuesHasMore = Array.isArray(issues) && issues.length >= ISSUES_PER_PAGE;
       appState.repoIssuesFilter = appState.issueStateFilter;
       appState.detailsScroll = 0;
       finishLoading(gen);
@@ -37,11 +42,11 @@ export function cycleIssueStateFilter() {
       if (!isStale(gen, 'analyze-issues')) { showMessage(e.message || 'Failed to reload issues', 'error'); render(); }
     });
   } else {
-    getRepositoryPullRequests(appState.token, owner, name, 1, 100, appState.issueStateFilter, gen.signal).then(prs => {
+    getRepositoryPullRequests(appState.token, owner, name, 1, ISSUES_PER_PAGE, appState.issueStateFilter, gen.signal).then(prs => {
       if (isStale(gen, 'analyze-issues')) { finishLoading(gen); return; }
       appState.repoPullRequests = Array.isArray(prs) ? prs : [];
       appState.repoPullRequestsPage = 1;
-      appState.repoPullRequestsHasMore = Array.isArray(prs) && prs.length >= 100;
+      appState.repoPullRequestsHasMore = Array.isArray(prs) && prs.length >= ISSUES_PER_PAGE;
       appState.repoPRsFilter = appState.issueStateFilter;
       appState.detailsScroll = 0;
       finishLoading(gen);
@@ -58,26 +63,27 @@ export async function loadMoreIssues() {
   const isIssues = appState.detailsPane === 'issues';
   const hasMore = isIssues ? appState.repoIssuesHasMore : appState.repoPullRequestsHasMore;
   if (!repo || !hasMore || appState.loading) return;
-  const [owner, name] = repo.full_name.split('/');
+  const [owner, name] = String(repo.full_name || '').split('/');
+  if (!owner || !name) return;
   const page = (isIssues ? appState.repoIssuesPage : appState.repoPullRequestsPage) + 1;
   const gen = startAsync('analyze-issues-more');
   beginLoading(gen);
   render();
   try {
     const more = isIssues
-      ? await getRepositoryIssues(appState.token, owner, name, page, 100, appState.issueStateFilter, gen.signal)
-      : await getRepositoryPullRequests(appState.token, owner, name, page, 100, appState.issueStateFilter, gen.signal);
+      ? await getRepositoryIssues(appState.token, owner, name, page, ISSUES_PER_PAGE, appState.issueStateFilter, gen.signal)
+      : await getRepositoryPullRequests(appState.token, owner, name, page, ISSUES_PER_PAGE, appState.issueStateFilter, gen.signal);
     if (isStale(gen)) return;
     const items = Array.isArray(more) ? more : [];
     if (isIssues) {
       appState.repoIssues = [...appState.repoIssues, ...items.filter(i => !i.pull_request)];
       appState.repoIssuesPage = page;
-      appState.repoIssuesHasMore = items.length >= 100;
+      appState.repoIssuesHasMore = items.length >= ISSUES_PER_PAGE;
       appState.repoIssuesFilter = appState.issueStateFilter;
     } else {
       appState.repoPullRequests = [...appState.repoPullRequests, ...items];
       appState.repoPullRequestsPage = page;
-      appState.repoPullRequestsHasMore = items.length >= 100;
+      appState.repoPullRequestsHasMore = items.length >= ISSUES_PER_PAGE;
       appState.repoPRsFilter = appState.issueStateFilter;
     }
     showMessage(items.length ? 'Loaded more ' + (isIssues ? 'issues' : 'pull requests') : 'All items loaded', 'info');
@@ -89,19 +95,24 @@ export async function loadMoreIssues() {
   }
 }
 
+// Shared column layout for both Issues and PRs panes — was duplicated
+// verbatim in each pane's getCols (drift risk: one edit misaligns the other).
+const PANE_COLS = (W) => ({
+  numW: 7, titleCol: 12,
+  authorCol: Math.max(32, W - 24),
+  extraCol: Math.max(46, W - 10),
+});
+
 export function renderIssuesPane(screen, y, maxH) {
   const state = appState.issueStateFilter;
   renderIssuePRList(screen, y, maxH, {
-    title: filterLabel(state) + ' ISSUES' + (appState.repoIssuesHasMore ? ' (loaded)' : ''),
+    title: filterLabel(state) + ' ISSUES' + (appState.repoIssuesHasMore ? ' (+)' : ''),
     items: appState.repoIssues,
     hint: '[s] ' + filterLabel(state),
     emptyMsg: state === 'all' ? '(no issues)' : '(no ' + filterLabel(state).toLowerCase() + ' issues)',
     numColor: { fg: 'yellow' },
-    getCols: (W) => ({
-      numW: 7, titleCol: 12,
-      authorCol: Math.max(32, W - 24),
-      extraCol: Math.max(46, W - 10),
-    }),
+    getCols: PANE_COLS,
+    hasMore: () => appState.repoIssuesHasMore,
     renderExtra: (screen, item, col, W, row) => {
       const labels = (item.labels || []).map(l => l.name).slice(0, 2).join(', ');
       if (col + 8 < W && labels) {
@@ -114,16 +125,13 @@ export function renderIssuesPane(screen, y, maxH) {
 export function renderPRsPane(screen, y, maxH) {
   const state = appState.issueStateFilter;
   renderIssuePRList(screen, y, maxH, {
-    title: filterLabel(state) + ' PULL REQUESTS' + (appState.repoPullRequestsHasMore ? ' (loaded)' : ''),
+    title: filterLabel(state) + ' PULL REQUESTS' + (appState.repoPullRequestsHasMore ? ' (+)' : ''),
     items: appState.repoPullRequests,
     hint: '[s] ' + filterLabel(state),
     emptyMsg: state === 'all' ? '(no PRs)' : '(no ' + filterLabel(state).toLowerCase() + ' PRs)',
     numColor: { fg: 'cyan' },
-    getCols: (W) => ({
-      numW: 7, titleCol: 12,
-      authorCol: Math.max(32, W - 24),
-      extraCol: Math.max(46, W - 10),
-    }),
+    getCols: PANE_COLS,
+    hasMore: () => appState.repoPullRequestsHasMore,
     renderExtra: (screen, item, col, W, row) => {
       if (col + 8 < W) {
         const branch = truncate((item.head && item.head.ref) || '', 8);
@@ -160,8 +168,12 @@ function renderIssuePRList(screen, y, maxH, opts) {
   }
   scrollIndicators(screen, y + 2, y + 1 + rows, start, items.length);
   if (items.length > rows) {
+    // hasMore comes from the pane config — the old reference-equality check
+    // (opts.items === appState.repoIssues) broke whenever a caller passed a
+    // filtered copy instead of the live array.
+    const more = typeof opts.hasMore === 'function' ? opts.hasMore() : false;
     screen.writeStr(2, y + 2 + rows,
       (start + 1) + '-' + Math.min(start + rows, items.length) + ' of ' + items.length +
-      '   [↑↓] scroll' + ((opts.items === appState.repoIssues && appState.repoIssuesHasMore) || (opts.items === appState.repoPullRequests && appState.repoPullRequestsHasMore) ? '   [Space] load more' : ''), { dim: true });
+      '   [↑↓] scroll' + (more ? '   [Space] load more' : ''), { dim: true });
   }
 }

@@ -74,8 +74,9 @@ function loadBindings() {
  * executed as a shell command.
  */
 export function shellEscape(value) {
-  if (!value) return "''";
+  if (value == null) return "''";
   const str = String(value);
+  if (str === '') return "''";
   if (process.platform === 'win32') {
     // Windows cmd.exe escaping: wrap in double quotes, escape special chars
     return '"' + str.replace(/"/g, '""').replace(/%/g, '%%').replace(/!/g, '^!') + '"';
@@ -124,20 +125,6 @@ function contextMatches(binding) {
     return appState.analyzeView === 'details' && appState.detailsPane === 'files';
   }
   return true;
-}
-
-// Action registry - maps action IDs to functions
-let _actionRegistry = null;
-
-function getActionRegistry() {
-  if (!_actionRegistry) {
-    // Lazy import to avoid circular dependencies
-    import('./palette.mjs').then(m => {
-      _actionRegistry = {};
-      // We'll use the palette's filter to find actions
-    }).catch(() => {});
-  }
-  return _actionRegistry;
 }
 
 /**
@@ -192,9 +179,17 @@ function runInternalAction(binding) {
 
 /**
  * Run a shell command.
+ * TRUST BOUNDARY: the command template comes from the user's own config
+ * file — it intentionally runs via `shell: true` so pipes/redirects work.
+ * Untrusted data only enters through {placeholders}, which are always
+ * shellEscape()d above; never interpolate repo/branch values directly.
  */
 function runShellCommand(binding) {
   const cmd = resolvePlaceholders(binding.command);
+  if (!cmd || !cmd.trim()) {
+    showMessage('Empty command — nothing to run', 'warning');
+    return true;
+  }
   // Unresolved placeholders collapse to '' — a command like git checkout ''
   // would fail with a cryptic shell error, so validate the interesting
   // substitutions up front and abort with a clear message.

@@ -3,21 +3,20 @@
 import { showMessage, setRetryHandler, clearRetryHandler } from './state.mjs';
 
 // Error recovery patterns with suggested actions.
+// Each entry is { pattern, recovery }: `message`/`action` fields were
+// removed — nothing consumed them, and the unreachable settings-import
+// inside `action` silently no-op'd on load failure.
 const RECOVERY_PATTERNS = [
   {
     pattern: /401|Bad credentials|Unauthorized/i,
-    message: 'Authentication failed',
-    recovery: 'Check your token in Settings [6]',
-    action: () => { import('./tabs/settings.mjs').then(s => s.showLogin && s.showLogin()); },
+    recovery: 'Check your token in Settings [6] — press Enter on the sign-in step',
   },
   {
     pattern: /403|rate limit|abuse/i,
-    message: 'Rate limited or forbidden',
     recovery: 'Wait for rate limit reset or check permissions',
   },
   {
     pattern: /404|Not Found/i,
-    message: 'Resource not found',
     recovery: 'Verify the repository or resource exists',
   },
   {
@@ -25,22 +24,18 @@ const RECOVERY_PATTERNS = [
     // matched any error text containing those English words ("Failed to fetch
     // user preferences") and produced the wrong recovery hint.
     pattern: /ENOTFOUND|ECONNREFUSED|EAI_AGAIN|getaddrinfo|fetch failed|network request failed/i,
-    message: 'Network error',
     recovery: 'Check your internet connection',
   },
   {
     pattern: /ETIMEDOUT|timeout/i,
-    message: 'Request timed out',
     recovery: 'The server may be slow — try again',
   },
   {
     pattern: /ECONNRESET/i,
-    message: 'Connection reset',
     recovery: 'Network instability — try again',
   },
   {
     pattern: /SSL|certificate/i,
-    message: 'SSL/TLS error',
     recovery: 'Check your system certificates',
   },
 ];
@@ -53,17 +48,22 @@ const RECOVERY_PATTERNS = [
  */
 export function showError(message, context, options = {}) {
   const { retry, duration } = options;
+  // Coerce safely: String(null) is "null", which broad patterns (e.g.
+  // /network|fetch/i historically) could match and mislabel.
+  const safeMessage = typeof message === 'string' ? message : '';
 
   let recoveryHint = '';
   for (const p of RECOVERY_PATTERNS) {
-    if (p.pattern.test(message)) {
+    // Guard the regex input (not the pattern): p.pattern.test(null)
+    // coerces to "null" and risks a false-positive match.
+    if (p.pattern.test(safeMessage)) {
       recoveryHint = p.recovery;
       break;
     }
   }
 
   const prefix = context ? context + ': ' : '';
-  let fullMessage = prefix + message;
+  let fullMessage = prefix + (safeMessage || 'Unknown error');
   if (recoveryHint) {
     fullMessage += ' — ' + recoveryHint;
   }

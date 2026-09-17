@@ -384,8 +384,10 @@ export function copyToClipboard(text) {
 
   // 1. OSC-52 — synchronous escape sequence to the terminal. Works in most
   //    modern terminals (tmux with allow-passthrough, iTerm2, kitty, foot, etc.)
+  //    Only when stdout is a TTY: over a pipe/redirect the bytes would
+  //    corrupt downstream output while falsely reporting success.
   const b64 = Buffer.from(str, 'utf-8').toString('base64');
-  if (b64.length <= 75_000) {
+  if (b64.length <= 75_000 && process.stdout && process.stdout.isTTY) {
     try {
       process.stdout.write(`\x1b]52;c;${b64}\x07`);
       // stdout.flush() is not part of Node's portable stream API. The write
@@ -563,7 +565,7 @@ export function notificationToHtmlUrl(apiUrl) {
 
 import { resolve, normalize, join, dirname } from 'path';
 import { mkdirSync, existsSync, writeFileSync, statSync } from 'fs';
-import { spawnSync } from 'child_process';
+import { spawnSync, spawn } from 'child_process';
 import { tmpdir } from 'os';
 
 // Refuse paths that escape CWD via .. — used before writing any user-named
@@ -608,30 +610,30 @@ export function dirExists(path) {
 // Run a command, streaming stdout/stderr to /dev/null (we don't redraw while
 // it runs — TUI raw mode is paused by the caller). Resolves to exit code.
 export function runCommand(cmd, args, opts = {}) {
-  return new Promise(async (resolve, reject) => {
+  return new Promise((resolve, reject) => {
+    let child;
     try {
-      const { spawn } = await import('child_process');
-      const child = spawn(cmd, args, {
+      child = spawn(cmd, args, {
         stdio: opts.inherit ? 'inherit' : 'ignore',
         cwd: opts.cwd || process.cwd(),
       });
-      child.on('error', reject);
-      child.on('exit', (code) => resolve(code ?? 0));
-    } catch (e) { reject(e); }
+    } catch (e) { reject(e); return; }
+    child.on('error', reject);
+    child.on('exit', (code) => resolve(code ?? 0));
   });
 }
 
 export function runCommandCapture(cmd, args, opts = {}) {
-  return new Promise(async (resolve, reject) => {
+  return new Promise((resolve, reject) => {
+    let child;
     try {
-      const { spawn } = await import('child_process');
-      const child = spawn(cmd, args, { cwd: opts.cwd || process.cwd(), stdio: ['ignore', 'pipe', 'pipe'] });
-      let stdout = '', stderr = '';
-      child.stdout.on('data', chunk => { stdout += chunk; });
-      child.stderr.on('data', chunk => { stderr += chunk; });
-      child.on('error', reject);
-      child.on('exit', code => resolve({ code: code ?? 0, stdout, stderr }));
-    } catch (e) { reject(e); }
+      child = spawn(cmd, args, { cwd: opts.cwd || process.cwd(), stdio: ['ignore', 'pipe', 'pipe'] });
+    } catch (e) { reject(e); return; }
+    let stdout = '', stderr = '';
+    child.stdout.on('data', chunk => { stdout += chunk; });
+    child.stderr.on('data', chunk => { stderr += chunk; });
+    child.on('error', reject);
+    child.on('exit', code => resolve({ code: code ?? 0, stdout, stderr }));
   });
 }
 

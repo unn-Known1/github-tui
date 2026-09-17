@@ -10,8 +10,18 @@ function _cancelReleaseDraft() {
   appState._releaseDraft = null;
 }
 
+// Single guard for every entry point: an authed repo context is required.
+// Returns true when the caller may proceed.
+function requireRepoAuth() {
+  if (!appState.repoDetails || !appState.token) {
+    showMessage('Open a repository and sign in first', 'warning');
+    return false;
+  }
+  return true;
+}
+
 export function startReleaseDraft() {
-  if (!appState.repoDetails || !appState.token) { showMessage('Open a repository and sign in first', 'warning'); return; }
+  if (!requireRepoAuth()) return;
   appState._releaseDraft = {};
   startInput('Release tag (for example v1.2.0): ', 'release-tag');
 }
@@ -52,7 +62,7 @@ registerInputHandler('release-body', (value) => {
 });
 
 export function publishRelease() {
-  if (!appState.repoDetails || !appState.token) { showMessage('Open a repository and sign in first', 'warning'); return; }
+  if (!requireRepoAuth()) return;
   startInput('Release id to publish: ', 'release-publish-id');
 }
 registerInputHandler('release-publish-id', (value) => {
@@ -73,12 +83,17 @@ registerInputHandler('release-publish-id', (value) => {
 });
 
 export function editRelease() {
-  if (!appState.repoDetails || !appState.token) { showMessage('Open a repository and sign in first', 'warning'); return; }
+  if (!requireRepoAuth()) return;
   startInput('Release id and JSON patch (id|{"name":"..."}): ', 'release-edit');
 }
 registerInputHandler('release-edit', (value) => {
-  const [id, raw] = String(value || '').split('|');
-  if (!id || !raw) { showMessage('Use id|JSON patch', 'warning'); return; }
+  // Split on the FIRST pipe only — the JSON patch itself may contain '|'
+  // (e.g. in a release body), and split('|') silently truncated it.
+  const text = String(value || '');
+  const sep = text.indexOf('|');
+  const id = sep === -1 ? '' : text.slice(0, sep).trim();
+  const raw = sep === -1 ? '' : text.slice(sep + 1);
+  if (!id || !raw.trim()) { showMessage('Use id|JSON patch', 'warning'); return; }
   let patch;
   try { patch = JSON.parse(raw); } catch { showMessage('Release patch must be valid JSON', 'error'); return; }
   const allowed = ['tag_name', 'target_commitish', 'name', 'body', 'draft', 'prerelease'];

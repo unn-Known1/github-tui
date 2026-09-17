@@ -1,7 +1,7 @@
 // Dashboard tab — the home screen.
 // v0.5+ design: cleaner section cards, focus-aware stat cards, breadcrumb-aware.
 
-import { appState, render, startAsync, isStale, showMessage, setTab, confirm, setWidgetLoading, isWidgetLoading, syncStarredEntities, getWidgetAge, beginLoading, finishLoading, shouldRefreshWidget, isDashboardHidden } from '../state.mjs';
+import { appState, render, startAsync, isStale, showMessage, setTab, setWidgetLoading, isWidgetLoading, syncStarredEntities, getWidgetAge, beginLoading, finishLoading, shouldRefreshWidget, isDashboardHidden } from '../state.mjs';
 import { STALE_DAYS } from '../repos-logic.mjs';
 import { startInput, registerInputHandler } from '../input.mjs';
 import {

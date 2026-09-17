@@ -27,7 +27,7 @@ import {
 import { startInput, registerInputHandler } from '../input.mjs';
 import { debugLog } from '../debug.mjs';
 import { color } from '../theme.mjs';
-import { join, resolve } from 'path';
+import { join } from 'path';
 import { detectLanguage, tokenizeLine, parseBlamePorcelain } from '../recommended-features.mjs';
 
 // Limit how big a single file we'll fetch into memory (the API caps at 1MB).
@@ -461,7 +461,7 @@ export async function viewFile(ent) {
   const [owner, name] = repoOwnerName();
   if (!owner) return;
   if (!ent || !ent.path) return;
-  if (ent.size != null && ent.size > MAX_VIEW_BYTES) {
+  if (Number.isFinite(ent.size) && ent.size > MAX_VIEW_BYTES) {
     showMessage('File too large to view (' + formatBytes(ent.size) +
       '). Use [s] to save instead.', 'warning');
     return;

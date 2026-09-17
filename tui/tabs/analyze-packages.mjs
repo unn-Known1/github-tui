@@ -18,16 +18,21 @@ export async function loadReleaseAssets(silent = false) {
   }
   try {
     const [owner, name] = repo.full_name.split('/');
+    const releases = appState.repoReleases.slice(0, 3);
+    // Parallel fetch (was: 3 sequential round-trips). Order is restored
+    // by release index so rows stay grouped per release.
+    const settled = await Promise.allSettled(
+      releases.map(rel => getReleaseAssets(appState.token, owner, name, rel.id, gen.signal))
+    );
+    if (isStale(gen, 'analyze-packages')) { finishLoading(gen); return; }
     const allAssets = [];
-    for (const rel of appState.repoReleases.slice(0, 3)) {
-      const assets = await getReleaseAssets(appState.token, owner, name, rel.id, gen.signal);
-      if (isStale(gen, 'analyze-packages')) { finishLoading(gen); return; }
-      if (Array.isArray(assets)) {
-        for (const a of assets) {
-          allAssets.push({ ...a, releaseTag: rel.tag_name, releaseName: rel.name });
-        }
+    settled.forEach((result, i) => {
+      const rel = releases[i];
+      if (result.status !== 'fulfilled' || !Array.isArray(result.value)) return;
+      for (const a of result.value) {
+        allAssets.push({ ...a, releaseTag: rel.tag_name, releaseName: rel.name });
       }
-    }
+    });
     // TOCTOU guard: a newer load may have started (and reset state to [])
     // while our last per-release await was in flight — without this check
     // the stale result would overwrite the newer call's fresh state.

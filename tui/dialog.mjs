@@ -174,7 +174,11 @@ function syncLegacyState() {
     const type = DIALOG_TYPES[dialog.id];
     if (type && type.stateKey) {
       if (type.stateKey === 'confirmAction') {
-        appState[type.stateKey] = dialog._confirmAction || true;
+        // Never clobber a real confirm payload with `true`: no pushDialog
+        // caller sets _confirmAction, so the old `|| true` overwrote the
+        // live confirm callback/label set via state.confirm().
+        appState[type.stateKey] =
+          dialog._confirmAction || dialog.confirmAction || appState[type.stateKey] || true;
       } else if (type.stateKey === 'inputMode') {
         // Restore the dialog's captured mode rather than a hardcoded
         // literal, so future non-'input' modes (numeric/search/path) sync

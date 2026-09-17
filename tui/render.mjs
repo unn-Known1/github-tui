@@ -134,7 +134,13 @@ export function recoverScrollPositions() {
 // Check if a focus zone is currently active for rendering highlight.
 // Uses lazy import to avoid circular dependencies.
 let _focusModule = null;
-import('./focus.mjs').then(m => { _focusModule = m; }).catch(() => {});
+let _focusLoadFailed = false;
+import('./focus.mjs').then(m => { _focusModule = m; }).catch(e => {
+  // Never silent: without focus state every highlight check returns false
+  // and keyboard focus appears broken with no diagnostic.
+  _focusLoadFailed = true;
+  try { process.stderr.write('[github-tui] focus module failed to load: ' + ((e && e.message) || e) + '\n'); } catch {}
+});
 export function isFocusActive(tabIndex, zoneId) {
   if (!_focusModule) return false;
   return _focusModule.isFocused(tabIndex, zoneId);
@@ -565,7 +571,8 @@ function renderTabStrip(y, W) {
 function renderFooterInput(screen, statusY, W) {
   screen.fillRow(statusY, ' ', color('statusBar'));
   const buf = Array.from(appState.inputBuffer);
-  const cursor = appState.inputCursor != null ? appState.inputCursor : buf.length;
+  const cursor = appState.inputCursor !== null && appState.inputCursor !== undefined
+    ? appState.inputCursor : buf.length;
   const shown = appState.inputMask
     ? Array.from('•'.repeat(buf.length)) : buf;
   // Insert cursor character at the correct code-point position.

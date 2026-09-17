@@ -40,7 +40,9 @@ export function renderOrganizations(screen, y, h) {
   screen.writeStr(2, y + 2, 'Organizations', { fg: 'cyan', bold: true });
   for (let i = 0; i < Math.min(orgs.length, Math.max(1, h - 7)); i++) {
     const selected = i === appState.organizationSelected;
-    if (selected) for (let x = 0; x < Math.min(34, W); x++) screen.styleBuf[y + 3 + i][x] = color('selection');
+    // Guard row existence: on short terminals y+3+i can exceed the buffer
+    // and a raw styleBuf[][] write throws mid-render, blanking the pane.
+    if (selected && screen.styleBuf[y + 3 + i]) for (let x = 0; x < Math.min(34, W); x++) screen.styleBuf[y + 3 + i][x] = color('selection');
     screen.writeStr(2, y + 3 + i, (selected ? '▶ ' : '  ') + truncate(orgs[i].login || orgs[i].name || '?', 28), selected ? color('selection') : null);
   }
   const rightX = Math.min(38, Math.floor(W * 0.45));

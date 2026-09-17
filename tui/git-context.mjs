@@ -9,6 +9,7 @@ function gitOut(args, timeoutMs = 5000) {
   return execFileSync('git', args, {
     stdio: ['pipe', 'pipe', 'pipe'],
     timeout: timeoutMs,
+    maxBuffer: 64 * 1024,
     encoding: 'utf-8',
   }).trim();
 }

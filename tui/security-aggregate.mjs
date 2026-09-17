@@ -58,8 +58,14 @@ export async function loadSecurityAggregate() {
         critical: 8, high: 7, error: 6, medium: 5, warning: 4,
         low: 3, note: 2, informational: 1, none: 1,
       };
-      return (rank[String(b.severity || b.rule?.security_severity_level || '').toLowerCase()] || 0) -
+      const byRank = (rank[String(b.severity || b.rule?.security_severity_level || '').toLowerCase()] || 0) -
         (rank[String(a.severity || a.rule?.security_severity_level || '').toLowerCase()] || 0);
+      if (byRank !== 0) return byRank;
+      // Secondary keys: same-rank alerts previously listed in network
+      // completion order, so the order reshuffled on every scan.
+      const byRepo = String(a.repository || '').localeCompare(String(b.repository || ''));
+      if (byRepo !== 0) return byRepo;
+      return String(a.number || a.id || '').localeCompare(String(b.number || b.id || ''));
     });
     appState.securityAggregateLoading = false;
     appState.securityAggregateCursor = 0;

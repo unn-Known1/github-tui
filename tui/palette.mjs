@@ -38,6 +38,7 @@ export function register(action) {
     category: action.category || 'General',
     suggested: action.suggested ?? false,
   });
+  _filterCache.result = null;
 }
 
 // Check if an action is currently suggested (supports function or boolean).
@@ -62,23 +63,37 @@ function score(query, label) {
 
 // Filter actions by query, returning sorted results.
 // When query is empty, returns suggested actions first, then all others.
+// Memoized on (query, registration size): filter() runs per keystroke,
+// per j/k press, per execSelected, and inside render — without a cache
+// each call re-scores + re-sorts and a mutable `suggested` predicate could
+// make navigation bounds disagree with what render shows.
+let _filterCache = { query: null, n: -1, result: null };
 export function filter(query) {
+  const q = query || '';
+  if (_filterCache.query === q && _filterCache.n === actions.length && _filterCache.result) {
+    return _filterCache.result;
+  }
   const all = actions
     .map(a => ({ a, s: score(query, a.label) }))
     .filter(x => x.s >= 0)
     .sort((a, b) => b.s - a.s)
     .slice(0, 20)  // Increased from 15 to accommodate categories
     .map(x => x.a);
-  
+
+  let result;
   if (!query) {
     // When no query, show suggested actions first
     const suggested = all.filter(a => isSuggested(a));
     const rest = all.filter(a => !isSuggested(a));
-    return [...suggested, ...rest];
+    result = [...suggested, ...rest];
+  } else {
+    result = all;
   }
-  
-  return all;
+  _filterCache = { query: q, n: actions.length, result };
+  return result;
 }
+
+export function invalidateFilterCache() { _filterCache.result = null; }
 
 // Group filtered actions by category.
 // Returns array of [category, actions[]] pairs.
@@ -217,9 +232,18 @@ export function handleKey(key) {
   // reuse the same module-local buffer across calls.
   const PASTE_START = '\x1b[200~';
   const PASTE_END = '\x1b[201~';
+  // Abandoned pastes (PASTE_START with no PASTE_END — truncated stream,
+  // resized TTY, Ctrl-C mid-paste) must not lock the palette forever.
+  const PASTE_MAX = 1 << 20;
   if (_pasteActive) {
+    // Esc cancels a stuck paste instead of being swallowed into the buffer.
+    if (key === '\x1b') { _pasteBuf = ''; _pasteActive = false; close(); return true; }
     const endIdx = key.indexOf(PASTE_END);
-    if (endIdx === -1) { _pasteBuf += key; return true; }
+    if (endIdx === -1) {
+      _pasteBuf += key;
+      if (_pasteBuf.length > PASTE_MAX) { _pasteBuf = ''; _pasteActive = false; }
+      return true;
+    }
     _pasteBuf += key.slice(0, endIdx);
     insertPasteChars(_pasteBuf);
     _pasteBuf = '';

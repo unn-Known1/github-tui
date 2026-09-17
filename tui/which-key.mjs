@@ -3,7 +3,7 @@
 
 import { appState, render as appRender } from './state.mjs';
 import { color } from './theme.mjs';
-import { truncate, truncateToWidth } from './utils.mjs';
+import { truncate } from './utils.mjs';
 import { saveFocus, restoreFocus } from './focus.mjs';
 
 // Key binding groups

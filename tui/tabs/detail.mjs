@@ -319,8 +319,13 @@ export function closeOrReopen() {
 export function mergePR() {
   if (!appState.token || !appState.detailData || appState.detailType !== 'pull_request') return;
   const pr = appState.detailData;
-  if (pr.mergeable === false) {
-    showMessage('PR is not mergeable', 'warning');
+  // mergeable === null means GitHub is still computing — block like false,
+  // but say so. Only explicit `true` proceeds to the confirm dialog.
+  if (pr.mergeable !== true) {
+    showMessage(
+      pr.mergeable === null ? 'Merge status still being computed — try again shortly' : 'PR is not mergeable',
+      'warning'
+    );
     return;
   }
   confirm('Merge PR #' + appState.detailNumber + ' (' + (pr.merge_method || 'merge') + ')?', async () => {
@@ -394,7 +399,7 @@ export function renderDetail(screen) {
 
   // Header line: state + title + author + date
   const stateStyle = data.state === 'closed' ? color('error') : color('success');
-  screen.writeStr(innerX, by + 1, data.state.toUpperCase(), stateStyle);
+  screen.writeStr(innerX, by + 1, String(data.state || '?').toUpperCase(), stateStyle);
   const author = (data.user && data.user.login) || '?';
   const when = data.created_at ? relTime(data.created_at) : '';
   const authorBlock = author + ' ' + when;

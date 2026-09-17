@@ -467,8 +467,8 @@ export function handleKey(key) {
     }
     // Up / k → scroll content up. Down / j / Enter → scroll content down.
     // g / Home → go to top of help. G / End → go to bottom.
-    if (key === '\x1b[A' || key === 'k') { help.scrollHelp(-3); render(); return; }
-    if (key === '\x1b[B' || key === 'j' || key === '\r' || key === '\n') { help.scrollHelp(3); render(); return; }
+    if (key === '\x1b[A' || key === 'k') { help.scrollHelp(-3, screen); render(); return; }
+    if (key === '\x1b[B' || key === 'j' || key === '\r' || key === '\n') { help.scrollHelp(3, screen); render(); return; }
     if (key === 'g' || key === '\x1b[H' || key === '\x1bOH') {
       // g scrolls-to-top WITHOUT clearing the user's search query.
       // Previously this inadvertently wiped any filter the user had typed.
@@ -482,8 +482,8 @@ export function handleKey(key) {
       render();
       return;
     }
-    if (key === 'n') { help.scrollHelp(3); render(); return; }
-    if (key === 'p') { help.scrollHelp(-3); render(); return; }
+    if (key === 'n') { help.scrollHelp(3, screen); render(); return; }
+    if (key === 'p') { help.scrollHelp(-3, screen); render(); return; }
     if (key === '/') {
       // / starts search; subsequent presses append to query.
       help.setHelpQuery((appState.helpQuery || '').length === 0 ? '/' : (appState.helpQuery || '') + '/');

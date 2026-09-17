@@ -16,12 +16,13 @@ let _pins = null;
 
 export function loadBookmarks() {
   if (_bookmarks === null) _bookmarks = readJson(BOOKMARKS_FILE, []);
-  return _bookmarks;
+  return [..._bookmarks];
 }
 
 export function saveBookmarks(list) {
-  _bookmarks = list;
-  writeJson(BOOKMARKS_FILE, list);
+  const snapshot = Array.isArray(list) ? [...list] : [];
+  writeJson(BOOKMARKS_FILE, snapshot);
+  _bookmarks = snapshot;
 }
 
 export function addBookmark(repo, tags = []) {
@@ -47,11 +48,14 @@ export function addBookmark(repo, tags = []) {
 }
 
 export function removeBookmark(idOrFullName) {
-  const list = loadBookmarks().filter(
-    b => b.id !== idOrFullName && b.full_name !== idOrFullName
-  );
-  saveBookmarks(list);
-  return list;
+  const list = loadBookmarks();
+  // Prefer exact id match; only fall back to full_name when no id matched.
+  // The old dual `!==` filter could remove two unrelated entries at once
+  // if an id ever equaled another entry's full_name.
+  const byId = list.filter(b => b.id !== idOrFullName);
+  const next = byId.length !== list.length ? byId : list.filter(b => b.full_name !== idOrFullName);
+  saveBookmarks(next);
+  return [...next];
 }
 
 export function isBookmarked(fullName) {
@@ -63,12 +67,13 @@ export function isBookmarked(fullName) {
 
 export function loadSavedSearches() {
   if (_savedSearches === null) _savedSearches = readJson(SAVED_SEARCHES_FILE, []);
-  return _savedSearches;
+  return [..._savedSearches];
 }
 
 export function saveSavedSearches(list) {
-  _savedSearches = list;
-  writeJson(SAVED_SEARCHES_FILE, list);
+  const snapshot = Array.isArray(list) ? [...list] : [];
+  writeJson(SAVED_SEARCHES_FILE, snapshot);
+  _savedSearches = snapshot;
 }
 
 export function addSavedSearch(label, query) {
@@ -94,12 +99,16 @@ export function removeSavedSearch(id) {
 
 const REPO_PREFS_FILE = join(CONFIG_DIR, 'repo-prefs.json');
 
+let _repoPrefs = null;
 export function loadRepoPrefs() {
-  return readJson(REPO_PREFS_FILE, {});
+  if (_repoPrefs === null) _repoPrefs = readJson(REPO_PREFS_FILE, {});
+  return { ..._repoPrefs };
 }
 
 export function saveRepoPrefs(prefs) {
-  writeJson(REPO_PREFS_FILE, prefs);
+  const snapshot = { ...(prefs || {}) };
+  writeJson(REPO_PREFS_FILE, snapshot);
+  _repoPrefs = snapshot;
 }
 
 // Pins — sticky favorites that float to the top of the Repos list.
@@ -107,11 +116,12 @@ export function saveRepoPrefs(prefs) {
 
 export function loadPins() {
   if (_pins === null) _pins = readJson(PINS_FILE, []);
-  return _pins;
+  return [..._pins];
 }
 export function savePins(list) {
-  _pins = list;
-  writeJson(PINS_FILE, list);
+  const snapshot = Array.isArray(list) ? [...list] : [];
+  writeJson(PINS_FILE, snapshot);
+  _pins = snapshot;
 }
 export function isPinned(fullName) { return loadPins().includes(fullName); }
 export function togglePin(fullName) {
@@ -125,12 +135,13 @@ export function togglePin(fullName) {
 let _inboxFilters = null;
 export function loadInboxFilters() {
   if (_inboxFilters === null) _inboxFilters = readJson(INBOX_FILTERS_FILE, []);
-  return _inboxFilters;
+  return [..._inboxFilters];
 }
 export function saveInboxFilters(filters) {
-  _inboxFilters = filters;
-  writeJson(INBOX_FILTERS_FILE, filters);
-  return _inboxFilters;
+  const snapshot = Array.isArray(filters) ? [...filters] : [];
+  writeJson(INBOX_FILTERS_FILE, snapshot);
+  _inboxFilters = snapshot;
+  return [..._inboxFilters];
 }
 export function addInboxFilter(label, filter) {
   const list = loadInboxFilters().filter(f => f.label !== label);

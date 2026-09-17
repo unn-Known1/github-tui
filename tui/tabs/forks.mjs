@@ -11,7 +11,7 @@ const FORKS_PER_PAGE = 30;
 const COMPARE_CONCURRENCY = 5;
 
 export const COMPARE_TTL_MS = 10 * 60 * 1000;
-export const _compareCache = new Map(); // key: upstreamFull + '|' + forkFull + '|' + base -> {ahead, behind, ts}
+export const _compareCache = new Map(); // key: upstreamFull + '|' + forkFull + '|' + defaultBranch + '|' + forkBranch -> {ahead, behind, ts}
 
 export const FORK_SORT_OPTIONS = [
   { field: 'pushed', label: 'Last Push', key: 'p' },

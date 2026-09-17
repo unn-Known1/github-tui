@@ -70,11 +70,12 @@ export function createSelect(options = {}) {
   }
 
   function render(screen) {
-    if (!screen) return;
+    if (!screen || !Array.isArray(screen.styleBuf)) return;
     const { boxW, boxH, x, y } = layout(screen);
     const backdropStyle = color('modalBackdrop');
 
     for (let yy = 0; yy < screen.height; yy++) {
+      if (!screen.styleBuf[yy]) continue;
       for (let xx = 0; xx < screen.width; xx++) screen.styleBuf[yy][xx] = backdropStyle;
     }
     for (let yy = y; yy < y + boxH; yy++) {
@@ -194,7 +195,9 @@ export function createSelect(options = {}) {
       return false;
     }
     if (key === '\x7f' || key === '\b') {
-      state.query = state.query.slice(0, -1);
+      // Array.from: slice(0, -1) splits UTF-16 surrogate pairs (emoji),
+      // corrupting the query and its display width.
+      state.query = Array.from(state.query || '').slice(0, -1).join('');
       applyFilter();
       appRender();
       return true;

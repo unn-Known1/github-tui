@@ -1,7 +1,7 @@
 // Create Issue workflow — multi-step form: pick repo → enter title → optional body.
 // Extracted from keys.mjs for maintainability.
 
-import { appState, render, showMessage } from './state.mjs';
+import { appState, showMessage } from './state.mjs';
 import { startInput, registerInputHandler } from './input.mjs';
 import { createIssue } from './github.mjs';
 

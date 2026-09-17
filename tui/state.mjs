@@ -221,9 +221,8 @@ export function resetAccountState() {
   appState.dashboardTopScroll = 0;
   appState.dashboardStaleSelected = 0;
   appState.dashboardStaleScroll = 0;
-  appState.dashboardContribSelected = null;
-  appState.dashboardContribDayFilter = null;
-  appState._contribGeom = null;
+  // (contrib selection keys are reset once above at lines ~202-204;
+  // the duplicate block here was dead — second write always won silently.)
   appState._moreReposAvailable = false;
 }
 
@@ -560,8 +559,8 @@ export const appState = {
   compareData: null,
   compareBase: '',
   compareHead: '',
-  fileHistory: [],
-  fileHistorySelected: 0,
+  // (fileHistory/fileHistorySelected live in the files section above —
+  // the duplicate keys here silently won and hid edits to the originals.)
   repoHealth: null,
   focusMode: null,
   myWorkQueue: [],
@@ -1120,11 +1119,17 @@ export function runShutdownCallbacks() {
   }
 }
 
-const COLLAPSED_PATH = join(homedir(), '.github-tui', 'collapsed.json');
+// All on-disk TUI state honors GITHUB_TUI_HOME (tests / portable installs);
+// defaults to ~/.github-tui.
+export function tuiHomeDir() {
+  return process.env.GITHUB_TUI_HOME || join(homedir(), '.github-tui');
+}
+
+const COLLAPSED_PATH = join(tuiHomeDir(), 'collapsed.json');
 
 function saveCollapsed() {
   try {
-    const dir = join(homedir(), '.github-tui');
+    const dir = tuiHomeDir();
     if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
     writeFileSync(COLLAPSED_PATH, JSON.stringify(appState.collapsed, null, 2));
   } catch {}
@@ -1170,7 +1175,7 @@ export function shouldRefreshWidget(widget, now = Date.now()) {
 }
 
 // ── D17 dashboard prefs persistence (hidden widgets + quick-actions toggle) ──
-const DASHBOARD_PREFS_PATH = join(homedir(), '.github-tui', 'dashboard.json');
+const DASHBOARD_PREFS_PATH = join(tuiHomeDir(), 'dashboard.json');
 export function loadDashboardPrefs() {
   try {
     if (existsSync(DASHBOARD_PREFS_PATH)) {
@@ -1182,7 +1187,7 @@ export function loadDashboardPrefs() {
 }
 export function saveDashboardPrefs() {
   try {
-    const dir = join(homedir(), '.github-tui');
+    const dir = tuiHomeDir();
     if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
     writeFileSync(DASHBOARD_PREFS_PATH, JSON.stringify({ hidden: appState.dashboardHidden, quickActions: appState.dashboardQuickActions }, null, 2));
   } catch {}
@@ -1191,7 +1196,7 @@ export function isDashboardHidden(id) { return Array.isArray(appState.dashboardH
 
 // ── Session persistence — save/restore navigation state across restarts ──
 
-const SESSION_PATH = join(homedir(), '.github-tui', 'session.json');
+const SESSION_PATH = join(tuiHomeDir(), 'session.json');
 
 export function saveSession() {
   try {
@@ -1214,7 +1219,7 @@ export function saveSession() {
       // on the next launch (currentVersion === APP_VERSION → not triggered).
       lastSeenVersion: appState.lastSeenVersion || null,
     };
-    const dir = join(homedir(), '.github-tui');
+    const dir = tuiHomeDir();
     if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
     writeFileSync(SESSION_PATH, JSON.stringify(session, null, 2));
   } catch {}

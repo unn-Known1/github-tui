@@ -257,7 +257,9 @@ export async function loadMoreSearchResults() {
       more = await searchCode(appState.token, appState.searchQuery, page, CODE_SEARCH_PER_PAGE, gen.signal);
     } else if (type === 'user-repos') {
       if (!appState.userReposHasMore) { finishLoading(gen); render(); return; }
-      more = await getUserRepos(appState.token, appState.selectedUser.login, page, USER_REPOS_PER_PAGE, gen.signal);
+      const login = appState.selectedUser && appState.selectedUser.login;
+      if (!login) { finishLoading(gen); render(); return; }
+      more = await getUserRepos(appState.token, login, page, USER_REPOS_PER_PAGE, gen.signal);
     } else {
       if (!appState.searchHasMore) { finishLoading(gen); render(); return; }
       more = await searchRepositories(appState.token, appState.searchQuery, page, SEARCH_PER_PAGE, gen.signal);
@@ -350,11 +352,13 @@ export function pageDown() {
         render();
       }).catch(e => { if (!isStale(gen, 'analyze-search-code')) showMessage(e.message || 'Page down failed', 'error'); finishLoading(gen); render(); });
     } else if (type === 'user-repos' && appState.userReposHasMore) {
+      const login = appState.selectedUser && appState.selectedUser.login;
+      if (!login) { render(); return; }
       const page = appState.userReposPage + 1;
       const gen = startAsync('analyze-user-repos');
       beginLoading(gen);
       render();
-      getUserRepos(appState.token, appState.selectedUser.login, page, USER_REPOS_PER_PAGE, gen.signal).then(more => {
+      getUserRepos(appState.token, login, page, USER_REPOS_PER_PAGE, gen.signal).then(more => {
         if (isStale(gen, 'analyze-user-repos')) { finishLoading(gen); return; }
         if (Array.isArray(more) && more.length > 0) {
           appState.userRepos = [...appState.userRepos, ...more];

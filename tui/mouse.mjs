@@ -434,16 +434,27 @@ function _clickQuickSettings(sx, sy) {
   if (row >= 0 && row < rowCount) quickSettings.activateAt(row);
 }
 
-// Hover handler for command palette — highlights the item under the cursor
-function _hoverPalette(sx, sy) {
+// Centered-overlay geometry shared by the hover/click handlers below.
+// Each overlay previously recomputed boxW/boxH/x0/y0 inline with slightly
+// different caps — one edit (e.g. palette height) silently desynced mouse
+// hit-testing from what render painted. Pass the same caps the renderer uses.
+function overlayBox(maxW, maxH) {
   const W = getScreen() ? getScreen().width : 80;
   const H = getScreen() ? getScreen().height : 24;
-  const boxW = Math.min(80, W - 4);
-  const boxH = Math.min(20, H - 4);
+  const boxW = Math.max(8, Math.min(maxW, W - 4));
+  const boxH = Math.max(6, Math.min(maxH, H - 4));
   const x0 = Math.floor((W - boxW) / 2);
   const y0 = Math.floor((H - boxH) / 2);
-  const inside = sx >= x0 && sx < x0 + boxW && sy >= y0 && sy < y0 + boxH;
-  if (!inside) return;
+  return {
+    boxW, boxH, x0, y0,
+    inside: (sx, sy) => sx >= x0 && sx < x0 + boxW && sy >= y0 && sy < y0 + boxH,
+  };
+}
+
+// Hover handler for command palette — highlights the item under the cursor
+function _hoverPalette(sx, sy) {
+  const { boxH, y0, inside } = overlayBox(80, 20);
+  if (!inside(sx, sy)) return;
 
   // Compute the row index from sy. Items list starts at y0+3.
   const itemY = sy - (y0 + 3);
@@ -465,14 +476,8 @@ function _hoverPalette(sx, sy) {
 
 function _clickPalette(sx, sy) {
   // Click on a row → select + exec. Click outside the box → close.
-  const W = getScreen() ? getScreen().width : 80;
-  const H = getScreen() ? getScreen().height : 24;
-  const boxW = Math.min(80, W - 4);
-  const boxH = Math.min(20, H - 4);
-  const x0 = Math.floor((W - boxW) / 2);
-  const y0 = Math.floor((H - boxH) / 2);
-  const inside = sx >= x0 && sx < x0 + boxW && sy >= y0 && sy < y0 + boxH;
-  if (!inside) {
+  const { boxH, y0, inside } = overlayBox(80, 20);
+  if (!inside(sx, sy)) {
     import('./palette.mjs').then(m => m.close()).catch(() => {});
     return;
   }
@@ -495,28 +500,16 @@ function _clickPalette(sx, sy) {
 }
 
 function _clickHelp(sx, sy) {
-  const W = getScreen() ? getScreen().width : 80;
-  const H = getScreen() ? getScreen().height : 24;
-  const boxW = Math.min(78, W - 4);
-  const boxH = Math.min(H - 4, 28);
-  const x0 = Math.floor((W - boxW) / 2);
-  const y0 = Math.floor((H - boxH) / 2);
-  const inside = sx >= x0 && sx < x0 + boxW && sy >= y0 && sy < y0 + boxH;
-  if (!inside) {
+  const { inside } = overlayBox(78, 28);
+  if (!inside(sx, sy)) {
     appState.showHelp = false;
     render();
   }
 }
 
 function _clickBookmarks(sx, sy) {
-  const W = getScreen() ? getScreen().width : 80;
-  const H = getScreen() ? getScreen().height : 24;
-  const boxW = Math.min(72, W - 4);
-  const boxH = Math.min(20, H - 4);
-  const x0 = Math.floor((W - boxW) / 2);
-  const y0 = Math.floor((H - boxH) / 2);
-  const inside = sx >= x0 && sx < x0 + boxW && sy >= y0 && sy < y0 + boxH;
-  if (!inside) {
+  const { inside } = overlayBox(72, 20);
+  if (!inside(sx, sy)) {
     import('./bookmarks.mjs').then(m => m.closeBookmarks()).catch(() => {});
   }
 }

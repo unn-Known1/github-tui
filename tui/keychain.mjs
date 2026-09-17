@@ -8,7 +8,7 @@
 // so callers can always fall back to plaintext gracefully.
 
 import { execFileSync } from 'child_process';
-import { appendFileSync } from 'fs';
+import { appendFileSync, mkdirSync, existsSync } from 'fs';
 import { join } from 'path';
 import { platform, homedir } from 'os';
 
@@ -44,9 +44,16 @@ export function detectBackend() {
 
 // Cache backend detection result so we don't shell out on every token read.
 let _cachedBackend = undefined;
+export function resetBackendCache() { _cachedBackend = undefined; _saveRetriedOnce = false; }
 function _backend() {
   if (_cachedBackend === undefined) _cachedBackend = detectBackend();
   return _cachedBackend;
+}
+
+// A cached backend can go stale (tool uninstalled). Clear it when the
+// spawn itself fails so the next call re-detects instead of failing forever.
+function _noteSpawnError(e) {
+  if (e && (e.code === 'ENOENT' || e.errno === 'ENOENT')) _cachedBackend = undefined;
 }
 
 // when saving, allow one re-detection in case the user installed
@@ -76,6 +83,7 @@ export function saveTokenSecure(token) {
     if (backend === 'secret-tool')        return _saveSecretTool(token);
     if (backend === 'windows-credential') return _saveWindows(token);
   } catch (e) {
+    _noteSpawnError(e);
     _debug('keychain saveTokenSecure failed (' + backend + '):', e.message);
   }
   return false;
@@ -92,6 +100,7 @@ export function loadTokenSecure() {
     if (backend === 'secret-tool')        return _loadSecretTool();
     if (backend === 'windows-credential') return _loadWindows();
   } catch (e) {
+    _noteSpawnError(e);
     _debug('keychain loadTokenSecure failed (' + backend + '):', e.message);
   }
   return null;
@@ -115,13 +124,13 @@ export function removeTokenSecure() {
 // ── macOS Keychain (security CLI) ───────────────────────────────────
 
 function _saveMacos(token) {
-  // -U updates the entry if it already exists.
-  // argv-array form: the token never passes through a shell and is no
-  // longer quoted into the process command line string.
+  // Bare `-w` reads the password from stdin — the token never appears in
+  // argv, so it is invisible to `ps` / process auditors. (Older code passed
+  // `-w <token>`, which leaked the PAT to the local process list.)
   execFileSync(
     'security',
-    ['add-generic-password', '-s', SERVICE, '-a', ACCOUNT, '-w', String(token), '-U'],
-    { stdio: 'pipe', timeout: 5000 }
+    ['add-generic-password', '-s', SERVICE, '-a', ACCOUNT, '-U', '-w'],
+    { input: String(token), stdio: ['pipe', 'pipe', 'pipe'], timeout: 5000 }
   );
   return true;
 }
@@ -180,9 +189,11 @@ function _removeSecretTool() {
 // ── Windows Credential Manager (cmdkey + PowerShell) ────────────────
 
 function _saveWindows(token) {
-  // cmdkey stores the password directly. argv-array form avoids the
-  // cmd.exe metacharacter escaping dance (_qWin) entirely; the token is
-  // passed as a single argument, never through a shell.
+  // LIMITATION: cmdkey has no stdin mode — /pass: is the only way to store
+  // non-interactively, so the secret is briefly visible in the process list
+  // to the same user. This is an OS-tool constraint (no native dep allowed);
+  // the token is never logged, never shelled, and the child lives <5s.
+  // Prefer secret-tool/macOS backends where available.
   execFileSync(
     'cmdkey',
     ['/generic:' + SERVICE, '/user:' + ACCOUNT, '/pass:' + String(token)],
@@ -240,8 +251,10 @@ function _hasCommand(cmd) {
 function _debug(...args) {
   if (process.env.DEBUG || process.env.GITHUB_TUI_DEBUG) {
     try {
+      const dir = join(homedir(), '.github-tui');
+      try { if (!existsSync(dir)) mkdirSync(dir, { recursive: true }); } catch {}
       appendFileSync(
-        join(homedir(), '.github-tui', 'debug.log'),
+        join(dir, 'debug.log'),
         '[keychain] ' + args.join(' ') + '\n'
       );
     } catch {}

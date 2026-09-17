@@ -88,8 +88,10 @@ export function splitLayout(terminalWidth, leftRatio = 0.3, minWidth = 20) {
  * @returns {{ maxVisible: number, contentHeight: number }}
  */
 export function calculateViewport(terminalHeight, headerHeight = 8, footerHeight = 2, itemHeight = 1) {
-  const contentHeight = terminalHeight - headerHeight - footerHeight;
-  const maxVisible = Math.max(1, Math.floor(contentHeight / itemHeight));
+  // Clamp: raw contentHeight went negative on tiny terminals and poisoned
+  // downstream row/scroll math.
+  const contentHeight = Math.max(0, terminalHeight - headerHeight - footerHeight);
+  const maxVisible = Math.max(1, Math.floor(contentHeight / Math.max(1, itemHeight)));
   return { maxVisible, contentHeight };
 }
 
@@ -169,10 +171,11 @@ export function getStatCardLayout(terminalWidth, cardCount = 5) {
 
   // md (80-99) fits 4 cards/row so each stays wide enough for the longest
   // label ("ACCOUNT AGE"); lg/xl use a single row of 5, spread across the
-  // width, capped + centered on very wide terminals.
-  const cardsPerRow = bp === 'md' ? 4 : Math.min(cardCount, 5);
+  // width, capped + centered on very wide terminals. Never exceed the actual
+  // card count: with fewer cards than slots the row showed empty slots.
+  const cardsPerRow = Math.max(1, Math.min(bp === 'md' ? 4 : Math.min(cardCount, 5), Math.max(1, cardCount)));
   const avail = terminalWidth - 2 * STAT_CARD_MARGIN;
-  const cardWidth = Math.min(MAX_STAT_CARD_WIDTH, Math.floor((avail - (cardsPerRow - 1) * STAT_CARD_GAP) / cardsPerRow));
+  const cardWidth = Math.max(1, Math.min(MAX_STAT_CARD_WIDTH, Math.floor((avail - (cardsPerRow - 1) * STAT_CARD_GAP) / cardsPerRow)));
   const totalWidth = cardWidth * cardsPerRow + STAT_CARD_GAP * (cardsPerRow - 1);
   const startX = STAT_CARD_MARGIN + Math.max(0, Math.floor((avail - totalWidth) / 2));
   return { cardWidth, gap: STAT_CARD_GAP, cardsPerRow, startX };
@@ -189,7 +192,9 @@ export function getDetailPopupLayout(terminalWidth, terminalHeight) {
   const width = bp === 'xs' ? terminalWidth - 2
     : bp === 'sm' ? terminalWidth - 4
     : Math.min(100, terminalWidth - 4);
-  const height = terminalHeight - 4;
+  // Floor at 1: on tiny terminals the raw height went negative and the
+  // popup claimed nonexistent rows.
+  const height = Math.max(1, terminalHeight - 4);
   const x = Math.floor((terminalWidth - width) / 2);
   return { width, height, x, y: 2 };
 }

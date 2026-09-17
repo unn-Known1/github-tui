@@ -3,7 +3,12 @@
 
 import { appState, render, showMessage } from './state.mjs';
 import { addBookmark, removeBookmark } from './store.mjs';
-import { starRepo, unstarRepo, setSubscription, deleteSubscription, closeIssue, reopenIssue } from './github.mjs';
+import { starRepo, unstarRepo, getSubscription, setSubscription, deleteSubscription, closeIssue, reopenIssue } from './github.mjs';
+
+// Tokens are resolved lazily via appState at execution time so undo/redo
+// closures (up to MAX_UNDO long-lived entries) never extend the lifetime
+// of a PAT string in memory beyond the API call itself.
+const liveToken = () => appState.token;
 
 // Undo stack: [{ type, data, undo, redo }]
 const undoStack = [];
@@ -37,8 +42,8 @@ export async function undo() {
     return true;
   } catch (e) {
     showMessage('Undo failed: ' + (e.message || 'unknown'), 'error');
-    // Push it back since undo failed
-    undoStack.push(entry);
+    // Drop the entry: the callback may have partially mutated state, so
+    // re-queueing it would retry a broken op against diverged state.
     return false;
   } finally {
     _undoBusy = false;
@@ -61,7 +66,7 @@ export async function redo() {
     return true;
   } catch (e) {
     showMessage('Redo failed: ' + (e.message || 'unknown'), 'error');
-    redoStack.push(entry);
+    // Drop the entry for the same partial-mutation reason as undo().
     return false;
   } finally {
     _undoBusy = false;
@@ -102,19 +107,21 @@ export async function undoableRemoveBookmark(fullName, bookmarkData) {
 }
 
 export async function undoableUnstar(token, owner, name, repoData) {
+  void token; // legacy param — token is resolved lazily via liveToken()
   try {
-    await unstarRepo(token, owner, name);
+    await unstarRepo(liveToken(), owner, name);
+    // Local ±1 keeps the UI responsive; reconciled with server on next fetch.
     if (repoData) repoData.stargazers_count = Math.max(0, (repoData.stargazers_count || 0) - 1);
     pushUndo({
       type: 'star-remove',
       label: 'Unstar: ' + owner + '/' + name,
-      data: { owner, name, repoData },
+      data: { owner, name },
       undo: async () => {
-        await starRepo(token, owner, name);
+        await starRepo(liveToken(), owner, name);
         if (repoData) repoData.stargazers_count = (repoData.stargazers_count || 0) + 1;
       },
       redo: async () => {
-        await unstarRepo(token, owner, name);
+        await unstarRepo(liveToken(), owner, name);
         if (repoData) repoData.stargazers_count = Math.max(0, (repoData.stargazers_count || 0) - 1);
       },
     });
@@ -124,17 +131,23 @@ export async function undoableUnstar(token, owner, name, repoData) {
 }
 
 export async function undoableUnsubscribe(token, owner, name) {
+  void token; // legacy param — token is resolved lazily via liveToken()
+  let previousSubscription = null;
+  try { previousSubscription = await getSubscription(liveToken(), owner, name); } catch {}
   try {
-    await deleteSubscription(token, owner, name);
+    await deleteSubscription(liveToken(), owner, name);
     pushUndo({
       type: 'unsubscribe',
       label: 'Unsubscribe: ' + owner + '/' + name,
       data: { owner, name },
       undo: async () => {
-        await setSubscription(token, owner, name, true);
+        // Restore the exact prior watch state (releases-only / ignore / …),
+        // not a hardcoded 'all notifications' default.
+        if (previousSubscription) await setSubscription(liveToken(), owner, name, previousSubscription);
+        else await setSubscription(liveToken(), owner, name, true);
       },
       redo: async () => {
-        await deleteSubscription(token, owner, name);
+        await deleteSubscription(liveToken(), owner, name);
       },
     });
   } catch (e) {
@@ -143,17 +156,18 @@ export async function undoableUnsubscribe(token, owner, name) {
 }
 
 export async function undoableCloseIssue(token, owner, name, issueNumber, type = 'issues') {
+  void token; // legacy param — token is resolved lazily via liveToken()
   try {
-    await closeIssue(token, owner, name, issueNumber, type);
+    await closeIssue(liveToken(), owner, name, issueNumber, type);
     pushUndo({
       type: 'issue-close',
       label: 'Close #' + issueNumber,
       data: { owner, name, issueNumber, type },
       undo: async () => {
-        await reopenIssue(token, owner, name, issueNumber, type);
+        await reopenIssue(liveToken(), owner, name, issueNumber, type);
       },
       redo: async () => {
-        await closeIssue(token, owner, name, issueNumber, type);
+        await closeIssue(liveToken(), owner, name, issueNumber, type);
       },
     });
   } catch (e) {

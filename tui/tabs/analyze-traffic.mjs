@@ -76,23 +76,9 @@ export function renderTrafficPane(screen, y, maxH) {
     return;
   }
 
-  // Views summary
-  if (views) {
-    screen.writeStr(2, y, 'Views:', { fg: 'cyan', bold: true });
-    screen.writeStr(10, y, String(views.count || 0), { fg: 'white' });
-    screen.writeStr(20, y, 'unique:', { dim: true });
-    screen.writeStr(28, y, String(views.uniques || 0), { fg: 'white' });
-    y++;
-  }
-
-  // Clones summary
-  if (clones) {
-    screen.writeStr(2, y, 'Clones:', { fg: 'cyan', bold: true });
-    screen.writeStr(10, y, String(clones.count || 0), { fg: 'white' });
-    screen.writeStr(20, y, 'unique:', { dim: true });
-    screen.writeStr(28, y, String(clones.uniques || 0), { fg: 'white' });
-    y++;
-  }
+  // Views + clones summaries (shared layout — was two near-identical blocks).
+  y = writeSummaryRow(screen, y, 'Views:', views);
+  y = writeSummaryRow(screen, y, 'Clones:', clones);
 
   y++;
 
@@ -106,31 +92,38 @@ export function renderTrafficPane(screen, y, maxH) {
   const pathOff = Math.min(clampedStart, paths.length);
   const refOff = clampedStart >= paths.length ? Math.min(clampedStart - paths.length, referrers.length) : 0;
   if (paths.length > 0) {
-    sectionHeader(screen, 2, y, 'Popular Paths');
-    y++;
-    const y0p = y;
-    for (const p of paths.slice(pathOff, pathOff + 5)) {
-      if (y >= y0p + maxH - 1) break;
-      screen.writeStr(4, y, truncate(p.path || '', 30));
-      screen.writeStr(36, y, String(p.count || 0), { dim: true });
-      screen.writeStr(44, y, String(p.uniques || 0) + ' unique', { dim: true });
-      y++;
-    }
-    y++;
+    y = writePopularSection(screen, y, maxH, 'Popular Paths', paths.slice(pathOff, pathOff + 5), (p) => p.path);
   }
 
   // Popular referrers
   if (referrers.length > 0) {
-    sectionHeader(screen, 2, y, 'Popular Referrers');
-    y++;
-    const y1 = y;
-    for (const r of referrers.slice(refOff, refOff + 5)) {
-      if (y >= y1 + maxH - 1) break;
-      screen.writeStr(4, y, truncate(r.referrer || '', 30));
-      screen.writeStr(36, y, String(r.count || 0), { dim: true });
-      screen.writeStr(44, y, String(r.uniques || 0) + ' unique', { dim: true });
-      y++;
-    }
+    y = writePopularSection(screen, y, maxH, 'Popular Referrers', referrers.slice(refOff, refOff + 5), (r) => r.referrer);
   }
   scrollIndicators(screen, y0, y0 + maxH - 1, start, paths.length + referrers.length);
+}
+
+// Shared summary row: `data` is { count, uniques } or null (skipped).
+function writeSummaryRow(screen, y, label, data) {
+  if (!data) return y;
+  screen.writeStr(2, y, label, { fg: 'cyan', bold: true });
+  screen.writeStr(10, y, String(data.count || 0), { fg: 'white' });
+  screen.writeStr(20, y, 'unique:', { dim: true });
+  screen.writeStr(28, y, String(data.uniques || 0), { fg: 'white' });
+  return y + 1;
+}
+
+// Shared popular-list section: header + up to N rows of
+// `label | count | N unique`. Returns the next y.
+function writePopularSection(screen, y, maxH, title, rows, labelOf) {
+  sectionHeader(screen, 2, y, title);
+  y++;
+  const y1 = y;
+  for (const r of rows) {
+    if (y >= y1 + maxH - 1) break;
+    screen.writeStr(4, y, truncate(labelOf(r) || '', 30));
+    screen.writeStr(36, y, String(r.count || 0), { dim: true });
+    screen.writeStr(44, y, String(r.uniques || 0) + ' unique', { dim: true });
+    y++;
+  }
+  return y + 1;
 }

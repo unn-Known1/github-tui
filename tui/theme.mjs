@@ -58,7 +58,7 @@ function makeTheme(spec) {
 }
 
 // ── Default — GitHub dark, professional ───────────────────────────
-const DEFAULT = makeTheme({
+const DARK_THEME = makeTheme({
   title:       { fg: P.d_fg,     bold: true },
   heading:     { fg: P.d_fg,     bold: true },
   dim:         { fg: P.d_fgDim },
@@ -221,7 +221,7 @@ const LIGHT = makeTheme({
 
 // ── Theme registry ────────────────────────────────────────────────
 const THEMES = {
-  default: DEFAULT,
+  default: DARK_THEME,
   light:   LIGHT,
 };
 

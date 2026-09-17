@@ -3,7 +3,7 @@
 
 import { render as appRender } from './state.mjs';
 import { color } from './theme.mjs';
-import { truncate, truncateToWidth } from './utils.mjs';
+import { truncate } from './utils.mjs';
 
 // Toast variants with theme colors
 const VARIANT_STYLES = {
@@ -85,6 +85,7 @@ export function getToasts() {
  * @param {Object} screen - Screen object
  */
 export function renderToasts(screen) {
+  if (!screen || !Array.isArray(screen.styleBuf)) return;
   if (toasts.length === 0) return;
 
   const W = screen.width;
@@ -102,11 +103,12 @@ export function renderToasts(screen) {
     const style = VARIANT_STYLES[toast.variant] || VARIANT_STYLES.info;
     const toastStyle = color(style.color);
 
-    // Toast box background
+    // Toast box background (row-guarded: short terminals previously threw
+    // on styleBuf[y] with y past the buffer).
     const boxW = Math.min(40, W - startX - 2);
     for (let xx = startX; xx < startX + boxW && xx < W; xx++) {
-      screen.styleBuf[y][xx] = toastStyle;
-      if (y + 1 < screen.height) screen.styleBuf[y + 1][xx] = toastStyle;
+      if (screen.styleBuf[y]) screen.styleBuf[y][xx] = toastStyle;
+      if (y + 1 < screen.height && screen.styleBuf[y + 1]) screen.styleBuf[y + 1][xx] = toastStyle;
     }
 
     // Icon

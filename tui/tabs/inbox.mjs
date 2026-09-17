@@ -25,6 +25,7 @@ const INBOX_PER_PAGE = 50;
 // ~/.github-tui/inbox-snoozed.json (same readJson/writeJson pattern as store.mjs).
 const SNOOZE_FILE = join(CONFIG_DIR, 'inbox-snoozed.json');
 let _snoozeLoaded = false;
+let _topReposCache = { ref: null, n: -1, top: [] };
 export function loadSnoozedState() {
   try {
     const raw = readJson(SNOOZE_FILE, {});
@@ -32,6 +33,9 @@ export function loadSnoozedState() {
     const clean = {};
     for (const [k, v] of Object.entries(raw || {})) if (v > now) clean[k] = v;
     appState.inboxSnoozed = { ...(appState.inboxSnoozed || {}), ...clean };
+    // Persist the prune: without this, expired entries accumulate on disk
+    // forever and every startup re-reads a growing dead map.
+    if (Object.keys(raw || {}).length !== Object.keys(clean).length) saveSnoozedState();
   } catch {}
   _snoozeLoaded = true;
 }
@@ -68,8 +72,12 @@ export async function loadNotifications() {
   if (!isStale(gen)) render();
 }
 
+// In-flight guard: two rapid Space presses computed the same
+// `inboxPage + 1` and appended the same server page twice (doubled rows).
+let _inboxMoreInflight = false;
 export async function loadMoreNotifications() {
-  if (!appState.inboxHasMore || !appState.token) return;
+  if (!appState.inboxHasMore || !appState.token || _inboxMoreInflight) return;
+  _inboxMoreInflight = true;
   const gen = startAsync('inbox-more');
   beginLoading(gen);
   render();
@@ -77,13 +85,18 @@ export async function loadMoreNotifications() {
     const page = appState.inboxPage + 1;
     const more = await getNotifications(appState.token, page, INBOX_PER_PAGE, gen.signal);
     if (isStale(gen)) { finishLoading(gen); return; }
-    appState.notifications = [...appState.notifications, ...more];
+    const batch = Array.isArray(more) ? more : [];
+    // Dedupe by id: a retried/overlapping page must never double rows.
+    const seen = new Set(appState.notifications.map(n => n && n.id));
+    for (const n of batch) if (n && !seen.has(n.id)) { appState.notifications.push(n); seen.add(n.id); }
     appState.inboxPage = page;
-    appState.inboxHasMore = more.length >= INBOX_PER_PAGE;
+    appState.inboxHasMore = batch.length >= INBOX_PER_PAGE;
     bumpInboxFilterGen();
     normalizeInboxCursor();
   } catch (e) {
     if (!isStale(gen)) showMessage(e.message || 'Failed to load more', 'error');
+  } finally {
+    _inboxMoreInflight = false;
   }
   finishLoading(gen);
   if (!isStale(gen)) render();
@@ -183,10 +196,19 @@ function selected() {
   return getSelectedNotification();
 }
 
+// Memoized: rebuilt on every render otherwise (O(n) per keystroke).
+let _snoozedCountCache = { minute: -1, size: -1, n: 0 };
 function countSnoozed() {
   const snoozed = appState.inboxSnoozed || {};
+  const minute = Math.floor(Date.now() / 60000);
+  const size = Object.keys(snoozed).length;
+  if (_snoozedCountCache.minute === minute && _snoozedCountCache.size === size) {
+    return _snoozedCountCache.n;
+  }
   const now = Date.now();
-  return Object.keys(snoozed).filter(id => (snoozed[id] || 0) > now).length;
+  const n = Object.keys(snoozed).filter(id => (snoozed[id] || 0) > now).length;
+  _snoozedCountCache = { minute, size, n };
+  return n;
 }
 
 export async function markCurrentRead() {
@@ -462,14 +484,22 @@ export function renderInbox(screen, y, h) {
     return;
   }
 
-  // By-repo summary panel (right).
+  // By-repo summary panel (right). Memoized on notifications identity —
+  // rebuilding + sorting per render janked large inboxes on every keystroke.
   const repoCounts = {};
-  for (const n of allList) {
-    const r = n.repository && n.repository.full_name;
-    if (!r) continue;
-    repoCounts[r] = (repoCounts[r] || 0) + 1;
+  const _notifRef = allList;
+  let topRepos;
+  if (_topReposCache.ref === _notifRef && _topReposCache.n === _notifRef.length) {
+    topRepos = _topReposCache.top;
+  } else {
+    for (const n of allList) {
+      const r = n.repository && n.repository.full_name;
+      if (!r) continue;
+      repoCounts[r] = (repoCounts[r] || 0) + 1;
+    }
+    topRepos = Object.entries(repoCounts).sort((a, b) => b[1] - a[1]).slice(0, 6);
+    _topReposCache = { ref: _notifRef, n: _notifRef.length, top: topRepos };
   }
-  const topRepos = Object.entries(repoCounts).sort((a, b) => b[1] - a[1]).slice(0, 6);
   const summaryX = Math.max(W - 32, Math.floor(W * 0.62));
   const summaryW = W - summaryX - 2;
   let summaryH = 0;

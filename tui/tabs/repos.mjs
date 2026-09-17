@@ -144,7 +144,6 @@ export async function loadAllReposBackground(gen) {
   // very high safety ceiling for malformed pagination responses, while
   // avoiding the old 300-repository truncation in normal accounts.
   const MAX_PAGES = 1000;
-  let capped = false;
   // Background pagination shares the account generation but owns a separate
   // loading contribution; the foreground first-page request may finish while
   // this work continues.
@@ -156,8 +155,12 @@ export async function loadAllReposBackground(gen) {
   // out-of-order fetch completion can never scramble list order. Over-fetch
   // past the last page is bounded by CONCURRENCY-1 tail pages (discarded).
   const CONCURRENCY = 3;
-  let nextPage = 2;
-  let commitPage = 2;
+  // Resume from the current page (not hardcoded 2): after the MAX_PAGES cap,
+  // [l] re-enters here and must continue at reposPage+1, not re-fetch
+  // pages 2..N and duplicate every row.
+  const startPage = Math.max(2, (appState.reposPage || 1) + 1);
+  let nextPage = startPage;
+  let commitPage = startPage;
   const buffered = new Map(); // page -> repos[]; committed when contiguous
   let exhausted = !appState.reposHasMore;
   let fetchError = null;
@@ -167,7 +170,8 @@ export async function loadAllReposBackground(gen) {
       const items = buffered.get(commitPage);
       buffered.delete(commitPage);
       if (exhausted) { commitPage++; continue; } // discard over-fetched tail
-      appState.repos = [...appState.repos, ...items];
+      const batch = Array.isArray(items) ? items : [];
+      appState.repos = [...appState.repos, ...batch];
       // Actions consumes a snapshot of repositories; keep it complete while
       // background pagination discovers additional account repos. Once the
       // Actions workflow scan has run, drop repos confirmed workflow-less so
@@ -212,7 +216,6 @@ export async function loadAllReposBackground(gen) {
   if (appState.reposHasMore) {
     appState.reposHasMore = false;  // we won't keep paging silently
     appState._moreReposAvailable = true;
-    capped = true;
     if (!isStale(gen, 'repos')) showMessage(
       'Loaded first ' + appState.repos.length + ' repos (' + MAX_PAGES + ' pages). ' +
       'Press [l] or run "repos.load-more" in the palette to fetch more.',
@@ -251,9 +254,10 @@ export async function loadMoreRepos() {
     const page = appState.reposPage + 1;
     const more = await getUserRepositories(appState.token, page, REPOS_PER_PAGE, gen.signal);
     if (isStale(gen, 'repos')) { finishLoading(gen); return; }
-    appState.repos = [...appState.repos, ...more];
+    const batch = Array.isArray(more) ? more : [];
+    appState.repos = [...appState.repos, ...batch];
     appState.reposPage = page;
-    appState.reposHasMore = more.length >= REPOS_PER_PAGE;
+    appState.reposHasMore = batch.length >= REPOS_PER_PAGE;
     recomputeDashboardDerived();
     enrichIssueCounts();
     showMessage('Loaded ' + appState.repos.length + ' repos total', 'info');
@@ -302,9 +306,7 @@ export function trueIssueCount(repo) {
 export async function enrichIssueCounts() {
   if (!appState.token || !Array.isArray(appState.repos) || appState.repos.length === 0) return;
   const gen = startAsync('repos-issue-counts');
-  let list = sortRepos(appState.repos, appState.repoSort);
-  list = applyAllFilters(list);
-  list = floatPinsToTop(list);
+  const list = ownViewList();
   const now = Date.now();
   // Scroll-idle enrichment: target the visible window instead of always the
   // first page, so rows scrolled into view get true counts too.
@@ -324,9 +326,16 @@ export async function enrichIssueCounts() {
       if (!owner || !name) continue;
       let prCount = 0;
       try {
-        const prs = await getRepositoryPullRequests(appState.token, owner, name, 1, 100, 'open', gen.signal);
-        if (isStale(gen)) return;
-        if (Array.isArray(prs)) prCount = prs.length;
+        // Paginate the open-PR probe (cap 3 pages): a single 100-row page
+        // undercounted PRs on repos with >100 open PRs and inflated the
+        // "true" issue count.
+        for (let pp = 1; pp <= 3; pp++) {
+          const prs = await getRepositoryPullRequests(appState.token, owner, name, pp, 100, 'open', gen.signal);
+          if (isStale(gen)) return;
+          if (!Array.isArray(prs) || prs.length === 0) break;
+          prCount += prs.length;
+          if (prs.length < 100) break;
+        }
       } catch {
         if (isStale(gen)) return;
         continue; // probe failed — keep the combined-count fallback
@@ -446,9 +455,7 @@ export function renderRepos(screen, y, h) {
     return;
   }
   const W = screen.width;
-  let repos = sortRepos(appState.repos, appState.repoSort);
-  repos = applyAllFilters(repos);
-  repos = floatPinsToTop(repos);
+  const repos = ownViewList();
   appState._filteredReposCount = repos.length;
 
   const totalStars = appState.repos.reduce((a, r) => a + (r.stargazers_count || 0), 0);
@@ -643,10 +650,7 @@ export function renderRepos(screen, y, h) {
 // ─── Key handlers ─────────────────────────────────────────────────
 
 function currentRepo() {
-  let list = sortRepos(appState.repos, appState.repoSort);
-  list = applyAllFilters(list);
-  list = floatPinsToTop(list);
-  return list[appState.repoSelected] || null;
+  return ownViewList()[appState.repoSelected] || null;
 }
 
 function openCurrentInAnalyze() {
@@ -907,7 +911,7 @@ export function pageDown() {
   }
   // Own view: viewport paging (was: early-return, dead keys). Total mirrors
   // down()/bottom() (WITHOUT pins — lengths equal); fixed STEP scroll pin.
-  const total = applyAllFilters(sortRepos(appState.repos, appState.repoSort)).length;
+  const total = ownViewList().length;
   appState.repoSelected = total > 0 ? Math.min(total - 1, appState.repoSelected + PAGE_STEP) : 0;
   if (appState.repoSelected >= appState.repoScroll + PAGE_STEP) appState.repoScroll = appState.repoSelected - PAGE_STEP + 1;
   render();
@@ -950,7 +954,7 @@ export function up(screen) {
     render();
     return;
   }
-  const total = floatPinsToTop(applyAllFilters(sortRepos(appState.repos, appState.repoSort))).length;
+  const total = ownViewList().length;
   if (total === 0) { render(); return; }
   if (appState.repoSelected > 0) appState.repoSelected--;
   if (appState.repoSelected < appState.repoScroll) appState.repoScroll = appState.repoSelected;
@@ -967,7 +971,7 @@ export function down(screen) {
   }
   // Own view: discount "★ PINNED" header rows (which consume rendered rows
   // but aren't data rows) from the visible-row budget.
-  const fullList = floatPinsToTop(applyAllFilters(sortRepos(appState.repos, appState.repoSort)));
+  const fullList = ownViewList();
   const total = fullList.length;
   if (total === 0) { render(); return; }
   appState.repoSelected = Math.min(total - 1, appState.repoSelected + 1);
@@ -1004,7 +1008,7 @@ export function bottom(screen) {
   }
   // Own view: discount pinned headers from the visible budget (approximated
   // over the trailing window, since scroll depends on v and vice versa).
-  const fullList = floatPinsToTop(applyAllFilters(sortRepos(appState.repos, appState.repoSort)));
+  const fullList = ownViewList();
   const total = fullList.length;
   if (total === 0) { render(); return; }
   appState.repoSelected = Math.max(0, total - 1);
@@ -1012,6 +1016,25 @@ export function bottom(screen) {
   const v = Math.max(1, rawV - pinnedHeaderCount(fullList, Math.max(0, total - rawV), rawV));
   appState.repoScroll = Math.max(0, total - v);
   render();
+}
+
+// Memoized own-view list (sort → filter → pins). The chain is O(n log n)
+// with Date parsing per repo; without memo it ran on every keystroke,
+// scroll step, and render. Keyed on array identity + view inputs.
+let _ownViewCache = { repos: null, n: -1, key: '', list: [] };
+export function ownViewList() {
+  const repos = appState.repos;
+  const key = JSON.stringify([
+    appState.repoSort, appState.reposTypeFilter ?? appState.typeFilter,
+    appState.reposLangFilter ?? appState.langFilter, appState.repoStaleOnly,
+    appState.reposTextFilter ?? appState.textFilter, appState.pins,
+  ]);
+  if (_ownViewCache.repos === repos && _ownViewCache.n === (repos ? repos.length : 0) && _ownViewCache.key === key) {
+    return _ownViewCache.list;
+  }
+  const list = floatPinsToTop(applyAllFilters(sortRepos(repos, appState.repoSort)));
+  _ownViewCache = { repos, n: repos ? repos.length : 0, key, list };
+  return list;
 }
 
 // ── Collapsible sections ──
@@ -1023,9 +1046,7 @@ export function getSections() {
 
 export function getCurrentSection() {
   if (appState.reposView === 'starred') return 'repos:repos';
-  let list = sortRepos(appState.repos, appState.repoSort);
-  list = applyAllFilters(list);
-  list = floatPinsToTop(list);
+  const list = ownViewList();
   const repo = list[appState.repoSelected];
   if (repo && isPinnedLocal(repo.full_name)) return 'repos:pinned';
   return 'repos:repos';

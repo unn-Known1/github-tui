@@ -317,10 +317,13 @@ export function setHelpQuery(q) {
   appState.helpQuery = q;
   appState.helpCursor = 0;
 }
-export function scrollHelp(delta) {
+export function scrollHelp(delta, screen) {
+  // Accept an optional `screen` so callers can clamp against the current
+  // terminal height rather than process.stdout.rows, which is stale between
+  // renders (and inaccurate inside tmux where rows != visible lines).
   const q = (appState.helpQuery || '').trim();
   const lines = getHelpLines(q);
-  const H = process.stdout.rows || 24;
+  const H = screen ? screen.height : (process.stdout.rows || 24);
   const boxH = Math.min(H - 4, 28);
   const maxLines = boxH - 4;
   const totalLines = lines.length;

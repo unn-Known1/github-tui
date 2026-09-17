@@ -3,7 +3,7 @@
 import { appState, render, startAsync, isStale, showMessage, beginLoading, finishLoading } from '../state.mjs';
 import { getReadme } from '../github.mjs';
 import { sectionHeader, wrapTextWithMap, stripAnsi } from '../utils.mjs';
-import { scrollIndicators } from '../render.mjs';
+import { scrollIndicators, HEADER_HEIGHT } from '../render.mjs';
 import { color } from '../theme.mjs';
 
 export async function viewReadme() {
@@ -42,9 +42,8 @@ export function clampReadmeSel(row, col, screen) {
   if (!screen) return null;
   const W = screen.width;
   const innerW = Math.max(20, W - 6);
-  // Pane content starts at screen row HEADER_HEIGHT+5 (tab-strip + header), col 2.
-  // The exact Y offset matches renderReadmePane below.
-  const paneTopY = 9; // HEADER_HEIGHT + 5 (pane tabs row)
+  // Pane content starts at HEADER_HEIGHT (tab strip) + 2 (pane tabs row), col 2.
+  const paneTopY = HEADER_HEIGHT + 2;
   const paneLeftX = 2;
   // Bottom bound is the PANE bottom (paneTopY + pane height), not the screen
   // bottom — the old screen.height-2 bound let clicks outside the pane but

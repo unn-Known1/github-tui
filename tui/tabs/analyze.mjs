@@ -987,6 +987,21 @@ function isSecurityPane() {
   return appState.analyzeView === 'details' && appState.detailsPane === 'security';
 }
 
+// Results-view cursor state per search type. The users/code/user-repos/repos
+// branches were copy-pasted in up() and down() (4×2); a fix in one branch
+// never reached the others. All cursor moves go through resultsCursor().
+const RESULTS_CURSOR = {
+  users: ['userSearchResults', 'userSelectedRepo', 'userSearchScroll'],
+  code: ['codeSearchResults', 'codeSelectedRepo', 'codeSearchScroll'],
+  'user-repos': ['userRepos', 'userReposSelected', 'userReposScroll'],
+  repos: ['searchResults', 'selectedRepo', 'searchScroll'],
+};
+function resultsCursor() {
+  const type = appState.searchType || 'repos';
+  const [listKey, selKey, scrollKey] = RESULTS_CURSOR[type] || RESULTS_CURSOR.repos;
+  return { list: appState[listKey] || [], selKey, scrollKey };
+}
+
 export function up(screen) {
   if (appState.analyzeView === 'security-aggregate') { securityAggregateUp(); return; }
   if (appState.analyzeView === 'organizations') { organizationUp(); return; }
@@ -998,31 +1013,10 @@ export function up(screen) {
     render(); return;
   }
   if (appState.analyzeView === 'results') {
-    const type = appState.searchType || 'repos';
-    if (type === 'users') {
-      const list = appState.userSearchResults;
-      if (list.length > 0) {
-        if (appState.userSelectedRepo > appState.userSearchScroll) appState.userSelectedRepo--;
-        else if (appState.userSearchScroll > 0) { appState.userSearchScroll--; appState.userSelectedRepo--; }
-      }
-    } else if (type === 'code') {
-      const list = appState.codeSearchResults;
-      if (list.length > 0) {
-        if (appState.codeSelectedRepo > appState.codeSearchScroll) appState.codeSelectedRepo--;
-        else if (appState.codeSearchScroll > 0) { appState.codeSearchScroll--; appState.codeSelectedRepo--; }
-      }
-    } else if (type === 'user-repos') {
-      const list = appState.userRepos;
-      if (list.length > 0) {
-        if (appState.userReposSelected > appState.userReposScroll) appState.userReposSelected--;
-        else if (appState.userReposScroll > 0) { appState.userReposScroll--; appState.userReposSelected--; }
-      }
-    } else {
-      const list = appState.searchResults;
-      if (list.length > 0) {
-        if (appState.selectedRepo > appState.searchScroll) appState.selectedRepo--;
-        else if (appState.searchScroll > 0) { appState.searchScroll--; appState.selectedRepo--; }
-      }
+    const { list, selKey, scrollKey } = resultsCursor();
+    if (list.length > 0) {
+      if (appState[selKey] > appState[scrollKey]) appState[selKey]--;
+      else if (appState[scrollKey] > 0) { appState[scrollKey]--; appState[selKey]--; }
     }
     render();
     return;
@@ -1057,47 +1051,14 @@ export function down(screen) {
     render(); return;
   }
   if (appState.analyzeView === 'results') {
-    const type = appState.searchType || 'repos';
     const maxVisible = maxVisibleResults(screen.height - 8);
-    if (type === 'users') {
-      const list = appState.userSearchResults;
-      if (list.length > 0) {
-        if (appState.userSelectedRepo < appState.userSearchScroll + maxVisible - 1) {
-          appState.userSelectedRepo = Math.min(list.length - 1, appState.userSelectedRepo + 1);
-        } else if (appState.userSearchScroll + maxVisible < list.length) {
-          appState.userSearchScroll++;
-          appState.userSelectedRepo = Math.min(list.length - 1, appState.userSelectedRepo + 1);
-        }
-      }
-    } else if (type === 'code') {
-      const list = appState.codeSearchResults;
-      if (list.length > 0) {
-        if (appState.codeSelectedRepo < appState.codeSearchScroll + maxVisible - 1) {
-          appState.codeSelectedRepo = Math.min(list.length - 1, appState.codeSelectedRepo + 1);
-        } else if (appState.codeSearchScroll + maxVisible < list.length) {
-          appState.codeSearchScroll++;
-          appState.codeSelectedRepo = Math.min(list.length - 1, appState.codeSelectedRepo + 1);
-        }
-      }
-    } else if (type === 'user-repos') {
-      const list = appState.userRepos;
-      if (list.length > 0) {
-        if (appState.userReposSelected < appState.userReposScroll + maxVisible - 1) {
-          appState.userReposSelected = Math.min(list.length - 1, appState.userReposSelected + 1);
-        } else if (appState.userReposScroll + maxVisible < list.length) {
-          appState.userReposScroll++;
-          appState.userReposSelected = Math.min(list.length - 1, appState.userReposSelected + 1);
-        }
-      }
-    } else {
-      const list = appState.searchResults;
-      if (list.length > 0) {
-        if (appState.selectedRepo < appState.searchScroll + maxVisible - 1) {
-          appState.selectedRepo = Math.min(list.length - 1, appState.selectedRepo + 1);
-        } else if (appState.searchScroll + maxVisible < list.length) {
-          appState.searchScroll++;
-          appState.selectedRepo = Math.min(list.length - 1, appState.selectedRepo + 1);
-        }
+    const { list, selKey, scrollKey } = resultsCursor();
+    if (list.length > 0) {
+      if (appState[selKey] < appState[scrollKey] + maxVisible - 1) {
+        appState[selKey] = Math.min(list.length - 1, appState[selKey] + 1);
+      } else if (appState[scrollKey] + maxVisible < list.length) {
+        appState[scrollKey]++;
+        appState[selKey] = Math.min(list.length - 1, appState[selKey] + 1);
       }
     }
     render();
