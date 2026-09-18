@@ -2,7 +2,7 @@
 // v0.5+ polish: sectioned panels with clearer hierarchy, system info in its own box.
 
 import { appState, render, startAsync, isStale, showMessage, confirm,
-  beginLoading, finishLoading, setManualLoading, resetAccountState } from '../state.mjs';
+  beginLoading, finishLoading, setManualLoading, resetAccountState, isCollapsed } from '../state.mjs';
 import {
   APP_VERSION, CONFIG_DIR, TOKEN_FILE, saveToken, removeToken,
   getTokenStorageBackend,
@@ -17,6 +17,7 @@ import { color, listThemes, getThemeName, setTheme } from '../theme.mjs';
 import { refreshDashboard, loadDashboardWidgets } from './dashboard.mjs';
 import { loadUserData, loadAllReposBackground } from './repos.mjs';
 import { openUrl, truncateToWidth, displayWidth } from '../utils.mjs';
+import { collapsibleHeader } from '../render.mjs';
 import { starRepo as apiStarRepo } from '../github.mjs';
 import { loadBookmarks, loadPins, loadSavedSearches, loadInboxFilters, saveBookmarks, savePins, saveSavedSearches, saveInboxFilters } from '../store.mjs';
 import { execFile } from 'child_process';
@@ -192,6 +193,15 @@ export function renderSettings(screen, y, h) {
   const W = screen.width;
   const isLoggedIn = !!appState.token;
 
+  // One-shot per session (after boot's loadCollapsed): fresh users get
+  // auth + about open and everything else collapsed; explicit toggles win.
+  if (!appState._settingsCollapseInit) {
+    appState._settingsCollapseInit = true;
+    applySettingsCollapseDefaults();
+  }
+  // Never strand the cursor on a row hidden inside a collapsed section.
+  ensureVisibleCursor();
+
   // Check gh CLI availability (async, cached after first check)
   if (appState._ghAvailable === undefined) {
     appState._ghAvailable = false; // assume not available until proven
@@ -217,6 +227,11 @@ export function renderSettings(screen, y, h) {
 
   let row = y + 3;
   const rowBounds = [];  // Track Y position of each menu item for mouse clicks
+  // Click targets republish below when their section is open; nulling first
+  // keeps collapsed sections from answering clicks on stale rows.
+  appState._settingsUrlBounds = null;
+  appState._starRowBounds = null;
+  appState._themeChips = [];
 
   // First decide where the system panel goes so we can constrain left column.
   const sysPanelW = Math.min(56, Math.max(34, Math.floor(W * 0.35)));
@@ -225,8 +240,9 @@ export function renderSettings(screen, y, h) {
   const sectionH = sysX > 50 ? h - 1 : h - 8;
 
   // AUTHENTICATION
-  sectionHeader(screen, 2, row, '◆ AUTHENTICATION', leftMaxW);
+  const authOpen = collapsibleHeader(screen, 2, row, 'settings:auth', '◆ AUTHENTICATION');
   row += 2;
+  if (authOpen) {
   // Keep the cursor on an actionable row while asynchronous CLI detection
   // settles. In particular, PAT login must remain reachable when `gh` is
   // unavailable.
@@ -247,10 +263,12 @@ export function renderSettings(screen, y, h) {
     row++;
   }
   row += 2;
+  }
 
   // DATA
-  sectionHeader(screen, 2, row, '◆ DATA', leftMaxW);
+  const dataOpen = collapsibleHeader(screen, 2, row, 'settings:data', '◆ DATA');
   row += 2;
+  if (dataOpen) {
   const dataItems = [
     { label: 'Refresh Dashboard', desc: 'Re-fetch events, trending',   enabled: isLoggedIn, sel: appState.settingsCursor === 3 },
     { label: 'Refresh User Data', desc: 'Re-fetch profile and repos',  enabled: isLoggedIn, sel: appState.settingsCursor === 4 },
@@ -263,10 +281,12 @@ export function renderSettings(screen, y, h) {
     row++;
   }
   row += 2;
+  }
 
   // APPEARANCE
-  sectionHeader(screen, 2, row, '◆ APPEARANCE', leftMaxW);
+  const appearanceOpen = collapsibleHeader(screen, 2, row, 'settings:appearance', '◆ APPEARANCE');
   row += 2;
+  if (appearanceOpen) {
   const themeItem = { label: 'Change Theme', desc: 'Current: ' + getThemeName(), enabled: true, sel: appState.settingsCursor === 6 };
   if (row < y + sectionH) {
     renderRow(screen, row, leftMaxW, themeItem.label, themeItem.desc, true, themeItem.sel);
@@ -318,10 +338,12 @@ export function renderSettings(screen, y, h) {
     row++;  // advance past last chip row
   }
   row++;  // blank line before next section
+  }
 
   // INTEGRATIONS
-  sectionHeader(screen, 2, row, '◆ INTEGRATIONS', leftMaxW);
+  const integrationsOpen = collapsibleHeader(screen, 2, row, 'settings:integrations', '◆ INTEGRATIONS');
   row += 2;
+  if (integrationsOpen) {
   let _apiHostLabel = 'Configure API/web host';
   try {
     const _hosts = getGitHubHosts();
@@ -341,10 +363,12 @@ export function renderSettings(screen, y, h) {
     row++;
   }
   row += 2;
+  }
 
   // DANGER ZONE
-  sectionHeader(screen, 2, row, '! DANGER ZONE', leftMaxW);
+  const dangerOpen = collapsibleHeader(screen, 2, row, 'settings:danger', '! DANGER ZONE');
   row += 2;
+  if (dangerOpen) {
   const dangerItems = [
     { cursor: 7, label: 'Clear Saved Token', desc: 'Wipe token from all storage',  enabled: isLoggedIn, sel: appState.settingsCursor === 7 },
     { cursor: 14, label: 'Clear Local Data', desc: 'Wipe bookmarks/pins/searches/filters', enabled: true, sel: appState.settingsCursor === 14 },
@@ -358,11 +382,13 @@ export function renderSettings(screen, y, h) {
     rowBounds.push({ cursor: item.cursor, y: row });
     row++;
   }
+  }
 
   // ABOUT
   row += 2;
-  sectionHeader(screen, 2, row, '◆ ABOUT', leftMaxW);
+  const aboutOpen = collapsibleHeader(screen, 2, row, 'settings:about', '◆ ABOUT');
   row += 2;
+  if (aboutOpen) {
   if (row < y + sectionH) {
     screen.writeStr(4, row, 'Built with', { dim: true });
     screen.writeStr(14, row, 'zero dependencies', { fg: 'cyan', bold: true });
@@ -401,6 +427,7 @@ export function renderSettings(screen, y, h) {
     appState._starRowBounds = { y: row, x1: 2, x2: leftMaxW - 2 };
     rowBounds.push({ cursor: 8, y: row });
     row++;
+  }
   }
 
   appState._settingsRowBounds = rowBounds;
@@ -555,6 +582,73 @@ const INTEGRATIONS_ITEMS = [9, 10, 11, 12, 13]; // Enterprise host, profiles, co
 const DANGER_ITEMS = [7, 14];  // Clear Token, Clear Local Data
 const ABOUT_ITEMS = [8];  // Star repo
 
+// Collapsible sections (About sits last, so without collapsing it scrolls
+// out of reach on short terminals). Auth + About stay open by default.
+export const SETTINGS_SECTIONS = [
+  'settings:auth', 'settings:data', 'settings:appearance',
+  'settings:integrations', 'settings:danger', 'settings:about',
+];
+const SECTION_CURSORS = {
+  'settings:auth': AUTH_ITEMS,
+  'settings:data': DATA_ITEMS,
+  'settings:appearance': APPEARANCE_ITEMS,
+  'settings:integrations': INTEGRATIONS_ITEMS,
+  'settings:danger': DANGER_ITEMS,
+  'settings:about': ABOUT_ITEMS,
+};
+// Visual top-to-bottom cursor order (differs from numeric: integrations
+// render before danger/about).
+const CURSOR_ORDER = [0, 1, 2, 3, 4, 5, 6, 9, 10, 11, 12, 13, 7, 14, 8];
+
+export function getSections() {
+  return [...SETTINGS_SECTIONS];
+}
+
+export function getCurrentSection() {
+  const c = appState.settingsCursor;
+  for (const [sec, curs] of Object.entries(SECTION_CURSORS)) {
+    if (curs.includes(c)) return sec;
+  }
+  return 'settings:auth';
+}
+
+export function isCursorVisible(cursor) {
+  for (const [sec, curs] of Object.entries(SECTION_CURSORS)) {
+    if (curs.includes(cursor)) return !isCollapsed(sec);
+  }
+  return true;
+}
+
+// Fresh installs (and upgraders who never touched these keys): everything
+// collapsed except Authentication and About, so the tab fits short
+// terminals and About stays reachable. Explicit user toggles always win —
+// only absent keys are filled. Runs lazily on first Settings render (after
+// loadCollapsed), never from module scope.
+export function applySettingsCollapseDefaults() {
+  const defaults = {
+    'settings:data': true,
+    'settings:appearance': true,
+    'settings:integrations': true,
+    'settings:danger': true,
+  };
+  for (const [k, v] of Object.entries(defaults)) {
+    if (!(k in appState.collapsed)) appState.collapsed[k] = v;
+  }
+}
+
+// Relocate a cursor stranded on a collapsed section's hidden row. Returns
+// true when the cursor was already visible (callers may proceed), false
+// when it moved or nowhere visible exists (callers must stop, not fire).
+function ensureVisibleCursor() {
+  if (isCursorVisible(appState.settingsCursor)) return true;
+  const found = CURSOR_ORDER.find(c =>
+    isCursorVisible(c) && isSettingsCursorEnabled(c, appState._ghAvailable === true));
+  if (found == null) return false;
+  appState.settingsCursor = found;
+  render();
+  return false;
+}
+
 export function isSettingsCursorEnabled(cursor, ghReady = appState._ghAvailable === true) {
   const isLoggedIn = !!appState.token;
   if (AUTH_ITEMS.includes(cursor)) {
@@ -584,7 +678,7 @@ export function up() {
   let cur = appState.settingsCursor;
   while (cur > 0) {
     cur--;
-    if (isCursorEnabled(cur)) {
+    if (isCursorEnabled(cur) && isCursorVisible(cur)) {
       appState.settingsCursor = cur;
       render();
       return;
@@ -596,7 +690,7 @@ export function down() {
   let cur = appState.settingsCursor;
   while (cur < max) {
     cur++;
-    if (isCursorEnabled(cur)) {
+    if (isCursorEnabled(cur) && isCursorVisible(cur)) {
       appState.settingsCursor = cur;
       render();
       return;
@@ -605,6 +699,9 @@ export function down() {
 }
 
 export function enter() {
+  // Never fire from a row hidden inside a collapsed section — relocate
+  // to the first visible row instead (a second Enter activates it).
+  if (!ensureVisibleCursor()) return;
   const isLoggedIn = !!appState.token;
   switch (appState.settingsCursor) {
     case 0:

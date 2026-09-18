@@ -23,6 +23,35 @@ export const TERM_CAPABILITIES = {
   isWSL: !!process.env.WSLENV,
 };
 
+// Full-repaint cadence for Screen.render(): every Nth frame re-asserts all
+// cells so terminal-side divergence the diff cannot see (font-change
+// reflow, scrollback clear, tmux reattach) self-heals within seconds.
+export const SCREEN_FULL_REPAINT_EVERY = 25;
+
+// Ask the terminal itself for its text-area size (XTWINOPS 18). The reply
+// arrives asynchronously on stdin as `\x1b[8;<rows>;<cols>t` and is
+// consumed by the key router (see keys.mjs); terminals that don't answer
+// change nothing. Fire-and-forget by design — never blocks startup.
+export function requestTerminalSize() {
+  try {
+    if (process.stdout && process.stdout.isTTY) process.stdout.write('\x1b[18t');
+  } catch {}
+}
+
+// Extract an XTWINOPS size report from an input chunk. Returns
+// { rows, cols, rest } with the report stripped, or null. Pure —
+// side-effect-free, so easily unit-tested. Callers must NOT feed pasted
+// text here (bracketed-paste markers): raw pastes could theoretically
+// contain the byte pattern.
+export function parseSizeReport(chunk) {
+  const m = String(chunk).match(/\x1b\[8;(\d+);(\d+)t/);
+  if (!m) return null;
+  const rows = parseInt(m[1], 10);
+  const cols = parseInt(m[2], 10);
+  if (!(rows > 0 && cols > 0 && rows <= 500 && cols <= 500)) return null;
+  return { rows, cols, rest: String(chunk).replace(m[0], '') };
+}
+
 // ── Named ANSI-8 color maps (fallback) ──────────────────────────────
 const FG = {
   black: `${ESC}[30m`,
@@ -266,6 +295,11 @@ export class Screen {
     this.prevStyle = [];
     this.prevLink = [];
     this._viewport = null;
+    // Frames painted (drives the periodic full repaint below).
+    this._frames = 0;
+    // Live terminal size from an XTWINOPS probe (beats pty dims, loses to
+    // the GITHUB_TUI_COLS/ROWS env override — see updateSize).
+    this._probe = null;
     this._init();
   }
 
@@ -286,8 +320,20 @@ export class Screen {
   }
 
   updateSize() {
-    const w = process.stdout.columns || 80;
-    const h = process.stdout.rows || 24;
+    // Resolution order: explicit env override > live terminal probe >
+    // pty dimensions. The pty can go stale (nested multiplexers, lost
+    // SIGWINCH, web-terminal viewports differing from the pty), which
+    // previously painted chrome below the visible fold with no recovery.
+    let w = process.stdout.columns || 80;
+    let h = process.stdout.rows || 24;
+    if (this._probe && this._probe.w > 0 && this._probe.h > 0) {
+      w = this._probe.w;
+      h = this._probe.h;
+    }
+    const envW = parseInt(process.env.GITHUB_TUI_COLS || '', 10);
+    const envH = parseInt(process.env.GITHUB_TUI_ROWS || '', 10);
+    if (Number.isFinite(envW) && envW > 0 && envW <= 500) w = envW;
+    if (Number.isFinite(envH) && envH > 0 && envH <= 500) h = envH;
     if (w !== this.width || h !== this.height) {
       this.width = w;
       this.height = h;
@@ -295,7 +341,22 @@ export class Screen {
       // Diff-based renderer handles the full redraw — no explicit clear needed.
       // Trigger scroll position recovery (imported lazily to avoid circular deps).
       try { import('./render.mjs').then(m => m.recoverScrollPositions?.()); } catch {}
+      return;
     }
+    // A resize event with identical cell counts still reflows most terminals
+    // (font-size changes are the classic case): force a full repaint so rows
+    // the terminal cleared get re-asserted instead of diff-skipped forever.
+    this.invalidate();
+  }
+
+  // Adopt a live terminal size report (XTWINOPS 18 reply). Returns true
+  // when the dimensions visibly changed (caller should re-render).
+  applyProbedSize(cols, rows) {
+    if (!(cols > 0 && rows > 0 && cols <= 500 && rows <= 500)) return false;
+    this._probe = { w: cols, h: rows };
+    const before = this.width + 'x' + this.height;
+    this.updateSize();
+    return (this.width + 'x' + this.height) !== before;
   }
 
   // Temporarily clip and vertically offset drawing for scrollable tab bodies.
@@ -603,6 +664,15 @@ export class Screen {
     let curCompiled = null;
     let curLink = null;
     const LINK_CLOSE = `${ESC}]8;;${ESC}\\`;
+
+    // Periodic full repaint: the diff loop below skips model-unchanged
+    // cells, so any terminal-side divergence it cannot see (font-change
+    // reflow, scrollback clear, tmux reattach, dropped bytes) would persist
+    // forever on static rows like the footer. Re-asserting every Nth frame
+    // bounds that window to seconds. One batched write — no flicker, and
+    // the steady-state frames between stay cheap diffs.
+    this._frames++;
+    if (this._frames % SCREEN_FULL_REPAINT_EVERY === 0) this.invalidate();
 
     for (let y = 0; y < this.height; y++) {
       for (let x = 0; x < this.width; x++) {

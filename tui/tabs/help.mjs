@@ -177,6 +177,7 @@ const CATEGORIES = [
   { id: 'settings',   name: 'SETTINGS',          shortcuts: [
     { key: '↑↓',        desc: 'Navigate menu items' },
     { key: 'Enter',     desc: 'Select / activate the highlighted item' },
+    { key: 'z / Z',     desc: 'Collapse section / expand all sections (click headers too)' },
     { key: 's / S',     desc: 'Star the github-tui repo (show support!)' },
     { key: 'o',         desc: 'Open github-tui repo in browser' },
     { key: 'r',         desc: 'Refresh dashboard + user data' },

@@ -41,6 +41,7 @@ import { starRepo, unstarRepo, isStarred, getSubscription, setSubscription, dele
 import { getScreen } from './render.mjs';
 import { parseMouseEvent, handleMouseEvent } from './mouse.mjs';
 import { getUndoInfo } from './undo.mjs';
+import { parseSizeReport } from './screen.mjs';
 import { upsertEntity as _upsertEntity, getStarredList as _getStarredList } from './state.mjs';
 const upsertEntity = _upsertEntity;
 const getStarredList = _getStarredList;
@@ -325,6 +326,9 @@ function quit() {
 let _lastKeyTime = 0;
 let _lastKeyStr = '';
 const KEY_REPEAT_DEBOUNCE_MS = 16; // ~60fps
+// Held fragment of a split XTWINOPS size reply (see below) — prepended to
+// the next input event, one-shot.
+let _sizeFrag = '';
 
 export function handleKey(key) {
   // Debounce repeated single-char keys (held arrow keys). Multi-char
@@ -333,6 +337,27 @@ export function handleKey(key) {
   if (key.length === 1 && key === _lastKeyStr && now - _lastKeyTime < KEY_REPEAT_DEBOUNCE_MS) return;
   _lastKeyTime = now;
   _lastKeyStr = key;
+  // 0-. XTWINOPS size-probe replies (see requestTerminalSize in screen.mjs):
+  // adopt the terminal's real dimensions, then keep processing any
+  // keystrokes glued to the same chunk. Pasted text is exempt — a raw paste
+  // could theoretically contain the byte pattern.
+  if (_sizeFrag) { key = _sizeFrag + key; _sizeFrag = ''; }
+  if (!key.includes('[200~')) {
+    const sizeReport = parseSizeReport(key);
+    if (sizeReport) {
+      try {
+        const screen = getScreen();
+        if (screen) screen.applyProbedSize(sizeReport.cols, sizeReport.rows);
+        render();
+      } catch {}
+      key = sizeReport.rest;
+      if (!key) return;
+    } else if (/\x1b\[8;?\d*(;\d*)?$/.test(key)) {
+      // Split reply — hold this fragment for the next input event.
+      _sizeFrag = key;
+      return;
+    }
+  }
   // 0. Ctrl+C quits by default — except when a text selection is active
   //    (README / file viewer), in which case Ctrl+C copies the selection.
   if (key === '\x03') {
@@ -1082,6 +1107,7 @@ function getCurrentSection() {
   if (t === 3) return actions.getCurrentSection ? actions.getCurrentSection() : null;
   if (t === 4) return inbox.getCurrentSection ? inbox.getCurrentSection() : null;
   if (t === 5) return local.getCurrentSection ? local.getCurrentSection() : null;
+  if (t === 6) return settings.getCurrentSection ? settings.getCurrentSection() : null;
   return null;
 }
 
@@ -1093,6 +1119,7 @@ function getTabSections() {
   if (t === 3) return actions.getSections ? actions.getSections() : [];
   if (t === 4) return inbox.getSections ? inbox.getSections() : [];
   if (t === 5) return local.getSections ? local.getSections() : [];
+  if (t === 6) return settings.getSections ? settings.getSections() : [];
   return [];
 }
 

@@ -11,6 +11,7 @@ import {
   loadCollapsed, loadSession, registerShutdownCallback, runShutdownCallbacks,
 } from './tui/state.mjs';
 import { enableMouse, disableMouse } from './tui/mouse.mjs';
+import { requestTerminalSize } from './tui/screen.mjs';
 import { enableBracketedPaste, disableBracketedPaste } from './tui/input.mjs';
 import { loadToken } from './tui/config.mjs';
 import { loadTheme, setAccessible } from './tui/theme.mjs';
@@ -204,6 +205,11 @@ async function main() {
     console.log('      --accessible Enable screen-reader friendly mode (text-only glyphs, no color)');
     console.log('      --accessible=linear  Use a linear screen-reader layout');
     console.log('      --no-mouse  Disable terminal mouse capture for screen readers and copy-mode');
+    console.log('');
+    console.log('Environment:');
+    console.log('  GITHUB_TUI_ROWS / GITHUB_TUI_COLS');
+    console.log('      Override the detected terminal size (when the pty reports a wrong size,');
+    console.log('      e.g. footer cut off: set ROWS to the rows you actually see).');
     process.exit(0);
   }
 
@@ -279,6 +285,9 @@ process.stdin.on('end', () => {
       resizeTimer = null;
       try {
         screen.updateSize();
+        // The pty size can be stale (nested multiplexers, lost SIGWINCH);
+        // ask the terminal itself too — its reply corrects us via handleKey.
+        requestTerminalSize();
         render();
       } catch (e) {
         debug('resize handler threw:', e && e.message);
@@ -379,6 +388,10 @@ if (process.platform === 'win32') {
     onboarding.startWelcome();
   }
   render();
+  // One-shot live size probe: if the pty dimensions are stale the terminal's
+  // own answer corrects the grid (and the footer) within milliseconds.
+  // Terminals that don't answer XTWINOPS change nothing.
+  requestTerminalSize();
 }
 
 // on startup crash, also disable mouse + paste mode and clear
