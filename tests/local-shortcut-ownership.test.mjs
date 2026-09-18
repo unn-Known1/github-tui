@@ -1,5 +1,5 @@
 // Tests for Local-tab shortcut ownership (§6.8) + which-key stub prune.
-// Rule under test: with Tab 7 focused, every owned footer key must reach
+// Rule under test: with the Local tab (key 6) focused, every owned footer key must reach
 // local.keys — never a Which-Key popup, never a global (bookmarks,
 // expand-all, copy-URL...). local.keys entries are monkey-patched with
 // flags so the test is hermetic (no git, no clipboard, no timers).
@@ -20,7 +20,7 @@ let fired;
 
 beforeEach(() => {
   savedTab = tabState.current;
-  tabState.current = 6;
+  tabState.current = 5;
   // Clean overlay/modal state so handleKey reaches tab dispatch.
   appState.showPalette = false;
   appState.showHelp = false;
@@ -48,14 +48,14 @@ afterEach(() => {
 
 describe('Local tab owns its shortcuts (§6.8)', () => {
   for (const k of OWNED) {
-    it(`'${k}' reaches local.keys on Tab 7 (no popup, no hijack)`, async () => {
+    it(`'${k}' reaches local.keys on the Local tab (no popup, no hijack)`, async () => {
       handleKey(k);
       // handleKey dispatches per-tab handlers through Promise.resolve() —
       // flush before asserting.
       await new Promise(r => setImmediate(r));
       assert.equal(fired[k], true, `local.keys['${k}'] did not fire`);
       assert.equal(whichKey.isOpen(), false, 'Which-Key trapped the key');
-      assert.equal(tabState.current, 6, 'tab switched unexpectedly');
+      assert.equal(tabState.current, 5, 'tab switched unexpectedly');
       assert.equal(appState.showBookmarks, false, 'bookmarks browser opened');
     });
   }

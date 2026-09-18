@@ -80,7 +80,7 @@ beforeEach(() => {
   appState.confirmAction = null;
   appState.inputMode = null;
   appState._sectionHeaders = {};
-  tabState.current = 6;
+  tabState.current = 5;
   seedFixture();
   renderLocal(stubScreen(), 6, 30);
 });
@@ -170,7 +170,7 @@ describe('local mouse — double-click, hover, wheel', () => {
     hover(60, row.y);
     assert.equal(appState.localHistorySelected, row.index);
     assert.equal(appState.localFocus, 'history');
-    assert.equal(tabState.current, 6);
+    assert.equal(tabState.current, 5);
   });
 
   it('wheel scrolls the pane under the cursor', () => {

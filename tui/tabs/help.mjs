@@ -8,7 +8,7 @@ import { truncate, truncateToWidth } from '../utils.mjs';
 // All shortcuts organized by category for the searchable help overlay.
 const CATEGORIES = [
   { id: 'global',     name: 'GLOBAL',            shortcuts: [
-    { key: '1-6',       desc: 'Switch tabs (Dashboard/Repos/Explore/Actions/Inbox/Settings)' },
+    { key: '1-6, 0',    desc: 'Switch tabs (Dash/Repos/Explore/Actions/Inbox/Local, 0 = Settings)' },
     { key: 'Tab',       desc: 'Next tab (or focus stat cards on Dashboard)' },
     { key: 'Shift+Tab', desc: 'Previous tab' },
     { key: 'Ctrl-P / :', desc: 'Open command palette' },
@@ -153,7 +153,7 @@ const CATEGORIES = [
     { key: 'y',         desc: 'Copy URL' },
   ]},
   { id: 'local',      name: 'LOCAL',             shortcuts: [
-    { key: '7',         desc: 'Go to Local tab (git status / history / diff)' },
+    { key: '6',         desc: 'Go to Local tab (git status / history / diff)' },
     { key: 'Enter',     desc: 'Diff selected file / commit (Enter again closes)' },
     { key: '↑↓ / j k',  desc: 'Navigate changes / history (scrolls diff when open)' },
     { key: '[ / ]',     desc: 'Switch focus between changes and history' },
@@ -287,7 +287,7 @@ export function getHelpLines(q) {
   const lines = [];
   const query = (q || '').trim();
 
-  const TAB_CATS = ['dashboard', 'repos', 'analyze', 'actions', 'inbox', 'settings', 'local'];
+  const TAB_CATS = ['dashboard', 'repos', 'analyze', 'actions', 'inbox', 'local', 'settings'];
   const currentCat = TAB_CATS[tabState.current] || 'global';
 
   if (!query) {

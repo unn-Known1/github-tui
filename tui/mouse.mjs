@@ -360,7 +360,7 @@ export function handleMouseEvent(event) {
     // Local tab hover — highlight the hovered row + focus its pane.
     // Skipped while a modal owns the screen (confirm/input/palette) so
     // hover can't fight the overlay. Mirrors the Inbox hover pattern.
-    if (t === 6) {
+    if (t === 5) {
       if (!appState.confirmAction && appState.inputMode !== 'input' && !appState.showPalette) {
         localHover(sx, sy);
       }
@@ -684,7 +684,7 @@ function handleClick(col, row) {
   // equality): trackpad/scaled-mouse double-clicks routinely land 1–2
   // cells off, and 2-row comfortable-density items are clicked on either
   // line — exact matching made those silently degrade to a re-select.
-  if ((tabState.current === 0 || tabState.current === 1 || tabState.current === 6) && appState._lastClickTime) {
+  if ((tabState.current === 0 || tabState.current === 1 || tabState.current === 5) && appState._lastClickTime) {
     const now = Date.now();
     if (now - appState._lastClickTime < 400 &&
         Math.abs(appState._lastClickX - sx) <= 2 &&
@@ -708,7 +708,7 @@ function handleClick(col, row) {
 function handleDblClick(sx, sy) {
   // Local tab — double-click a row opens it, exactly like Enter
   // (status/history → diff preview, branch → checkout).
-  if (tabState.current === 6) {
+  if (tabState.current === 5) {
     return localDblClickOpen(sx, sy);
   }
   // Repos tab — double-click a repo row opens it, exactly like Enter.
@@ -946,7 +946,7 @@ function loadPane(paneId) {
 
 function handleCollapsibleClick(sx, sy) {
   const t = tabState.current;
-  const prefix = ['dashboard', 'repos', 'analyze', 'actions', 'inbox', 'settings', 'local'][t];
+  const prefix = ['dashboard', 'repos', 'analyze', 'actions', 'inbox', 'local', 'settings'][t];
   // Unknown tab index → no prefix match. (Falling back to '' would make
   // startsWith('') match EVERY section in the headers map, so a stale map
   // from a previous tab could collapse unrelated sections on this one.)
@@ -977,8 +977,8 @@ function handleContentClick(sx, sy) {
       dispatchActionsClick(sx, sy);
       break;
     case 4: dispatchInboxClick(sy); break;
-    case 5: dispatchSettingsClick(sx, sy); break;
-    case 6: dispatchLocalClick(sx, sy); break;
+    case 5: dispatchLocalClick(sx, sy); break;
+    case 6: dispatchSettingsClick(sx, sy); break;
     default: render();
   }
 }
@@ -1544,7 +1544,7 @@ function scrollUp(sx, sy) {
   // Local tab wheel uses bounds geometry, not screen dims — dispatch before
   // the screen guard so it stays testable headless (and never no-ops when
   // the screen object is momentarily unavailable).
-  if (t === 6) { localWheel(-1, sx, sy); return; }
+  if (t === 5) { localWheel(-1, sx, sy); return; }
   if (t === 0) {
     if (inTrendingSection(sx, sy)) {
       import('./tabs/dashboard.mjs').then(m => m.trendingUp()).catch(() => {});
@@ -1574,7 +1574,7 @@ function scrollUp(sx, sy) {
 function scrollDown(sx, sy) {
   const t = tabState.current;
   // See scrollUp: Local wheel needs no screen dims.
-  if (t === 6) { localWheel(1, sx, sy); return; }
+  if (t === 5) { localWheel(1, sx, sy); return; }
   const screen = getScreen();
   if (!screen) return;
 

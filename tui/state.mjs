@@ -333,12 +333,13 @@ export const TABS = [
   { key: '5', label: 'Inbox',
     refresh: () => import('./tabs/inbox.mjs').then(m => m.loadNotifications())
       .catch(err => { showMessage('Inbox refresh failed: ' + ((err && err.message) || err), 'error'); }) },
-  { key: '6', label: 'Settings',
-    // Settings has nothing to auto-refresh.
-    refresh: null },
-  { key: '7', label: 'Local',
+  { key: '6', label: 'Local',
     refresh: () => import('./tabs/local.mjs').then(m => m.refreshLocal())
       .catch(err => { showMessage('Local refresh failed: ' + ((err && err.message) || err), 'error'); }) },
+  { key: '0', label: 'Settings',
+    // Settings has nothing to auto-refresh. Keyed `0` so it sits last on
+    // the right of the tab strip (vim-style `:0`-is-last convention).
+    refresh: null },
 ];
 export const tabState = { current: 0 };
 

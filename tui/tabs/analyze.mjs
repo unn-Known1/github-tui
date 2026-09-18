@@ -331,7 +331,7 @@ export async function loadRepoDetails(owner, name) {
         resetAccountState();
         resetRateLimit();
         removeToken();
-        setTab(5);
+        setTab(6); // Settings sits last (key 0)
         showMessage('Token expired or invalid — please log in again in Settings', 'error', 8000);
       } else {
         showMessage(msg || 'Failed to load repository', 'error');

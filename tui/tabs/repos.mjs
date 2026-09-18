@@ -128,7 +128,7 @@ export async function loadUserData({ loadDashboard = true, awaitBackground = fal
         resetAccountState();
         resetRateLimit();
         removeToken();
-        setTab(5);
+        setTab(6); // Settings sits last (key 0)
         showError('Token expired or invalid — please log in again', 'Authentication', { retry: loadUserData });
       } else {
         showError(msg || 'Unknown error', 'Load repos', { retry: loadUserData });
@@ -238,7 +238,7 @@ function _recover401(e, retryFn) {
     resetAccountState();
     resetRateLimit();
     removeToken();
-    setTab(5);
+    setTab(6); // Settings sits last (key 0)
     showError('Token expired or invalid — please log in again', 'Authentication', { retry: retryFn });
     return true;
   }

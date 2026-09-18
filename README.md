@@ -79,7 +79,7 @@ npm update -g github-tui
 npm test
 ```
 
-First launch lands you on the Dashboard. Press `6` for Settings, then `Enter` on **Login**, and paste your GitHub Personal Access Token (the input is masked).
+First launch lands you on the Dashboard. Press `0` for Settings, then `Enter` on **Login**, and paste your GitHub Personal Access Token (the input is masked).
 
 ## 🔑 Creating a GitHub Personal Access Token
 
@@ -96,7 +96,7 @@ Your current token scopes are shown in the Settings → System panel so you can 
 
 | Key | Action |
 |---|---|
-| `1`–`7` / `Tab` / `Shift+Tab` | Switch tabs (Dashboard / Repos / Analyze / Actions / Inbox / Settings / Local) |
+| `1`–`6` / `0` / `Tab` / `Shift+Tab` | Switch tabs (Dashboard / Repos / Analyze / Actions / Inbox / Local, `0` = Settings on the right) |
 | `Ctrl-P` or `:` | Open the command palette (fuzzy search every action) |
 | `↑` `↓` or `j` `k` | Navigate lists |
 | `Enter` | Select / drill in |
@@ -237,7 +237,7 @@ Your current token scopes are shown in the Settings → System panel so you can 
 | `o` | Open github-tui repo in browser |
 | `r` | Refresh dashboard + user data |
 
-### Local tab (`7` — local git workspace, works offline without login)
+### Local tab (`6` — local git workspace, works offline without login)
 
 | Key | Action |
 |---|---|

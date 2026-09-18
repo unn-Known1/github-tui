@@ -285,7 +285,7 @@ export function ensureLocalPoll() {
       if (!appState.localAutoPoll || !appState.localIsRepo || appState.loading) return;
       if (appState.inputMode || appState.confirmAction) return;
       _pollTick++;
-      if (tabState.current !== 6 && (_pollTick % 4) !== 0) return;
+      if (tabState.current !== 5 && (_pollTick % 4) !== 0) return;
       await loadLocalStatus({ quiet: true });
     } catch { /* poller never throws into the interval */ }
   }, 1500);
@@ -1271,7 +1271,7 @@ export function renderLocal(screen, y, h) {
       title: 'Not a git repository',
       message: 'Run inside a git checkout to see status, history, and diffs.',
       hint: '',
-      keyHint: 'Press [1-7] to switch tabs   [?] Help',
+      keyHint: 'Press [0-6] to switch tabs   [?] Help',
     });
     return;
   }

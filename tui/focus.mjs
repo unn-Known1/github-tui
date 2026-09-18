@@ -113,7 +113,11 @@ const FOCUS_ZONES = {
   4: [ // Inbox
     { id: 'list', label: 'Notifications', canFocus: () => appState.notifications?.length > 0 },
   ],
-  5: [ // Settings
+  5: [ // Local
+    { id: 'changes', label: 'Local Changes', canFocus: () => (appState.localStaged?.length || 0) + (appState.localUnstaged?.length || 0) + (appState.localUntracked?.length || 0) + (appState.localConflicted?.length || 0) > 0 },
+    { id: 'history', label: 'Local History', canFocus: () => (appState.localHistory?.length || 0) > 0 },
+  ],
+  6: [ // Settings
     { id: 'menu', label: 'Settings Menu', canFocus: () => true },
   ],
 };

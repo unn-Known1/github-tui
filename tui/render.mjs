@@ -206,8 +206,8 @@ export const TAB_CONTENT_Y = {
   2: HEADER_HEIGHT + 2,  // Analyze
   3: HEADER_HEIGHT + 2,  // Actions
   4: HEADER_HEIGHT + 2,  // Inbox
-  5: HEADER_HEIGHT + 2,  // Settings
-  6: HEADER_HEIGHT + 2,  // Local
+  5: HEADER_HEIGHT + 2,  // Local
+  6: HEADER_HEIGHT + 2,  // Settings
 };
 
 // Responsive layout helpers (re-exported from layout.mjs).
@@ -252,11 +252,11 @@ export function buildBreadcrumb() {
       segments.push('Inbox');
       if (appState.inboxFilter !== 'all') segments.push(appState.inboxFilter);
       break;
-    case 5: segments.push('Settings'); break;
-    case 6:
+    case 5:
       segments.push('Local');
       if (appState.localBranch) segments.push(appState.localBranch);
       break;
+    case 6: segments.push('Settings'); break;
   }
   return segments;
 }
@@ -707,16 +707,16 @@ function statusLine() {
       return ' [↑↓jk] Nav' + sep + '[Enter] View runs' + sep + '[/] Filter' + sep + '[F] Failures' + sep + '[R] Rescan' + sep + '[?] Help';
     }
     case 4: return ' [↑↓jk] Nav' + sep + '[Enter] Open' + sep + '[m] Read' + sep + '[M] All' + sep + '[f] Filter' + sep + '[H] Hide processed' + sep + '[u] Unsubscribe';
-    case 5: return ' [↑↓] Nav' + sep + '[Enter] Select' + sep + '[s] Star repo' + sep + '[c] Clear account cache' + sep + '[?] Help';
-    case 6: return ' [Enter] Diff' + sep + '[a] Stage' + sep + '[X] Discard' + sep + '[c] Commit' + sep + '[f] Fetch' + sep + '[p] Pull' + sep + '[P] Push' + sep + '[B] Branch' + sep + '[/] Focus';
+    case 5: return ' [Enter] Diff' + sep + '[a] Stage' + sep + '[X] Discard' + sep + '[c] Commit' + sep + '[f] Fetch' + sep + '[p] Pull' + sep + '[P] Push' + sep + '[B] Branch' + sep + '[/] Focus';
+    case 6: return ' [↑↓] Nav' + sep + '[Enter] Select' + sep + '[s] Star repo' + sep + '[c] Clear account cache' + sep + '[?] Help';
   }
   return '';
 }
 
 function renderCompact(W, H) {
-  const labels = ['Dash', 'Repos', 'Explore', 'Actions', 'Inbox', 'Settings', 'Local'];
+  const labels = ['Dash', 'Repos', 'Explore', 'Actions', 'Inbox', 'Local', 'Settings'];
   screen.writeStr(1, 0, 'GitHub TUI', { fg: 'cyan', bold: true });
-  const tabs = labels.map((label, i) => (i === tabState.current ? '[' + (i + 1) + ']' : String(i + 1)) + label[0]).join(' ');
+  const tabs = labels.map((label, i) => (i === tabState.current ? '[' + TABS[i].key + ']' : TABS[i].key) + label[0]).join(' ');
   screen.writeStr(1, 1, truncate(tabs, W - 2), { fg: 'white', bold: true });
   screen.hline(2, '─', { dim: true });
   const title = labels[tabState.current] || 'View';
@@ -724,12 +724,12 @@ function renderCompact(W, H) {
   const context = appState.repoDetails?.full_name || appState.user?.login ||
     (appState.message && appState.message.text) || 'Use number keys to switch tabs';
   screen.writeStr(1, 6, truncate(context, W - 2), { dim: true });
-  screen.writeStr(1, H - 2, '[1-6] tabs  [q] quit  [?] help', { dim: true });
+  screen.writeStr(1, H - 2, '[0-6] tabs  [q] quit  [?] help', { dim: true });
   screen.hline(H - 1, '─', { dim: true });
 }
 
 function renderLinear(W, H) {
-  const labels = ['Dashboard', 'Repositories', 'Explore', 'Actions', 'Inbox', 'Settings', 'Local'];
+  const labels = ['Dashboard', 'Repositories', 'Explore', 'Actions', 'Inbox', 'Local', 'Settings'];
   const title = labels[tabState.current] || 'View';
   screen.writeStr(0, 0, 'GitHub TUI — ' + title, { bold: true });
   screen.writeStr(0, 1, 'Breadcrumb: ' + buildBreadcrumb().join(' > '), { dim: true });
@@ -750,7 +750,7 @@ function renderLinear(W, H) {
     for (const run of (appState.actionsRuns || []).slice(0, Math.max(1, H - 7))) lines.push((run.name || '?') + ' #' + (run.run_number || run.id || '?') + ' ' + (run.conclusion || run.status || ''));
   } else if (tabState.current === 4) {
     for (const note of (appState.notifications || []).slice(0, Math.max(1, H - 7))) lines.push((note.unread ? '[unread] ' : '') + (note.repository?.full_name || '?') + ' — ' + (note.subject?.title || ''));
-  } else if (tabState.current === 6) {
+  } else if (tabState.current === 5) {
     if (!appState.localIsRepo) lines.push('Not a git repository. Run inside a git checkout.');
     else {
       lines.push('Branch: ' + (appState.localBranch || '?') + (appState.localUpstream ? ' → ' + appState.localUpstream : ' (no upstream)'));
@@ -760,7 +760,7 @@ function renderLinear(W, H) {
     }
   } else lines.push('Settings menu. Use arrow keys and Enter.');
   for (let i = 0; i < Math.min(lines.length, H - 5); i++) screen.writeStr(0, 4 + i, truncateToWidth(lines[i], W, ''), null);
-  screen.writeStr(0, H - 2, '[↑↓] navigate  [Enter] select  [1-6] tabs  [q] quit  [?] help', { dim: true });
+  screen.writeStr(0, H - 2, '[↑↓] navigate  [Enter] select  [0-6] tabs  [q] quit  [?] help', { dim: true });
   screen.hline(H - 1, '─', { dim: true });
 }
 
@@ -832,8 +832,8 @@ function doRender() {
     case 2: renderAnalyze(screen, contentY, contentH); break;
     case 3: renderActions(screen, contentY, contentH); break;
     case 4: renderInbox(screen, contentY, contentH); break;
-    case 5: renderSettings(screen, contentY, contentH); break;
-    case 6: renderLocal(screen, contentY, contentH); break;
+    case 5: renderLocal(screen, contentY, contentH); break;
+    case 6: renderSettings(screen, contentY, contentH); break;
   }
 
   // ── Footer ──
