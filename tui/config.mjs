@@ -99,7 +99,7 @@ export function saveToken(token) {
     setTokenStorageBackend(detectBackend() || 'plaintext');
     // Remove legacy plaintext file if it exists (clean migration)
     try { if (existsSync(TOKEN_FILE)) unlinkSync(TOKEN_FILE); } catch {}
-    return tokenStorageBackend;
+    return _tokenStorageBackend;
   }
 
   // 2. Fall back to plaintext with strict permissions
@@ -125,7 +125,7 @@ export function saveToken(token) {
   } catch {
     // Best-effort; ignore on platforms that don't support POSIX modes.
   }
-  return tokenStorageBackend;
+  return _tokenStorageBackend;
 }
 
 export function removeToken() {
