@@ -21,6 +21,7 @@ import { renderAnalyze } from './tabs/analyze.mjs';
 import { renderSettings } from './tabs/settings.mjs';
 import { renderInbox } from './tabs/inbox.mjs';
 import { renderActions } from './tabs/actions.mjs';
+import { renderLocal } from './tabs/local.mjs';
 import * as help from './tabs/help.mjs';
 import { renderPalette } from './palette.mjs';
 import { renderDetail } from './tabs/detail.mjs';
@@ -128,6 +129,18 @@ export function recoverScrollPositions() {
     appState.settingsCursor = appState._maxSettingsCursor;
   }
 
+  // Local tab — clamp cursors into the refreshed lists.
+  if ((appState.localStatusSelected || 0) >= Math.max(1, (appState.localStaged || []).length +
+      (appState.localUnstaged || []).length + (appState.localUntracked || []).length +
+      (appState.localConflicted || []).length)) {
+    appState.localStatusSelected = 0;
+    appState.localStatusScroll = 0;
+  }
+  if ((appState.localHistorySelected || 0) >= Math.max(1, (appState.localHistory || []).length)) {
+    appState.localHistorySelected = 0;
+    appState.localHistoryScroll = 0;
+  }
+
   render();
 }
 
@@ -194,6 +207,7 @@ export const TAB_CONTENT_Y = {
   3: HEADER_HEIGHT + 2,  // Actions
   4: HEADER_HEIGHT + 2,  // Inbox
   5: HEADER_HEIGHT + 2,  // Settings
+  6: HEADER_HEIGHT + 2,  // Local
 };
 
 // Responsive layout helpers (re-exported from layout.mjs).
@@ -239,6 +253,10 @@ export function buildBreadcrumb() {
       if (appState.inboxFilter !== 'all') segments.push(appState.inboxFilter);
       break;
     case 5: segments.push('Settings'); break;
+    case 6:
+      segments.push('Local');
+      if (appState.localBranch) segments.push(appState.localBranch);
+      break;
   }
   return segments;
 }
@@ -690,12 +708,13 @@ function statusLine() {
     }
     case 4: return ' [↑↓jk] Nav' + sep + '[Enter] Open' + sep + '[m] Read' + sep + '[M] All' + sep + '[f] Filter' + sep + '[H] Hide processed' + sep + '[u] Unsubscribe';
     case 5: return ' [↑↓] Nav' + sep + '[Enter] Select' + sep + '[s] Star repo' + sep + '[c] Clear account cache' + sep + '[?] Help';
+    case 6: return ' [Enter] Diff' + sep + '[a] Stage' + sep + '[X] Discard' + sep + '[c] Commit' + sep + '[f] Fetch' + sep + '[p] Pull' + sep + '[P] Push' + sep + '[B] Branch' + sep + '[/] Focus';
   }
   return '';
 }
 
 function renderCompact(W, H) {
-  const labels = ['Dash', 'Repos', 'Explore', 'Actions', 'Inbox', 'Settings'];
+  const labels = ['Dash', 'Repos', 'Explore', 'Actions', 'Inbox', 'Settings', 'Local'];
   screen.writeStr(1, 0, 'GitHub TUI', { fg: 'cyan', bold: true });
   const tabs = labels.map((label, i) => (i === tabState.current ? '[' + (i + 1) + ']' : String(i + 1)) + label[0]).join(' ');
   screen.writeStr(1, 1, truncate(tabs, W - 2), { fg: 'white', bold: true });
@@ -710,7 +729,7 @@ function renderCompact(W, H) {
 }
 
 function renderLinear(W, H) {
-  const labels = ['Dashboard', 'Repositories', 'Explore', 'Actions', 'Inbox', 'Settings'];
+  const labels = ['Dashboard', 'Repositories', 'Explore', 'Actions', 'Inbox', 'Settings', 'Local'];
   const title = labels[tabState.current] || 'View';
   screen.writeStr(0, 0, 'GitHub TUI — ' + title, { bold: true });
   screen.writeStr(0, 1, 'Breadcrumb: ' + buildBreadcrumb().join(' > '), { dim: true });
@@ -731,6 +750,14 @@ function renderLinear(W, H) {
     for (const run of (appState.actionsRuns || []).slice(0, Math.max(1, H - 7))) lines.push((run.name || '?') + ' #' + (run.run_number || run.id || '?') + ' ' + (run.conclusion || run.status || ''));
   } else if (tabState.current === 4) {
     for (const note of (appState.notifications || []).slice(0, Math.max(1, H - 7))) lines.push((note.unread ? '[unread] ' : '') + (note.repository?.full_name || '?') + ' — ' + (note.subject?.title || ''));
+  } else if (tabState.current === 6) {
+    if (!appState.localIsRepo) lines.push('Not a git repository. Run inside a git checkout.');
+    else {
+      lines.push('Branch: ' + (appState.localBranch || '?') + (appState.localUpstream ? ' → ' + appState.localUpstream : ' (no upstream)'));
+      lines.push('Staged: ' + (appState.localStaged || []).length + '  Unstaged: ' + (appState.localUnstaged || []).length +
+        '  Untracked: ' + (appState.localUntracked || []).length + '  Conflicted: ' + (appState.localConflicted || []).length);
+      for (const c of (appState.localHistory || []).slice(0, Math.max(0, H - 9))) lines.push((c.sha || '').slice(0, 8) + ' ' + (c.subject || ''));
+    }
   } else lines.push('Settings menu. Use arrow keys and Enter.');
   for (let i = 0; i < Math.min(lines.length, H - 5); i++) screen.writeStr(0, 4 + i, truncateToWidth(lines[i], W, ''), null);
   screen.writeStr(0, H - 2, '[↑↓] navigate  [Enter] select  [1-6] tabs  [q] quit  [?] help', { dim: true });
@@ -806,6 +833,7 @@ function doRender() {
     case 3: renderActions(screen, contentY, contentH); break;
     case 4: renderInbox(screen, contentY, contentH); break;
     case 5: renderSettings(screen, contentY, contentH); break;
+    case 6: renderLocal(screen, contentY, contentH); break;
   }
 
   // ── Footer ──
@@ -849,10 +877,15 @@ function doRender() {
   screen.render();
 }
 
-function renderConfirmDialog(screen) {
+// Structured confirm dialog (v0.8): multi-paragraph body (`\n` preserved,
+// each paragraph word-wrapped), dynamic height, danger styling, and
+// clickable [Yes]/[Cancel] buttons with published hit bounds
+// (appState._confirmBounds). Exported for tests.
+export function renderConfirmDialog(screen) {
   const W = screen.width, H = screen.height;
   const msg = appState.confirmMessage || 'Are you sure?';
   const title = appState.confirmTitle || 'Confirm';
+  const danger = appState._confirmDanger === true;
 
   // Dim backdrop.
   const backdropStyle = color('modalBackdrop');
@@ -862,8 +895,34 @@ function renderConfirmDialog(screen) {
     }
   }
 
-  const boxW = Math.min(60, W - 4);
-  const boxH = 8;
+  const boxW = Math.min(70, W - 4);
+  const innerW = Math.max(10, boxW - 6);
+  // Preserve paragraphs: split on \n first, wrap each, keep blank lines
+  // (collapsed to one) so action/target/scope/command/consequence read as
+  // sections instead of one run-on stream.
+  const lines = [];
+  for (const para of String(msg).split('\n')) {
+    if (!para.trim()) {
+      if (lines.length > 0 && lines[lines.length - 1] !== '') lines.push('');
+      continue;
+    }
+    let line = '';
+    for (const w of para.split(/\s+/)) {
+      if ((line + ' ' + w).trim().length > innerW) {
+        if (line) lines.push(line);
+        // An unbreakable token wider than the box still gets its own row.
+        line = w.length > innerW ? w.slice(0, innerW) : w;
+      } else {
+        line = line ? line + ' ' + w : w;
+      }
+    }
+    if (line) lines.push(line);
+  }
+  const maxLines = Math.max(1, H - 10);
+  const truncated = lines.length > maxLines;
+  const shown = lines.slice(0, maxLines);
+  if (truncated) shown.push('…');
+  const boxH = Math.min(H - 2, Math.max(8, shown.length + 6));
   const x = Math.floor((W - boxW) / 2);
   const y = Math.floor((H - boxH) / 2);
 
@@ -871,33 +930,38 @@ function renderConfirmDialog(screen) {
   for (let yy = y; yy < y + boxH; yy++) {
     for (let xx = x; xx < x + boxW; xx++) screen.setCell(xx, yy, ' ', null);
   }
-  screen.box(x, y, boxW, boxH, title, color('modalBorder'));
+  const borderStyle = danger ? (color('gitConflicted') || { fg: 'red', bold: true }) : color('modalBorder');
+  screen.box(x, y, boxW, boxH, (danger ? '⚠ ' : '') + title, borderStyle);
 
-  // Centered message with word-wrap.
-  const words = msg.split(/\s+/);
-  const innerW = boxW - 6;
-  const lines = [];
-  let line = '';
-  for (const w of words) {
-    if ((line + ' ' + w).trim().length > innerW) {
-      if (line) lines.push(line);
-      line = w;
-    } else {
-      line = line ? line + ' ' + w : w;
-    }
-  }
-  if (line) lines.push(line);
   const msgY = y + 2;
-  for (let i = 0; i < lines.length && i < 3; i++) {
-    const cx = Math.max(x + 2, Math.floor((W - lines[i].length) / 2));
-    screen.writeStr(cx, msgY + i, lines[i]);
+  for (let i = 0; i < shown.length && msgY + i < y + boxH - 2; i++) {
+    const ln = shown[i];
+    const style = ln.startsWith('⚠') ? (color('gitConflicted') || { fg: 'red', bold: true })
+      : ln.startsWith('`') ? (color('accent') || null) : null;
+    screen.writeStr(x + 3, msgY + i, truncateToWidth(ln, innerW, ''), style);
   }
 
-  // Hint: [y] Yes  [n] No — pinned to bottom.
-  const hint = '[y] Yes   [n] Cancel';
+  // Clickable buttons pinned to the bottom row (min 10 cells wide each,
+  // separated — no single-pixel misclicks). Bounds published for mouse.
+  const yesLabel = '[ Yes ]';
+  const noLabel = '[ Cancel ]';
+  const gap = 6;
+  const totalBtnW = yesLabel.length + gap + noLabel.length;
   const hy = y + boxH - 2;
-  const hx = Math.max(x + 2, Math.floor((W - hint.length) / 2));
-  screen.writeStr(hx, hy, hint, color('accent'));
+  const bx = Math.max(x + 2, Math.floor((W - totalBtnW) / 2));
+  const yesStyle = danger ? (color('gitConflicted') || { fg: 'red', bold: true }) : (color('accent') || null);
+  screen.writeStr(bx, hy, yesLabel, yesStyle);
+  screen.writeStr(bx + yesLabel.length + gap, hy, noLabel, { dim: true });
+  appState._confirmBounds = {
+    yes: { x1: bx, x2: bx + yesLabel.length, y: hy },
+    no: { x1: bx + yesLabel.length + gap, x2: bx + yesLabel.length + gap + noLabel.length, y: hy },
+  };
+  // Key hint on the same bottom row when it fits (never overwrites buttons).
+  const hint = danger ? '[y] yes   [n] no   (Enter does nothing)' : '[y]/[Enter] yes   [n] no';
+  const hintX = bx + totalBtnW + 3;
+  if (hintX + hint.length < x + boxW - 1) {
+    screen.writeStr(hintX, hy, hint, { dim: true });
+  }
 }
 
 function renderBookmarksOverlay(screen) {

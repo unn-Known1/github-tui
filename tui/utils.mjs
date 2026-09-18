@@ -637,6 +637,88 @@ export function runCommandCapture(cmd, args, opts = {}) {
   });
 }
 
+// Run git with argv-array form (never a shell string), non-interactive env,
+// a hard timeout, and abort support. Used by the Local tab (v0.8).
+// Resolves { code, stdout, stderr } on exit; rejects on spawn failure,
+// timeout, abort, or output over MAX_GIT_BYTES.
+// Callers pass an AbortSignal from startAsync() handles so stale refreshes
+// actually kill the child instead of letting it commit late results.
+export const MAX_GIT_BYTES = 4 * 1024 * 1024;
+
+export function runGit(args, opts = {}) {
+  const cwd = opts.cwd || process.cwd();
+  const timeoutMs = Number.isFinite(opts.timeoutMs) ? opts.timeoutMs : 30000;
+  const signal = opts.signal || null;
+  const env = { ...process.env, GIT_TERMINAL_PROMPT: '0', ...(opts.env || {}) };
+  return new Promise((resolve, reject) => {
+    let child;
+    try {
+      child = spawn('git', Array.isArray(args) ? args : [], {
+        cwd, env, stdio: ['ignore', 'pipe', 'pipe'],
+      });
+    } catch (e) { reject(e); return; }
+    let stdout = '', stderr = '';
+    let stdoutBytes = 0, stderrBytes = 0;
+    let settled = false;
+    const finish = (fn, val) => { if (settled) return; settled = true; cleanup(); fn(val); };
+    const killAll = (sig) => { try { child.kill(sig); } catch {} };
+    const timer = setTimeout(() => {
+      killAll('SIGKILL');
+      const err = new Error('git ' + (args[0] || '') + ' timed out after ' + timeoutMs + 'ms');
+      err.code = 'ETIMEDOUT';
+      finish(reject, err);
+    }, Math.max(1, timeoutMs));
+    // setTimeout keeps the event loop alive — the TUI owns long-lived
+    // intervals already, but tests and CLI one-shots must exit cleanly.
+    if (timer.unref) timer.unref();
+    let abortHandler = null;
+    const cleanup = () => {
+      clearTimeout(timer);
+      if (signal && abortHandler) {
+        try { signal.removeEventListener('abort', abortHandler); } catch {}
+      }
+    };
+    if (signal) {
+      if (signal.aborted) {
+        killAll('SIGTERM');
+        finish(reject, Object.assign(new Error('Aborted'), { code: 'EABORTED' }));
+        return;
+      }
+      abortHandler = () => {
+        killAll('SIGTERM');
+        // Escalate: a hung credential helper may ignore SIGTERM.
+        setTimeout(() => { if (!settled) killAll('SIGKILL'); }, 2000);
+        finish(reject, Object.assign(new Error('Aborted'), { code: 'EABORTED' }));
+      };
+      signal.addEventListener('abort', abortHandler, { once: true });
+    }
+    const onData = (chunk, which) => {
+      const s = String(chunk);
+      if (which === 'out') {
+        stdoutBytes += s.length;
+        if (stdoutBytes > MAX_GIT_BYTES) {
+          killAll('SIGKILL');
+          finish(reject, Object.assign(new Error('git output exceeded 4MB cap'), { code: 'EOUTPUTCAP' }));
+          return;
+        }
+        stdout += s;
+      } else {
+        stderrBytes += s.length;
+        if (stderrBytes > MAX_GIT_BYTES) {
+          killAll('SIGKILL');
+          finish(reject, Object.assign(new Error('git output exceeded 4MB cap'), { code: 'EOUTPUTCAP' }));
+          return;
+        }
+        stderr += s;
+      }
+    };
+    child.stdout.on('data', (c) => onData(c, 'out'));
+    child.stderr.on('data', (c) => onData(c, 'err'));
+    child.on('error', (e) => finish(reject, e));
+    child.on('close', (code) => finish(resolve, { code: code ?? 0, stdout, stderr }));
+  });
+}
+
 export function ghCloneUrl(owner, repo, webHost = 'github.com') {
   const host = String(webHost).replace(/^https?:\/\//, '').replace(/\/$/, '');
   return 'https://' + host + '/' + owner + '/' + repo + '.git';

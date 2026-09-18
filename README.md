@@ -1,8 +1,8 @@
 # GitHub TUI
 
-A fast, zero-dependency terminal user interface for GitHub — six tabs, a command palette, an in-terminal file explorer that can clone or save anything to your CWD, an inbox triage workflow, themes, persistent bookmarks & pins, OSC-52 clipboard, ETag-aware caching, mouse support, collapsible sections, and comprehensive repo analytics. All driven by your keyboard (and mouse).
+A fast, zero-dependency terminal user interface for GitHub — seven tabs, a command palette, an in-terminal file explorer that can clone or save anything to your CWD, a local git workspace (status/commit/pull/push), an inbox triage workflow, themes, persistent bookmarks & pins, OSC-52 clipboard, ETag-aware caching, mouse support, collapsible sections, and comprehensive repo analytics. All driven by your keyboard (and mouse).
 
-![status](https://img.shields.io/badge/status-active-success) ![node](https://img.shields.io/badge/node-%E2%89%A520-blue) ![deps](https://img.shields.io/badge/deps-0-green) [![Socket Badge](https://badge.socket.dev/npm/package/github-tui/0.7.6)](https://badge.socket.dev/npm/package/github-tui/0.7.6) ![license](https://img.shields.io/badge/license-MIT-blue)
+![status](https://img.shields.io/badge/status-active-success) ![node](https://img.shields.io/badge/node-%E2%89%A520-blue) ![deps](https://img.shields.io/badge/deps-0-green) [![Socket Badge](https://badge.socket.dev/npm/package/github-tui/0.8.0)](https://badge.socket.dev/npm/package/github-tui/0.8.0) ![license](https://img.shields.io/badge/license-MIT-blue)
 
 ![GitHub TUI Screenshot](https://raw.githubusercontent.com/unn-Known1/github-tui/main/Screenshot.png)
 
@@ -19,6 +19,7 @@ A fast, zero-dependency terminal user interface for GitHub — six tabs, a comma
 - 🔍 **Explore any public repo** — search, 2-column detail view (metadata + languages bar + top contributors + latest releases), pane tabs `[O] Overview / [i] Issues / [P] PRs / [R] README / [F] Files / [A] Packages / [T] Traffic / [K] Checks / [S] Security / [D] Compare`, branch/ref comparison, file history, local blame, and parallel ahead/behind compares on forks.
 - 📊 **Repo Analytics** — Traffic (views/clones/popular paths/referrers), Checks/CI (pass/fail/pending summary), Security (Dependabot alerts with severity icons), cross-repository security aggregation, health scoring, and branch comparison.
 - 📥 **Inbox triage** — color-coded notification types, grouping, snoozing, saved filters, mark-as-read (`m`) / mark-all (`M`) / unsubscribe (`u`) / filter cycle (`f`: all/unread/mentions/review), repo-grouped summary.
+- 🗂️ **Local git workspace** — `7` opens a working-tree tab in any checkout (no login needed): live status (staged/unstaged/untracked/conflicted), commit history with diff preview, stage (`a`), discard (`X`, double-confirmed), commit with body (`c`), fetch/pull/push (`f`/`p`/`P`, lease-only force), branch picker (`B`). Full mouse support; destructive actions always confirm with details.
 - 🎨 **Themes** — `light` (default) and `default` (dark) — each with a fully distinct palette using true-color (24-bit) and 256-color rendering. Persisted across sessions.
 - ⚡ **Command Palette** — `Ctrl-P` or `:` opens a fuzzy-search modal listing every action.
 - 📖 **README viewer** — `R` on the details pane renders the repo's README in-terminal with naive Markdown styling.
@@ -95,7 +96,7 @@ Your current token scopes are shown in the Settings → System panel so you can 
 
 | Key | Action |
 |---|---|
-| `1`–`6` / `Tab` / `Shift+Tab` | Switch tabs (Dashboard / Repos / Analyze / Actions / Inbox / Settings) |
+| `1`–`7` / `Tab` / `Shift+Tab` | Switch tabs (Dashboard / Repos / Analyze / Actions / Inbox / Settings / Local) |
 | `Ctrl-P` or `:` | Open the command palette (fuzzy search every action) |
 | `↑` `↓` or `j` `k` | Navigate lists |
 | `Enter` | Select / drill in |
@@ -236,6 +237,28 @@ Your current token scopes are shown in the Settings → System panel so you can 
 | `o` | Open github-tui repo in browser |
 | `r` | Refresh dashboard + user data |
 
+### Local tab (`7` — local git workspace, works offline without login)
+
+| Key | Action |
+|---|---|
+| `Enter` | Diff selected file / commit (`Enter` again closes) |
+| `↑↓` `j`/`k` | Navigate changes / history (scrolls diff when open) |
+| `[` / `]` | Switch focus between changes and history |
+| `a` / `A` | Stage / unstage selected file; stage-all / unstage-all |
+| `X` | Discard changes (double danger-confirm, irreversible) |
+| `c` / `C` | Commit (subject + optional body) / amend last commit |
+| `f` | Fetch `--prune` (read-only, refreshes ahead/behind) |
+| `p` / `P` | Pull `--rebase --autostash` / push (lease-only force) |
+| `B` / `b` | Branch picker (`Enter` checkout, `n` new, `d` delete) |
+| `y` / `o` | Copy SHA / path; open commit on GitHub |
+| `Space` | Load more commits (append) |
+| `r` | Refresh status + history |
+| `g` / `G` | Jump to top / bottom (`g` is two-press: `g g`) |
+| `z` / `Z` | Collapse toggle / collapse all |
+| `Esc` / `h` | Close diff / picker first, then back to Dashboard |
+
+Mouse: click selects rows, double-click opens diff / checks out branch, hover highlights, wheel scrolls the pane under the cursor. Destructive actions always show a detail popup (action/target/command/consequence); irreversible ones need a literal `y` — `Enter` never confirms those.
+
 ## 🗂️ Project Layout
 
 The app is split into focused zero-dependency modules. Adding a new tab is: create one file, register it in `state.mjs`, import it in `render.mjs` and `keys.mjs`. The command palette picks up new actions automatically when you call `palette.register({ id, label, run })`.
@@ -253,6 +276,7 @@ The app is split into focused zero-dependency modules. Adding a new tab is: crea
 └── tui/
     ├── screen.mjs                   # Diff-based terminal renderer + buffer swap + FORCE_COLOR + CJK + OSC 8 hyperlink support
     ├── github.mjs                   # HTTPS client + ETag cache + 60+ endpoints + streaming downloader
+    ├── git-local.mjs                # Pure local-git parsers (porcelain -z, branches, log) + argv builders
     ├── config.mjs                   # Constants + token I/O (delegates to keychain.mjs) + JSON store helpers
     ├── keychain.mjs                 # OS keychain abstraction (macOS / Linux / Windows, zero deps)
     ├── utils.mjs                    # Pure helpers (time, format, OSC-52, openUrl, safeCwdJoin, runCommand)
@@ -289,6 +313,7 @@ The app is split into focused zero-dependency modules. Adding a new tab is: crea
         ├── forks.mjs                # Forks sub-view with concurrent ahead/behind
         ├── settings.mjs             # Settings + System info panel
         ├── inbox.mjs                # Notifications with triage actions
+        ├── local.mjs                # Local git tab: status, history, diff, stage/commit/pull/push/branch
         └── help.mjs                 # Help overlay (?) — context-aware
 ```
 
@@ -354,6 +379,14 @@ Every tab module exports `render(screen, y, h)`, an optional `keys` map for tab-
 - `Space` appends the next page of notifications without replacing the current list.
 - `u` unsubscribes from the thread (calls DELETE on the GitHub subscription endpoint).
 - Triage actions: `m`/`M`/`u`/`f`.
+
+### 7 · Local
+- Local git workspace (`7`) — works inside any checkout, offline, no login required. Branch + upstream + ahead/behind header, auto-refresh poll, freshness badge.
+- **Changes:** staged / unstaged / untracked / conflicted sections with counts, merge-rebase-cherry-pick banners, per-file diff preview (untracked read from disk, binary/size guarded).
+- **History:** paginated local `git log` with author + relative age, commit diff preview, `Space` appends more.
+- **Write actions:** stage/unstage per file (`a`), stage-all (`A`), discard with double danger-confirm (`X`), commit with subject + optional body (`c`), amend (`C`), fetch (`f`), pull `--rebase --autostash` (`p`), push with `-u` + lease-only force (`P`), branch picker with checkout/create/delete (`B`).
+- **Safety:** every destructive action shows a detail popup (action, target, scope, exact command, consequence); irreversible ones need a literal `y` — `Enter` never confirms those. Non-interactive git (`GIT_TERMINAL_PROMPT=0`), timeouts, abortable runs.
+- **Mouse:** click select, double-click open, hover highlight, per-pane wheel scroll. Full keyboard parity.
 
 ## 🧠 Design Notes
 

@@ -2,6 +2,27 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.8.0] - 2026-09-18
+
+### Added
+- **Local tab (`7`)** — git workspace for any checkout, offline, no login: branch/upstream/ahead-behind header, auto-refresh poll, freshness badge, op-state (merge/rebase) banners
+- Status sections (staged/unstaged/untracked/conflicted) with counts, paginated `git log` history, staged/unstaged/commit/untracked diff preview (binary/size guarded)
+- Stage/unstage per file (`a`), stage-all (`A`), discard with double danger-confirm (`X`), commit with subject + optional body (`c`), amend (`C`)
+- Fetch `--prune` (`f`), pull `--rebase --autostash` (`p`), push with `-u` tracking and lease-only force (`P`), branch picker with checkout/create/delete (`B`)
+- **Detailed confirms** — structured popup (action/target/scope/command/consequence), dynamic height, danger mode where `Enter` never confirms, clickable `[Yes]`/`[Cancel]` mouse buttons
+- **Shortcut ownership** — Local keys dispatch before Which-Key (stub `c`/`b`/`f`/`z`/`d`/`w` prefix groups removed, fixing dead Repos-`c` and Inbox-`f` too)
+- **Mouse parity on Local** — click select, double-click open/checkout, hover highlight, per-pane wheel scroll via published hit geometry
+- 13 git theme roles (`gitBranch`, `gitStaged`, `gitConflicted`, `gitDiffAdd`, …) in dark + light themes with `--accessible` fallbacks
+- `runGit()` — argv-only git runner (`GIT_TERMINAL_PROMPT=0`, timeouts, abort-kill, 4MB cap); `git check-ref-format` branch validation
+- Palette: 10 `local.*` actions; help overlay gains a LOCAL category
+
+### Fixed
+- `check-ref-format` rejects a `--` separator (exit 129) — validation calls it without one
+- `git status -z` rename pairs parse dest-first so origins never leak as phantom entries
+
+### Tests
+- 85 new tests: `git-local` parsers (27), shortcut ownership (20), confirms + scratch-repo stage/discard/commit/amend (15), scratch-remote fetch/pull/push/lease/branches (14), Local mouse (8); **501 total, 0 failures**
+
 ## [0.7.6] - 2026-09-17
 
 ### Security

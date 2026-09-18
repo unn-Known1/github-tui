@@ -336,6 +336,9 @@ export const TABS = [
   { key: '6', label: 'Settings',
     // Settings has nothing to auto-refresh.
     refresh: null },
+  { key: '7', label: 'Local',
+    refresh: () => import('./tabs/local.mjs').then(m => m.refreshLocal())
+      .catch(err => { showMessage('Local refresh failed: ' + ((err && err.message) || err), 'error'); }) },
 ];
 export const tabState = { current: 0 };
 
@@ -592,6 +595,32 @@ export const appState = {
   localRepo: null,           // { owner, repo } | null — detected from cwd git remote
   localRepoFilter: false,    // when true, dashboard/inbox filter to this repo
 
+  // ── Local Git worktree (v0.8) — flat keys, local not account-bound.
+  // resetAccountState() deliberately preserves these (logout must not
+  // wipe the working-tree view). cwd never changes mid-process.
+  localIsRepo: false,        // git rev-parse success
+  localRoot: '',             // rev-parse --show-toplevel
+  localGitDir: '',           // rev-parse --git-dir (worktree-aware)
+  localBranch: '',           // symbolic-ref --short HEAD or 'HEAD (detached …)'
+  localUpstream: null,       // "origin/main" or null
+  localAhead: 0, localBehind: 0,   // rev-list --left-right --count HEAD...@{u}
+  localOpState: null,        // null | 'merge' | 'rebase' | 'cherry-pick' | 'revert'
+  localStaged: [],           // [{ path, code }] — index side
+  localUnstaged: [],         // [{ path, code }] — worktree side
+  localUntracked: [],        // [{ path }]
+  localConflicted: [],       // [{ path, code }]
+  localStatusError: null,    // string when git missing / failed
+  localHistory: [],          // [{ sha, author, date, subject, body }]
+  localHistoryHasMore: true,
+  localHistoryPage: 1,
+  localStatusSelected: 0, localStatusScroll: 0,
+  localHistorySelected: 0, localHistoryScroll: 0,
+  localFocus: 'status',      // 'status' | 'history'
+  localDiff: null,           // { path, staged, text } | null
+  localAutoPoll: true,       // persisted in session.json
+  localLastFetched: null,    // ms timestamp — freshness badge
+  _localBounds: null,        // published hit geometry for mouse { statusRows, historyRows, actionBar, diffBox }
+
   // ── Custom sections ──
   customSections: [],        // [{ title, type, query, items: [], selected: 0, scroll: 0 }]
   customSectionsLoaded: false,
@@ -670,8 +699,10 @@ export const appState = {
 
   // ── Confirmation dialog ──
   confirmAction: null,   // function to call on 'y'
-  confirmMessage: '',    // message to display
+  confirmMessage: '',    // message to display (multi-paragraph \n supported)
   confirmTitle: 'Confirm', // dialog title
+  _confirmDanger: false, // danger mode: Enter no-ops, literal y / [Yes] only
+  _confirmBounds: null,  // mouse hit bounds { yes: {x1,x2,y}, no: {...} }
 
   // ── Input modal ──
   inputMode: null,       // null | 'input'
@@ -956,13 +987,37 @@ export function confirm(message, action, title = 'Confirm') {
   appState.confirmMessage = message;
   appState.confirmAction = action;
   appState.confirmTitle = title;
+  appState._confirmDanger = false;
   render();
+}
+
+// Danger confirm (v0.8): irreversible actions (discard, force-with-lease,
+// force branch delete). Renders red with an IRREVERSIBLE banner and —
+// critically — Enter does NOT confirm (keys.mjs); only a literal `y` or a
+// click on [Yes] fires. Double-confirm flows call this twice in sequence:
+// the first action re-arms the second after keys.mjs clears the first.
+export function confirmDanger(message, action, title = 'Confirm') {
+  if (appState.confirmAction) {
+    showMessage('A confirmation is already pending — press y or n', 'warning');
+    return;
+  }
+  appState.confirmMessage = message;
+  appState.confirmAction = action;
+  appState.confirmTitle = title;
+  appState._confirmDanger = true;
+  render();
+}
+
+export function isDangerConfirm() {
+  return appState.confirmAction != null && appState._confirmDanger === true;
 }
 
 export function dismissConfirm() {
   appState.confirmAction = null;
   appState.confirmMessage = '';
   appState.confirmTitle = 'Confirm';
+  appState._confirmDanger = false;
+  appState._confirmBounds = null;
   render();
 }
 
@@ -1218,6 +1273,7 @@ export function saveSession() {
       // session.json predates the field will see "what's new" exactly once
       // on the next launch (currentVersion === APP_VERSION → not triggered).
       lastSeenVersion: appState.lastSeenVersion || null,
+      localAutoPoll: appState.localAutoPoll,
     };
     const dir = tuiHomeDir();
     if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
@@ -1242,6 +1298,7 @@ export function loadSession() {
     if (Number.isFinite(s.autoRefreshIntervalMs)) appState.autoRefreshIntervalMs = Math.min(3600000, Math.max(60000, s.autoRefreshIntervalMs));
     if (typeof s.inboxTextFilter === 'string') appState.inboxTextFilter = s.inboxTextFilter;
     if (typeof s.lastSeenVersion === 'string') appState.lastSeenVersion = s.lastSeenVersion;
+    if (typeof s.localAutoPoll === 'boolean') appState.localAutoPoll = s.localAutoPoll;
   } catch {}
 }
 

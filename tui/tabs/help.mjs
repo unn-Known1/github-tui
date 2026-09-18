@@ -152,6 +152,25 @@ const CATEGORIES = [
     { key: 'C',         desc: 'Checkout PR branch locally (gh, then git fallback)' },
     { key: 'y',         desc: 'Copy URL' },
   ]},
+  { id: 'local',      name: 'LOCAL',             shortcuts: [
+    { key: '7',         desc: 'Go to Local tab (git status / history / diff)' },
+    { key: 'Enter',     desc: 'Diff selected file / commit (Enter again closes)' },
+    { key: '↑↓ / j k',  desc: 'Navigate changes / history (scrolls diff when open)' },
+    { key: '[ / ]',     desc: 'Switch focus between changes and history' },
+    { key: 'Space',     desc: 'Load more commits (append)' },
+    { key: 'y / o',     desc: 'Copy SHA/path, open commit/repo on GitHub' },
+    { key: 'r',         desc: 'Refresh status + history' },
+    { key: 'g / G',     desc: 'Jump to top / bottom (g is two-press: g g)' },
+    { key: 'a / A',     desc: 'Stage / unstage file, stage-all / unstage-all' },
+    { key: 'X',         desc: 'Discard changes (double danger-confirm)' },
+    { key: 'c / C',     desc: 'Commit (subject + body), amend last commit' },
+    { key: 'f',         desc: 'Fetch --prune (read-only)' },
+    { key: 'p / P',     desc: 'Pull --rebase --autostash / push (lease-only force)' },
+    { key: 'B / b',     desc: 'Branch picker (checkout / new / delete)' },
+    { key: 'n / d',     desc: 'New branch / delete branch (in picker)' },
+    { key: 'z / Z / X*', desc: 'Collapse toggle / collapse all (*X discards in Local)' },
+    { key: 'Esc / h',   desc: 'Close diff first, then back to Dashboard' },
+  ]},
   { id: 'settings',   name: 'SETTINGS',          shortcuts: [
     { key: '↑↓',        desc: 'Navigate menu items' },
     { key: 'Enter',     desc: 'Select / activate the highlighted item' },
@@ -268,7 +287,7 @@ export function getHelpLines(q) {
   const lines = [];
   const query = (q || '').trim();
 
-  const TAB_CATS = ['dashboard', 'repos', 'analyze', 'actions', 'inbox', 'settings'];
+  const TAB_CATS = ['dashboard', 'repos', 'analyze', 'actions', 'inbox', 'settings', 'local'];
   const currentCat = TAB_CATS[tabState.current] || 'global';
 
   if (!query) {

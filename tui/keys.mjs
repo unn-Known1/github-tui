@@ -34,6 +34,7 @@ import * as settings  from './tabs/settings.mjs';
 import * as inbox     from './tabs/inbox.mjs';
 import * as detail    from './tabs/detail.mjs';
 import * as actions   from './tabs/actions.mjs';
+import * as local     from './tabs/local.mjs';
 import * as help      from './tabs/help.mjs';
 import { addBookmark, removeBookmark, isBookmarked, removeSavedSearch } from './store.mjs';
 import { starRepo, unstarRepo, isStarred, getSubscription, setSubscription, deleteSubscription } from './github.mjs';
@@ -44,7 +45,14 @@ import { upsertEntity as _upsertEntity, getStarredList as _getStarredList } from
 const upsertEntity = _upsertEntity;
 const getStarredList = _getStarredList;
 
-const tabModules = [dashboard, repos, analyze, actions, inbox, settings];
+const tabModules = [dashboard, repos, analyze, actions, inbox, settings, local];
+
+// Local tab shortcut ownership (§6.8): when Tab 7 is focused these keys
+// MUST reach local.keys — never a Which-Key stub prefix, never a global.
+// Checked before the prefix test below (same precedence as detail/input
+// overlays). Shared keys (r/Enter/Space/arrows/z/Z) intentionally stay on
+// the generic path with case-6 handlers added further down.
+const LOCAL_OWNED = new Set(['a', 'A', 'X', 'c', 'C', 'f', 'p', 'P', 'B', 'b', 'y', 'o', '[', ']', 'g', 'G']);
 
 // Context helpers — figure out what the user is pointing at.
 
@@ -299,6 +307,10 @@ export function refreshCurrent() {
       showMessage('Refresh failed: ' + (e && e.message || 'unknown'), 'error'));
   } else if (t === 5) {
     settings.refreshAll();
+  } else if (t === 6) {
+    showMessage('Refreshing local git...', 'info');
+    local.refreshLocal().catch(e =>
+      showMessage('Refresh failed: ' + (e && e.message || 'unknown'), 'error'));
   }
 }
 
@@ -372,6 +384,17 @@ export function handleKey(key) {
     // overlay so it can't linger on top of the input prompt.
     if (whichKey.isOpen()) whichKey.close();
   } else {
+    // 0a0. Local tab owns its shortcuts — dispatch before Which-Key so a
+    // single press (c/f/…) can never be trapped by a stub prefix group.
+    if (tabState.current === 6 && LOCAL_OWNED.has(key)) {
+      const fn = local.keys[key];
+      if (typeof fn === 'function') {
+        Promise.resolve()
+          .then(() => fn())
+          .catch((e) => showMessage((e && e.message) || 'Action failed', 'error'));
+      }
+      return;
+    }
     // 0a1. Which-Key handles keys when active
     let skipPrefixCheck = false;
     if (whichKey.isOpen()) {
@@ -505,14 +528,24 @@ export function handleKey(key) {
   // confirms while showDetail stays true, so the popup would otherwise
   // swallow the confirming keystrokes (Enter cycled tabs, y copied URL).
   if (appState.confirmAction) {
-    if (key === 'y' || key === 'Y' || key === '\r' || key === '\n') {
+    // Danger confirms (v0.8): Enter NEVER confirms — only a literal `y`
+    // (or [Yes] click) fires. This kills the reflex-Enter misclick where
+    // Enter meant "open" a split-second before the popup appeared.
+    const danger = appState._confirmDanger === true;
+    const isYes = key === 'y' || key === 'Y' || (!danger && (key === '\r' || key === '\n'));
+    if (isYes) {
       const action = appState.confirmAction;
       appState.confirmAction = null;
       appState.confirmMessage = '';
+      appState.confirmTitle = 'Confirm';
+      appState._confirmDanger = false;
+      appState._confirmBounds = null;
       try { action(); } catch (e) { showMessage(e?.message || 'Action failed', 'error'); render(); }
     } else if (key === 'n' || key === 'N' || key === '\x1b') {
       dismissConfirm();
     }
+    // Any other key (including Enter on danger) is swallowed so it can't
+    // leak through to the tab underneath while deciding.
     return;
   }
 
@@ -542,7 +575,7 @@ export function handleKey(key) {
   // Skip number keys 1-6 when in Analyze security pane (they switch sub-panes).
   const isSecurityPane = tabState.current === 2 && appState.analyzeView === 'details' && appState.detailsPane === 'security';
   switch (key) {
-    case '1': case '2': case '3': case '4': case '5': case '6': {
+    case '1': case '2': case '3': case '4': case '5': case '6': case '7': {
       // when in the Analyze security sub-pane, 1-6 switch between
       // sub-panes (dependabot / secret / codescan / advisories / branch / deps)
       // instead of changing tabs. The previous `break` fall-through silently
@@ -898,6 +931,7 @@ function handleSpace() {
   else if (t === 2) analyze.pageDown();
   else if (t === 3) actions.space();
   else if (t === 4) inbox.space();
+  else if (t === 6) local.space();
 }
 function handlePageUp() {
   const t = tabState.current;
@@ -906,6 +940,7 @@ function handlePageUp() {
   else if (t === 2) analyze.pageUp();
   else if (t === 3) actions.up();
   else if (t === 4) inbox.pageUp();
+  else if (t === 6) local.pageUp();
 }
 function handlePageDown() {
   const t = tabState.current;
@@ -914,6 +949,7 @@ function handlePageDown() {
   else if (t === 2) analyze.pageDown();
   else if (t === 3) actions.down();
   else if (t === 4) inbox.pageDown();
+  else if (t === 6) local.pageDown();
 }
 function handleTop() {
   const t = tabState.current;
@@ -951,6 +987,8 @@ function handleTop() {
   } else if (t === 5) {
     appState.settingsCursor = 0;
     render();
+  } else if (t === 6) {
+    local.top();
   }
 }
 function handleBottom() {
@@ -1004,6 +1042,8 @@ function handleBottom() {
     inbox.bottom(screen);
   } else if (t === 5) {
     // Settings has no scrollable list
+  } else if (t === 6) {
+    local.bottom();
   }
 }
 
@@ -1032,6 +1072,7 @@ function getCurrentSection() {
   if (t === 2) return analyze.getCurrentSection ? analyze.getCurrentSection() : null;
   if (t === 3) return actions.getCurrentSection ? actions.getCurrentSection() : null;
   if (t === 4) return inbox.getCurrentSection ? inbox.getCurrentSection() : null;
+  if (t === 6) return local.getCurrentSection ? local.getCurrentSection() : null;
   return null;
 }
 
@@ -1042,6 +1083,7 @@ function getTabSections() {
   if (t === 2) return analyze.getSections ? analyze.getSections() : [];
   if (t === 3) return actions.getSections ? actions.getSections() : [];
   if (t === 4) return inbox.getSections ? inbox.getSections() : [];
+  if (t === 6) return local.getSections ? local.getSections() : [];
   return [];
 }
 
@@ -1057,6 +1099,7 @@ function handleEnter() {
   else if (t === 3) actions.enter();
   else if (t === 4) inbox.enter();
   else if (t === 5) settings.enter();
+  else if (t === 6) local.enter();
 }
 function handleUp() {
   const t = tabState.current;
@@ -1073,6 +1116,7 @@ function handleUp() {
   else if (t === 3) actions.up();
   else if (t === 4) inbox.up();
   else if (t === 5) settings.up();
+  else if (t === 6) local.up();
 }
 function handleDown() {
   const t = tabState.current;
@@ -1087,6 +1131,7 @@ function handleDown() {
   else if (t === 3) actions.down();
   else if (t === 4) inbox.down(screen);
   else if (t === 5) settings.down();
+  else if (t === 6) local.down();
 }
 function handleBack() {
   const t = tabState.current;
@@ -1115,6 +1160,9 @@ function handleBack() {
     if (appState.reposView === 'starred') { repos.toggleReposView(); return; }
   }
   if (t === 3) { actions.goBack(); return; }
+  // Local tab: Esc/h closes the diff preview first; otherwise fall through
+  // to setTab(0) like every other tab.
+  if (t === 6 && local.back()) return;
   if (t === 4) {
     if (appState.showDetail) {
       import('./tabs/detail.mjs').then(m => m.closeDetail()).catch(() => {});
@@ -1183,6 +1231,28 @@ export function registerCoreActions() {
   reg({ id: 'repos.load-more', label: 'Load more repositories (lift background cap)',
         hint: 'l', category: 'Repos', run: () => { setTab(1); repos.keys.l(); } });
   // ── Explore Tab ──
+  // ── Local Tab (v0.8) ──
+  reg({ id: 'local.refresh', label: 'Local: Refresh status & history',
+        hint: 'r', category: 'Local', run: () => { setTab(6); local.refreshLocal(); } });
+  reg({ id: 'local.diff', label: 'Local: Diff selected file / commit',
+        hint: 'Enter', category: 'Local', run: () => { setTab(6); local.enter(); } });
+  reg({ id: 'local.stage', label: 'Local: Stage / unstage file',
+        hint: 'a', category: 'Local', run: () => { setTab(6); local.toggleStage(); } });
+  reg({ id: 'local.discard', label: 'Local: Discard changes…',
+        hint: 'X', category: 'Local', run: () => { setTab(6); local.discardFlow(); } });
+  reg({ id: 'local.commit', label: 'Local: Commit staged changes…',
+        hint: 'c', category: 'Local', run: () => { setTab(6); local.commitFlow(); } });
+  reg({ id: 'local.amend', label: 'Local: Amend last commit…',
+        hint: 'C', category: 'Local', run: () => { setTab(6); local.amendFlow(); } });
+  reg({ id: 'local.fetch', label: 'Local: Fetch --prune',
+        hint: 'f', category: 'Local', run: () => { setTab(6); local.fetchFlow(); } });
+  reg({ id: 'local.push', label: 'Local: Push to upstream',
+        hint: 'P', category: 'Local', run: () => { setTab(6); local.pushFlow(); } });
+  reg({ id: 'local.pull', label: 'Local: Pull --rebase',
+        hint: 'p', category: 'Local', run: () => { setTab(6); local.pullFlow(); } });
+  reg({ id: 'local.branch', label: 'Local: Branch picker',
+        hint: 'B', category: 'Local', run: () => { setTab(6); local.openBranchPicker(); } });
+
   reg({ id: 'analyze.files', label: 'Open File explorer for current repo',
         hint: 'F', category: 'Explore',
         run: () => {

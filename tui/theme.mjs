@@ -136,6 +136,22 @@ const DARK_THEME = makeTheme({
   traffic:     { fg: P.d_teal },
   milestone:   { fg: P.d_yellow },
   label:       { fg: P.d_purple },
+  // Local tab (v0.8) — git semantics. All color()-gated so --accessible /
+  // NO_COLOR degrade automatically; local.mjs falls back when a role is
+  // absent on older persisted themes (prototype chain covers it anyway).
+  gitBranch:    { fg: P.d_accent, bold: true },
+  gitUpstream:  { fg: P.d_fgDim },
+  gitAhead:     { fg: P.d_green },
+  gitBehind:    { fg: P.d_yellow },
+  gitStaged:    { fg: P.d_green },
+  gitUnstaged:  { fg: P.d_yellow },
+  gitUntracked: { fg: P.d_teal },
+  gitConflicted:{ fg: P.d_red, bold: true },
+  gitDiffAdd:   { fg: P.d_green },
+  gitDiffDel:   { fg: P.d_red },
+  gitDiffHunk:  { fg: P.d_accent },
+  gitActionBar: { bg: P.d_chrome, fg: P.d_fg },
+  gitFocusRing: { fg: P.d_accent, bold: true },
 });
 
 // ── Light — GitHub light, daylight-optimised ──────────────────────
@@ -217,6 +233,20 @@ const LIGHT = makeTheme({
   traffic:     { fg: P.lt_blue },
   milestone:   { fg: P.lt_orange },
   label:       { fg: P.lt_purple },
+  // Local tab (v0.8) — git semantics, light palette.
+  gitBranch:    { fg: P.lt_teal, bold: true },
+  gitUpstream:  { fg: P.lt_fgDim },
+  gitAhead:     { fg: P.lt_green },
+  gitBehind:    { fg: P.lt_orange },
+  gitStaged:    { fg: P.lt_green },
+  gitUnstaged:  { fg: P.lt_orange },
+  gitUntracked: { fg: P.lt_teal },
+  gitConflicted:{ fg: P.lt_red, bold: true },
+  gitDiffAdd:   { fg: P.lt_green },
+  gitDiffDel:   { fg: P.lt_red },
+  gitDiffHunk:  { fg: P.lt_teal },
+  gitActionBar: { bg: P.lt_bg2, fg: P.lt_fg },
+  gitFocusRing: { fg: P.lt_teal, bold: true },
 });
 
 // ── Theme registry ────────────────────────────────────────────────

@@ -6,7 +6,15 @@ import { color } from './theme.mjs';
 import { truncate } from './utils.mjs';
 import { saveFocus, restoreFocus } from './focus.mjs';
 
-// Key binding groups
+// Key binding groups.
+// v0.8: only groups with FUNCTIONAL bindings may live here. Every stub
+// group (all bindings `run: () => null`) was deleted: a stub prefix eats
+// the single press on EVERY tab before global/per-tab dispatch ever runs,
+// which silently killed Repos `c` (clear filters), Inbox `f` (filter
+// cycle), collapse `z`, bookmark `b`, and would have killed Local `c`/`f`.
+// 'g' stays: its bindings re-inject real keys (run returns 'g'/'G') so the
+// two-press `g g` / `g G` sequences still work. 'r' stays unregistered (see
+// note below) for the same single-press reason.
 const KEY_GROUPS = {
   'g': {
     label: 'Go',
@@ -15,51 +23,11 @@ const KEY_GROUPS = {
       { key: 'G', desc: 'Go to bottom', run: () => 'G' },
     ],
   },
-  'd': {
-    label: 'Debug',
-    bindings: [
-      { key: 'd', desc: 'Debug info', run: () => null },
-    ],
-  },
-  'z': {
-    label: 'Fold',
-    bindings: [
-      { key: 'z', desc: 'Toggle fold', run: () => null },
-      { key: 'Z', desc: 'Fold all', run: () => null },
-    ],
-  },
-  'c': {
-    label: 'Code',
-    bindings: [
-      { key: 'c', desc: 'Comment', run: () => null },
-    ],
-  },
   // NOTE: 'r' is intentionally NOT a prefix key. It is the global
   // single-press "Refresh current view" hotkey (see keys.mjs `case 'r'`).
   // Registering it here made the first press only open this overlay and
   // the second press re-open it (handleKey returns false -> isPrefixKey
   // re-triggers), so refresh never fired.
-  'w': {
-    label: 'Window',
-    bindings: [
-      { key: 'w', desc: 'Save window', run: () => null },
-      { key: 'q', desc: 'Close window', run: () => null },
-    ],
-  },
-  'b': {
-    label: 'Buffer',
-    bindings: [
-      { key: 'b', desc: 'Switch buffer', run: () => null },
-      { key: 'd', desc: 'Delete buffer', run: () => null },
-    ],
-  },
-  'f': {
-    label: 'Find',
-    bindings: [
-      { key: 'f', desc: 'Find file', run: () => null },
-      { key: 'g', desc: 'Find grep', run: () => null },
-    ],
-  },
 };
 
 let _active = false;

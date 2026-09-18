@@ -11,6 +11,7 @@ import * as repos from './tabs/repos.mjs';
 import * as dashboard from './tabs/dashboard.mjs';
 import * as settings from './tabs/settings.mjs';
 import * as inbox from './tabs/inbox.mjs';
+import * as localTab from './tabs/local.mjs';
 import { focusDashboardZone } from './focus.mjs';
 import * as quickSettings from './quick-settings.mjs';
 import * as paletteMod from './palette.mjs';
@@ -356,6 +357,16 @@ export function handleMouseEvent(event) {
       }
     }
 
+    // Local tab hover — highlight the hovered row + focus its pane.
+    // Skipped while a modal owns the screen (confirm/input/palette) so
+    // hover can't fight the overlay. Mirrors the Inbox hover pattern.
+    if (t === 6) {
+      if (!appState.confirmAction && appState.inputMode !== 'input' && !appState.showPalette) {
+        localHover(sx, sy);
+      }
+      return;
+    }
+
     // Actions tab list. Renderers publish separate origins because the repo
     // list and workflow-run list have different headers/offsets.
     if (t === 3) {
@@ -515,8 +526,30 @@ function _clickBookmarks(sx, sy) {
 }
 
 function _clickConfirm(sx, sy) {
-  // Confirm has only y/n — clicks anywhere dismiss.
-  // (Esc-outside / click-outside dismissal is the user-friendly default.)
+  // Clickable [Yes]/[Cancel] buttons (bounds published by renderConfirmDialog).
+  // Clicks anywhere else dismiss (safe default — never confirms by accident).
+  const b = appState._confirmBounds;
+  if (b) {
+    if (b.yes && sy === b.yes.y && sx >= b.yes.x1 && sx < b.yes.x2) {
+      const action = appState.confirmAction;
+      // A Yes click is as explicit as a `y` press — it fires even in
+      // danger mode (the buttons are 7+ cells wide and separated).
+      appState.confirmAction = null;
+      appState.confirmMessage = '';
+      appState.confirmTitle = 'Confirm';
+      appState._confirmDanger = false;
+      appState._confirmBounds = null;
+      try {
+        if (typeof action === 'function') action();
+        else render();
+      } catch (e) { showMessage((e && e.message) || 'Action failed', 'error'); render(); }
+      return;
+    }
+    if (b.no && sy === b.no.y && sx >= b.no.x1 && sx < b.no.x2) {
+      if (typeof dismissConfirm === 'function') dismissConfirm();
+      return;
+    }
+  }
   if (typeof dismissConfirm === 'function') dismissConfirm();
 }
 
@@ -644,13 +677,14 @@ function handleClick(col, row) {
   // Collapsible section headers — check exact arrow position.
   if (handleCollapsibleClick(sx, sy)) return;
 
-  // Log click for double-click detection (dashboard trending/stat cards
-  // AND the Repos tab, where a double click on a repo row = Enter).
+  // Log click for double-click detection (dashboard trending/stat cards,
+  // the Repos tab where a double click on a repo row = Enter, and the Local
+  // tab where a double click opens the diff / checks out the branch).
   // The second press is matched with a small tolerance (not exact-cell
   // equality): trackpad/scaled-mouse double-clicks routinely land 1–2
   // cells off, and 2-row comfortable-density items are clicked on either
   // line — exact matching made those silently degrade to a re-select.
-  if ((tabState.current === 0 || tabState.current === 1) && appState._lastClickTime) {
+  if ((tabState.current === 0 || tabState.current === 1 || tabState.current === 6) && appState._lastClickTime) {
     const now = Date.now();
     if (now - appState._lastClickTime < 400 &&
         Math.abs(appState._lastClickX - sx) <= 2 &&
@@ -672,6 +706,11 @@ function handleClick(col, row) {
 }
 
 function handleDblClick(sx, sy) {
+  // Local tab — double-click a row opens it, exactly like Enter
+  // (status/history → diff preview, branch → checkout).
+  if (tabState.current === 6) {
+    return localDblClickOpen(sx, sy);
+  }
   // Repos tab — double-click a repo row opens it, exactly like Enter.
   if (tabState.current === 1) {
     return reposDblClickOpen(sx, sy);
@@ -907,7 +946,7 @@ function loadPane(paneId) {
 
 function handleCollapsibleClick(sx, sy) {
   const t = tabState.current;
-  const prefix = ['dashboard', 'repos', 'analyze', 'actions', 'inbox', 'settings'][t];
+  const prefix = ['dashboard', 'repos', 'analyze', 'actions', 'inbox', 'settings', 'local'][t];
   // Unknown tab index → no prefix match. (Falling back to '' would make
   // startsWith('') match EVERY section in the headers map, so a stale map
   // from a previous tab could collapse unrelated sections on this one.)
@@ -939,8 +978,71 @@ function handleContentClick(sx, sy) {
       break;
     case 4: dispatchInboxClick(sy); break;
     case 5: dispatchSettingsClick(sx, sy); break;
+    case 6: dispatchLocalClick(sx, sy); break;
     default: render();
   }
+}
+
+// ── Local tab ─────────────────────────────────────────────────
+// Hit geometry comes from appState._localBounds (published by renderLocal):
+// rows[] maps painted rows → list indices, so clicks stay correct while
+// sections collapse or the body scrolls. Clicks are ignored while a modal
+// owns the screen (overlays route through _dispatchOverlayClick instead).
+
+function localHitRow(sy) {
+  const b = appState._localBounds;
+  if (!b || !Array.isArray(b.rows)) return null;
+  return b.rows.find(r => r.y === sy) || null;
+}
+
+function localHover(sx, sy) {
+  void sx;
+  const hit = localHitRow(sy);
+  if (!hit) return;
+  if (localTab.isBranchPickerOpen() && hit.kind !== 'branch') return;
+  if (hit.kind === 'branch') {
+    localTab.setBranchCursor(hit.index);
+    return;
+  }
+  if (hit.kind === 'status') {
+    if (appState.localStatusSelected !== hit.index || appState.localFocus !== 'status') {
+      appState.localFocus = 'status';
+      appState.localStatusSelected = hit.index;
+      render();
+    }
+  } else if (hit.kind === 'history') {
+    if (appState.localHistorySelected !== hit.index || appState.localFocus !== 'history') {
+      appState.localFocus = 'history';
+      appState.localHistorySelected = hit.index;
+      render();
+    }
+  }
+}
+
+function dispatchLocalClick(sx, sy) {
+  void sx;
+  // Modals own all clicks while open (confirm/input/palette handled above).
+  if (appState.confirmAction || appState.inputMode === 'input' || appState.showPalette) return;
+  const hit = localHitRow(sy);
+  if (!hit) { render(); return; }
+  // Branch picker overlay owns its rows — clicks elsewhere fall through
+  // (the overlay stays open; Esc closes it).
+  if (localTab.isBranchPickerOpen() && hit.kind !== 'branch') return;
+  if (hit.kind === 'branch') {
+    localTab.setBranchCursor(hit.index);
+    return;
+  }
+  // Selecting another row closes an open diff (same as keyboard nav).
+  if (hit.kind === 'status') {
+    appState.localFocus = 'status';
+    appState.localStatusSelected = hit.index;
+  } else {
+    appState.localFocus = 'history';
+    appState.localHistorySelected = hit.index;
+  }
+  // Selecting another row closes an open diff (same as keyboard nav).
+  if (appState.localDiff) localTab.closeDiffView();
+  else render();
 }
 
 // ── Dashboard ─────────────────────────────────────────────────
@@ -1176,6 +1278,38 @@ function dispatchReposClick(sx, sy) {
   render();
 }
 
+// Local tab double-click: open the clicked row exactly like Enter.
+function localDblClickOpen(sx, sy) {
+  void sx;
+  if (appState.confirmAction || appState.inputMode === 'input' || appState.showPalette) return false;
+  const hit = localHitRow(sy);
+  if (!hit) return false;
+  if (localTab.isBranchPickerOpen()) {
+    if (hit.kind !== 'branch') return false;
+    localTab.setBranchCursor(hit.index);
+    try {
+      localTab.checkoutSelectedBranch();
+    } catch (e) {
+      showMessage((e && e.message) || 'Failed to checkout branch', 'error');
+    }
+    return true;
+  }
+  if (hit.kind !== 'status' && hit.kind !== 'history') return false;
+  if (hit.kind === 'status') {
+    appState.localFocus = 'status';
+    appState.localStatusSelected = hit.index;
+  } else {
+    appState.localFocus = 'history';
+    appState.localHistorySelected = hit.index;
+  }
+  try {
+    localTab.enter();
+  } catch (e) {
+    showMessage((e && e.message) || 'Failed to open diff', 'error');
+  }
+  return true;
+}
+
 // Repos tab double-click: open the clicked repo exactly like Enter.
 function reposDblClickOpen(sx, sy) {
   const hit = reposItemAt(sx, sy);
@@ -1407,6 +1541,10 @@ function inTrendingSection(sx, sy) {
 
 function scrollUp(sx, sy) {
   const t = tabState.current;
+  // Local tab wheel uses bounds geometry, not screen dims — dispatch before
+  // the screen guard so it stays testable headless (and never no-ops when
+  // the screen object is momentarily unavailable).
+  if (t === 6) { localWheel(-1, sx, sy); return; }
   if (t === 0) {
     if (inTrendingSection(sx, sy)) {
       import('./tabs/dashboard.mjs').then(m => m.trendingUp()).catch(() => {});
@@ -1435,6 +1573,8 @@ function scrollUp(sx, sy) {
 
 function scrollDown(sx, sy) {
   const t = tabState.current;
+  // See scrollUp: Local wheel needs no screen dims.
+  if (t === 6) { localWheel(1, sx, sy); return; }
   const screen = getScreen();
   if (!screen) return;
 
@@ -1469,6 +1609,31 @@ function scrollDown(sx, sy) {
     const inboxCount = inbox.getFilteredNotifications().length;
     if (appState.inboxScroll + maxV < inboxCount) { appState.inboxScroll++; render(); }
   }
+}
+
+// Local tab wheel — scrolls the diff when over it, otherwise the pane
+// under the cursor (x-half in wide layout, focused pane when stacked).
+function localWheel(d, sx, sy) {
+  const b = appState._localBounds;
+  if (!b) return;
+  if (appState.localDiff && b.diffY0 >= 0 && sy >= b.diffY0 && sy < b.diffY1) {
+    localTab.scrollDiff(d);
+    return;
+  }
+  let pane = appState.localFocus === 'history' ? 'history' : 'status';
+  if (sy >= b.colY0 && sy < b.colY1 && b.splitX > 0) {
+    pane = sx < b.splitX ? 'status' : 'history';
+  }
+  if (pane === 'history') {
+    const n = typeof b.historyCount === 'number' ? b.historyCount : (appState.localHistory || []).length;
+    appState.localHistoryScroll = Math.max(0, Math.min(Math.max(0, n - 1), (appState.localHistoryScroll || 0) + d));
+  } else {
+    const n = typeof b.statusCount === 'number' ? b.statusCount
+      : (appState.localStaged || []).length + (appState.localUnstaged || []).length +
+        (appState.localUntracked || []).length + (appState.localConflicted || []).length;
+    appState.localStatusScroll = Math.max(0, Math.min(Math.max(0, n - 1), (appState.localStatusScroll || 0) + d));
+  }
+  render();
 }
 
 // ── Settings tab ─────────────────────────────────────────────

@@ -327,22 +327,39 @@ if (process.platform === 'win32') {
   // welcome check works for authenticated and logged-out users alike.
   const onboarding = await import('./tui/tabs/onboarding.mjs');
 
+  // Detect local git worktree OUTSIDE the auth gate: the Local tab works
+  // offline and logged-out. GitHub-remote mapping (localRepo) stays
+  // optional — local-only / GitLab / Bitbucket checkouts are first-class.
+  try {
+    const { detectLocalRepo, getLocalGitMeta } = await import('./tui/git-context.mjs');
+    const meta = getLocalGitMeta();
+    if (meta && meta.isRepo) {
+      appState.localIsRepo = true;
+      appState.localRoot = meta.root || '';
+      appState.localGitDir = meta.gitDir || '';
+      appState.localBranch = meta.branch || '';
+      appState.localUpstream = meta.upstream || null;
+    }
+    const local = detectLocalRepo();
+    if (local) {
+      // Detect context for the optional Dashboard local-repo filter, but
+      // keep account-wide totals as the default view. Users can press [l]
+      // when they explicitly want to scope Dashboard data to this repo.
+      appState.localRepo = local;
+      appState.localRepoFilter = false;
+    }
+  } catch {}
+  // Start the Local tab poller (it no-ops when not in a repo or disabled).
+  // Shutdown cleanup rides the state callback registry (already imported).
+  try {
+    const { ensureLocalPoll, stopLocalPoll } = await import('./tui/tabs/local.mjs');
+    ensureLocalPoll();
+    registerShutdownCallback(stopLocalPoll);
+  } catch {}
+
   if (appState.token) {
     await loadUserData();
     refreshRateLimit();
-
-    // Detect local git repo context for smart filtering.
-    try {
-      const { detectLocalRepo } = await import('./tui/git-context.mjs');
-      const local = detectLocalRepo();
-      if (local) {
-        // Detect context for the optional Dashboard local-repo filter, but
-        // keep account-wide totals as the default view. Users can press [l]
-        // when they explicitly want to scope Dashboard data to this repo.
-        appState.localRepo = local;
-        appState.localRepoFilter = false;
-      }
-    } catch {}
 
     rateLimitInterval = setInterval(refreshRateLimit, 60000);
 

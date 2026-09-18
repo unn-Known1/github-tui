@@ -2,7 +2,7 @@
 
 > *The fastest way to live in GitHub without a browser tab — discovery, triage, review, and CI in one terminal.*
 
-**Current version:** v0.7.6
+**Current version:** v0.8.0
 
 ---
 
@@ -48,6 +48,7 @@
 | **Modular architecture** — focused modules with one file per tab and feature helpers | ✅ |
 | **Zero dependencies** — just `node app.mjs` | ✅ |
 | **416+ tests** — Node built-in test runner, zero deps (v0.7.6) | ✅ |
+| **Local Git workspace** — 7th tab: status/history/diff, stage/discard/commit, fetch/pull/push, branch picker (v0.8.0) | ✅ |
 | **OSC 8 hyperlinks** — truncated URLs display short but open complete (v0.7.4) | ✅ |
 | **Graceful shutdown** — atomic handlers, raw mode restore, crash logging | ✅ |
 | **Cross-platform rendering** — ASCII box fallback, FORCE_COLOR/NO_COLOR | ✅ |
@@ -91,16 +92,22 @@
 
 ---
 
-### v0.8 — "Discovery & Read Mode"
+### v0.8 — "Local Git" ✅ shipped
 
-> Remaining discovery work follows the implemented 0.7.0 read and comparison foundation.
+> The TUI grew a working-tree surface: status, history, and sync without leaving the terminal.
 
 | Feature | Why |
 |---|---|
+| **Local tab** — status (staged/unstaged/untracked/conflicted), history, diff preview | See the checkout you're standing in, offline, no login |
+| **Stage / discard / commit** | Full edit loop with subject + body, double-confirmed discards |
+| **Fetch / pull / push** | `--rebase --autostash`, `-u` tracking, lease-only force |
+| **Branch picker** | Checkout / create / delete with `check-ref-format` validation |
+| **Detailed confirms** | Every destructive action shows action/target/command/consequence; irreversible ones need literal `y` |
+| **Full mouse parity** | Click/double-click/hover/wheel on Local rows |
 | ~~**Syntax-highlighted file viewer**~~ | Implemented in v0.7.0 |
-| **Topic explorer toggles** | 7d / 30d / 90d / by language facets |
+| **Topic explorer toggles** | 7d / 30d / 90d / by language facets (still open) |
 | ~~**Branch/tag comparison**~~ | Implemented in v0.7.0 |
-| **Code search** | `searchCode` across orgs |
+| **Code search** | `searchCode` across orgs (still open) |
 | ~~**Blame view**~~ | Implemented in v0.7.0 |
 | ~~**File history**~~ | Implemented in v0.7.0 |
 
