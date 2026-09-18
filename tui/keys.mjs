@@ -52,7 +52,7 @@ const tabModules = [dashboard, repos, analyze, actions, inbox, local, settings];
 // Checked before the prefix test below (same precedence as detail/input
 // overlays). Shared keys (r/Enter/Space/arrows/z/Z) intentionally stay on
 // the generic path with case-6 handlers added further down.
-const LOCAL_OWNED = new Set(['a', 'A', 'X', 'c', 'C', 'f', 'p', 'P', 'B', 'b', 'y', 'o', '[', ']', 'g', 'G']);
+const LOCAL_OWNED = new Set(['a', 'A', 'X', 'c', 'C', 'f', 'F', 'p', 'P', 'B', 'b', 'y', 'o', '[', ']', 'g', 'G', 'z']);
 
 // Context helpers — figure out what the user is pointing at.
 
@@ -1245,6 +1245,8 @@ export function registerCoreActions() {
         hint: 'r', category: 'Local', run: () => { setTab(5); local.refreshLocal(); } });
   reg({ id: 'local.diff', label: 'Local: Diff selected file / commit',
         hint: 'Enter', category: 'Local', run: () => { setTab(5); local.enter(); } });
+  reg({ id: 'local.fullscreen', label: 'Local: Toggle diff fullscreen',
+        hint: 'F', category: 'Local', run: () => { setTab(5); local.toggleDiffFullscreen(); } });
   reg({ id: 'local.stage', label: 'Local: Stage / unstage file',
         hint: 'a', category: 'Local', run: () => { setTab(5); local.toggleStage(); } });
   reg({ id: 'local.discard', label: 'Local: Discard changes…',

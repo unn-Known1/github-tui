@@ -9,15 +9,16 @@
 
 import {
   appState, tabState, render, startAsync, isStale, showMessage,
-  beginLoading, finishLoading, confirm, confirmDanger,
+  beginLoading, finishLoading, confirm, confirmDanger, toggleCollapse,
 } from '../state.mjs';
 import { startInput, registerInputHandler } from '../input.mjs';
 import {
-  runGit, relTime, truncateToWidth, stripAnsi, copyToClipboard,
+  runGit, relTime, truncateToWidth, displayWidth, stripAnsi, copyToClipboard,
   getClipboardTempFilePath, openUrl,
 } from '../utils.mjs';
 import {
-  parsePorcelainV1Z, parseLog, parseBranches, statusArgs, logArgs, diffArgs, showArgs,
+  parsePorcelainV1Z, parseLog, parseBranches, parseNumstatZ, parseDiffFiles,
+  statusArgs, logArgs, diffArgs, numstatArgs, showArgs,
 } from '../git-local.mjs';
 import { getLocalGitMeta } from '../git-context.mjs';
 import { color } from '../theme.mjs';
@@ -36,6 +37,8 @@ const MAX_VIEW_BYTES = 1_000_000;
 // Diff-viewer scroll is view-local (module scope): it dies with navigation,
 // which is correct — moving selection closes the diff (see up/down/enter).
 let _diffScroll = 0;
+// Fullscreen diff flag (F): likewise view-local, cleared with the diff.
+let _diffFullscreen = false;
 // Last-rendered visible row counts per column (for scroll-follow in nav).
 let _statusVisible = 10;
 let _historyVisible = 10;
@@ -48,6 +51,120 @@ let _regions = { colY0: 0, colY1: 0, splitX: -1, diffY0: -1, diffY1: -1 };
 // Scroll the diff preview (mouse wheel support).
 export function scrollDiff(d) {
   _diffScroll = Math.max(0, _diffScroll + d);
+  render();
+}
+export function isDiffFullscreen() { return _diffFullscreen; }
+
+// ─── Navigable diff files ─────────────────────────────────────
+// The open diff is parsed into file sections (see parseDiffFiles) so long
+// commit diffs stop being one endless scroll: `n`/`N` jump between files,
+// `z`/click folds the current file. Folded indices are view-local like the
+// scroll offset — any close or fresh load clears them.
+const _collapsedDiff = new Set(); // file indices folded by the user
+
+function diffFileStat(f) {
+  if (f.binary) return ' bin';
+  const parts = [];
+  if (f.add > 0) parts.push('+' + f.add);
+  if (f.del > 0) parts.push('-' + f.del);
+  return parts.length > 0 ? ' ' + parts.join(' ') : '';
+}
+
+function diffLineStyle(ln) {
+  if (ln.startsWith('+') && !ln.startsWith('+++')) return color('gitDiffAdd') || { fg: 'green' };
+  if (ln.startsWith('-') && !ln.startsWith('---')) return color('gitDiffDel') || { fg: 'red' };
+  if (ln.startsWith('@@')) return color('gitDiffHunk') || { dim: true };
+  return null;
+}
+
+// Flat visible rows for the diff box: summary lines (file -1) plus one
+// header row per file and the unfolded body lines. Returns
+// { rows: [{ text, style, file, header }], starts: Map(fileIdx → rowIdx),
+//   count, files }.
+function diffVisibleRows() {
+  const d = appState.localDiff;
+  const rows = [];
+  const starts = new Map();
+  if (!d) return { rows, starts, count: 0, files: [] };
+  const a11y = !!appState.accessible;
+  const model = parseDiffFiles(d.text || '');
+  for (const ln of model.summary) rows.push({ text: ln, style: { dim: true }, file: -1, header: false });
+  model.files.forEach((f, i) => {
+    starts.set(i, rows.length);
+    const folded = _collapsedDiff.has(i);
+    rows.push({
+      text: (a11y ? (folded ? '> ' : 'v ') : (folded ? '▸ ' : '▾ ')) + f.path + diffFileStat(f),
+      style: folded ? { dim: true } : (color('accent') || { bold: true }),
+      file: i, header: true,
+    });
+    if (folded) return;
+    for (const ln of f.lines) rows.push({ text: ln, style: diffLineStyle(ln), file: i, header: false });
+  });
+  return { rows, starts, count: model.files.length, files: model.files };
+}
+
+// File index containing a visible row (summary rows report the first file).
+function diffFileAt(starts, rowIdx) {
+  let cur = -1;
+  for (const [i, s] of starts) {
+    if (s <= rowIdx && (cur === -1 || s > starts.get(cur))) cur = i;
+  }
+  return cur;
+}
+
+function clampDiffScroll(n) {
+  _diffScroll = Math.max(0, Math.min(_diffScroll, Math.max(0, n - 1)));
+}
+
+// Jump to the next (dir>0) / previous (dir<0) file section, unfolding it.
+export function nextDiffFile(dir) {
+  if (!appState.localDiff) return;
+  const { rows, starts } = diffVisibleRows();
+  const order = [...starts.keys()].sort((a, b) => starts.get(a) - starts.get(b));
+  if (order.length === 0) return;
+  clampDiffScroll(rows.length);
+  let target;
+  if (dir > 0) target = order.find(i => starts.get(i) > _diffScroll);
+  else target = [...order].reverse().find(i => starts.get(i) < _diffScroll);
+  if (target == null) target = dir > 0 ? order[order.length - 1] : order[0];
+  _collapsedDiff.delete(target);
+  _diffScroll = starts.get(target);
+  render();
+}
+
+// Fold/unfold the file under the scroll offset (z).
+export function toggleCurrentDiffFile() {
+  if (!appState.localDiff) return;
+  const { rows, starts } = diffVisibleRows();
+  if (starts.size === 0) return;
+  clampDiffScroll(rows.length);
+  const cur = diffFileAt(starts, _diffScroll);
+  toggleDiffFile(cur < 0 ? [...starts.keys()][0] : cur);
+}
+
+// Fold/unfold an explicit file section (mouse).
+export function toggleDiffFile(i) {
+  if (!appState.localDiff) return;
+  if (_collapsedDiff.has(i)) _collapsedDiff.delete(i);
+  else _collapsedDiff.add(i);
+  render();
+}
+
+// Fullscreen diff toggle (F): split preview ↔ full-height view. With no
+// diff open, F opens straight into fullscreen so long diffs are one
+// keypress away; Esc steps back fullscreen → split → closed (see back()).
+export function toggleDiffFullscreen() {
+  if (!appState.localDiff) {
+    const hasSel = appState.localFocus === 'history' ? !!getSelectedCommit() : !!getSelectedStatusRow();
+    if (!needRepo() || !hasSel) {
+      if (appState.localIsRepo) showMessage('Nothing to diff', 'warning');
+      return;
+    }
+    _diffFullscreen = true;
+    loadLocalDiff().catch(e => showMessage((e && e.message) || 'Diff failed', 'error'));
+    return;
+  }
+  _diffFullscreen = !_diffFullscreen;
   render();
 }
 // One-shot first-paint kick per repo root (render side-effect, guarded).
@@ -132,7 +249,14 @@ export async function loadLocalStatus(opts = {}) {
   const gen = startAsync('local-status');
   if (!quiet) { beginLoading(gen); render(); }
   try {
-    const r = await runGit(statusArgs(), { cwd: root, signal: gen.signal, timeoutMs: 30000 });
+    const gitOpts = { cwd: root, signal: gen.signal, timeoutMs: 30000 };
+    // Status + both numstats fly in parallel on the same abort handle:
+    // per-file +added/-deleted stats cost one extra round-trip each.
+    const [r, nsU, nsS] = await Promise.all([
+      runGit(statusArgs(), gitOpts),
+      runGit(numstatArgs(false), gitOpts),
+      runGit(numstatArgs(true), gitOpts),
+    ]);
     if (isStale(gen)) return;
     if (r.code !== 0) {
       appState.localStatusError = (r.stderr || 'git status failed').trim().split(/\r?\n/)[0];
@@ -162,6 +286,11 @@ export async function loadLocalStatus(opts = {}) {
       appState.localUnstaged = p.unstaged;
       appState.localUntracked = p.untracked;
       appState.localConflicted = p.conflicted;
+      // Per-file line stats ride along (numstat failures keep the previous
+      // maps so one flaky spawn can't blank the whole column).
+      if (nsS && nsS.code === 0) appState.localNumstatStaged = parseNumstatZ(nsS.stdout);
+      if (nsU && nsU.code === 0) appState.localNumstatUnstaged = parseNumstatZ(nsU.stdout);
+      appState.localUntrackedLines = countUntrackedLines(root, p.untracked);
       appState.localStatusError = null;
       appState.localLastFetched = Date.now();
     }
@@ -215,6 +344,57 @@ export async function loadLocalHistory(opts = {}) {
   if (!isStale(gen)) render();
 }
 
+// New-file sizes for untracked rows (`+N`). Results are cached by
+// size+mtime so the 1.5s poll doesn't re-read unchanged files; entries for
+// vanished paths are pruned on every load to bound memory.
+const _untrackedCache = new Map(); // rel -> { size, mtimeMs, info }
+function countUntrackedLines(root, untracked) {
+  const out = {};
+  const seen = new Set();
+  const NUL = String.fromCharCode(0);
+  for (const e of (untracked || []).slice(0, MAX_STATUS_ROWS)) {
+    const rel = e && e.path;
+    if (!rel || seen.has(rel)) continue;
+    seen.add(rel);
+    try {
+      const target = resolve(root, rel);
+      const prefix = root.endsWith(sep) ? root : root + sep;
+      if (target !== root && !target.startsWith(prefix)) continue;
+      // Same symlink rule as the preview reader: links escaping the repo
+      // get no stat (their content isn't the repo's to report).
+      try {
+        const real = realpathSync(target);
+        const realRoot = realpathSync(root);
+        const realPrefix = realRoot.endsWith(sep) ? realRoot : realRoot + sep;
+        if (real !== realRoot && !real.startsWith(realPrefix)) continue;
+      } catch { continue; }
+      let st;
+      try { st = statSync(target); } catch { continue; }
+      if (!st.isFile()) continue;
+      if (!Number.isFinite(st.size) || st.size > MAX_VIEW_BYTES) continue;
+      const mtimeMs = Number(st.mtimeMs || 0);
+      const hit = _untrackedCache.get(rel);
+      if (hit && hit.size === st.size && hit.mtimeMs === mtimeMs) {
+        out[rel] = hit.info;
+        continue;
+      }
+      const text = readFileSync(target, 'utf-8');
+      const info = text.slice(0, 8000).includes(NUL)
+        ? { binary: true }
+        : { lines: text.length === 0 ? 0 : text.split('\n').length - (text.endsWith('\n') ? 1 : 0) };
+      _untrackedCache.set(rel, { size: st.size, mtimeMs, info });
+      out[rel] = info;
+    } catch { /* unreadable — row simply shows no stat */ }
+  }
+  // Prune entries for paths that are no longer untracked.
+  if (_untrackedCache.size > seen.size) {
+    for (const k of [..._untrackedCache.keys()]) {
+      if (!seen.has(k)) _untrackedCache.delete(k);
+    }
+  }
+  return out;
+}
+
 // Read an untracked file from disk for the diff preview. Containment is
 // checked against the repo ROOT (not process.cwd()) with binary + size caps.
 function readUntrackedFile(root, rel) {
@@ -249,8 +429,7 @@ export async function loadLocalDiff() {
   if (!appState.localIsRepo || !appState.localRoot) return;
   // Toggle: Enter on the open item closes the preview.
   if (appState.localDiff) {
-    appState.localDiff = null;
-    _diffScroll = 0;
+    closeDiff();
     render();
     return;
   }
@@ -263,7 +442,7 @@ export async function loadLocalDiff() {
     let staged = false;
     if (appState.localFocus === 'history') {
       const c = getSelectedCommit();
-      if (!c) { showMessage('No commit selected', 'warning'); return; }
+      if (!c) { _diffFullscreen = false; showMessage('No commit selected', 'warning'); return; }
       label = c.sha.slice(0, 8) + ' ' + c.subject;
       const r = await runGit(showArgs(c.sha), { cwd: appState.localRoot, signal: gen.signal, timeoutMs: 30000 });
       if (isStale(gen)) return;
@@ -271,7 +450,7 @@ export async function loadLocalDiff() {
       text = r.stdout;
     } else {
       const row = getSelectedStatusRow();
-      if (!row) { showMessage('Nothing to diff — working tree clean', 'info'); return; }
+      if (!row) { _diffFullscreen = false; showMessage('Nothing to diff — working tree clean', 'info'); return; }
       label = (row.section === 'staged' ? 'staged · ' : '') + row.path;
       if (row.section === 'untracked') {
         text = readUntrackedFile(appState.localRoot, row.path);
@@ -308,6 +487,7 @@ export async function loadLocalDiff() {
       text: body,
     };
     _diffScroll = 0;
+    _collapsedDiff.clear();
   } catch (e) {
     if (!isStale(gen)) showMessage('Diff: ' + ((e && e.message) || 'failed').split(/\r?\n/)[0], 'error');
   } finally {
@@ -364,6 +544,8 @@ function closeDiff() {
     appState.localDiff = null;
     _diffScroll = 0;
   }
+  _diffFullscreen = false;
+  _collapsedDiff.clear();
 }
 
 // Mouse seam: close the diff preview without touching selection.
@@ -1314,6 +1496,7 @@ export async function openCurrent() {
 export const keys = {
   '\r': () => enter(),
   '\n': () => enter(),
+  'F': () => toggleDiffFullscreen(),
   'a': () => toggleStage(),
   'A': () => stageAll(),
   'X': () => discardFlow(),
@@ -1324,7 +1507,24 @@ export const keys = {
   'P': () => pushFlow(),
   'B': () => openBranchPicker(),
   'b': () => openBranchPicker(),
-  'n': () => createBranchFlow(),
+  'n': () => {
+    // The branch picker owns n while open (same as ↑↓/Enter); otherwise n
+    // jumps to the next diff file when one is open.
+    if (!isBranchPickerOpen() && appState.localDiff) nextDiffFile(1);
+    else createBranchFlow();
+  },
+  'N': () => {
+    if (isBranchPickerOpen()) return; // overlay owns keys; N has no picker meaning
+    if (appState.localDiff) nextDiffFile(-1);
+    else showMessage('Open a diff first — Enter on a file or commit', 'info');
+  },
+  'z': () => {
+    // With a diff open (and no picker overlay), z folds the file under the
+    // cursor; otherwise it keeps its global meaning (collapse the current
+    // column section).
+    if (appState.localDiff && !isBranchPickerOpen()) toggleCurrentDiffFile();
+    else toggleCollapse(getCurrentSection());
+  },
   'd': () => deleteBranchFlow(),
   '[': () => switchFocus(),
   ']': () => switchFocus(),
@@ -1349,8 +1549,9 @@ export function getCurrentSection() {
   return 'local:' + row.section;
 }
 
-// Back handler for Esc/h: close picker, then diff; return false when there
-// is nothing local to dismiss so keys.mjs falls through to setTab(0).
+// Back handler for Esc/h: close picker, then step the diff back
+// (fullscreen → split → closed); return false when there is nothing local
+// to dismiss so keys.mjs falls through to setTab(0).
 export function back() {
   if (_branchPicker) {
     _branchPicker = false;
@@ -1358,8 +1559,12 @@ export function back() {
     return true;
   }
   if (appState.localDiff) {
-    appState.localDiff = null;
-    _diffScroll = 0;
+    if (_diffFullscreen) {
+      _diffFullscreen = false;
+      render();
+      return true;
+    }
+    closeDiff();
     render();
     return true;
   }
@@ -1396,6 +1601,38 @@ function statusStyle(kind, selected) {
   if (kind === 'staged') return color('gitStaged') || { fg: 'green' };
   if (kind === 'untracked') return color('gitUntracked') || { dim: true };
   return color('gitUnstaged') || { fg: 'yellow' };
+}
+
+// Numeric line stat behind statusStat(): { add, del, binary } or null when
+// there is nothing countable (mode-only change, not loaded yet).
+function statNumbers(kind, path) {
+  if (kind === 'untracked') {
+    const info = (appState.localUntrackedLines || {})[path];
+    if (!info) return null;
+    if (info.binary) return { add: 0, del: 0, binary: true };
+    return { add: info.lines || 0, del: 0, binary: false };
+  }
+  if (kind !== 'staged' && kind !== 'unstaged') return null;
+  const map = kind === 'staged'
+    ? (appState.localNumstatStaged || {})
+    : (appState.localNumstatUnstaged || {});
+  const s = map[path];
+  if (!s) return null;
+  if (s.binary) return { add: 0, del: 0, binary: true };
+  if (!(s.add > 0) && !(s.del > 0)) return null;
+  return { add: s.add, del: s.del, binary: false };
+}
+
+// Per-row line stat for the status column (`+A -D`, `+N` for new files,
+// `bin` for binary). Null when there is nothing to report.
+function statusStat(kind, path) {
+  const n = statNumbers(kind, path);
+  if (!n) return null;
+  if (n.binary) return { text: 'bin', binary: true };
+  const parts = [];
+  if (n.add > 0) parts.push('+' + n.add);
+  if (n.del > 0) parts.push('-' + n.del);
+  return parts.length > 0 ? { text: parts.join(' ') } : null;
 }
 
 export function renderLocal(screen, y, h) {
@@ -1454,13 +1691,42 @@ export function renderLocal(screen, y, h) {
   if (appState.localRepo) {
     const rn = '· ' + appState.localRepo.owner + '/' + appState.localRepo.repo;
     screen.writeStr(hx, cy, truncateToWidth(rn, Math.max(0, W - hx - 24), ''), { dim: true });
+    hx += Math.min(rn.length, Math.max(0, W - hx - 24)) + 1;
   } else {
     screen.writeStr(hx, cy, '· local only', { dim: true });
+    hx += 13;
   }
+  // Aggregate worktree totals: `N files +A -D`, summed over the same rows
+  // the columns show (staged + unstaged + untracked; conflicted/binary rows
+  // contribute files but no countable lines). Skipped when clean and when
+  // the right-hand badge would be overpainted on narrow screens.
   const autoBadge = appState.localAutoPoll ? (a11y ? '[auto]' : '● auto') : (a11y ? '[manual]' : '○ manual');
   const ageBadge = 'Updated ' + ageLabel();
   const rightTxt = autoBadge + ' · ' + ageBadge;
-  screen.writeStr(Math.max(2, W - rightTxt.length - 2), cy, rightTxt, { dim: true });
+  const rightX = Math.max(2, W - rightTxt.length - 2);
+  {
+    const rows = getStatusList();
+    if (rows.length > 0) {
+      let tA = 0, tD = 0;
+      for (const r of rows) {
+        const n = statNumbers(r.section, r.path);
+        if (n && !n.binary) { tA += n.add; tD += n.del; }
+      }
+      const totFiles = '· ' + rows.length + ' file' + (rows.length === 1 ? '' : 's');
+      const totAdd = '+' + tA;
+      const totDel = '-' + tD;
+      const totLen = totFiles.length + 1 + totAdd.length + 1 + totDel.length;
+      if (hx + totLen + 1 < rightX) {
+        screen.writeStr(hx, cy, totFiles, { dim: true });
+        hx += totFiles.length + 1;
+        screen.writeStr(hx, cy, totAdd, color('gitDiffAdd') || { fg: 'green' });
+        hx += totAdd.length + 1;
+        screen.writeStr(hx, cy, totDel, color('gitDiffDel') || { fg: 'red' });
+        hx += totDel.length + 1;
+      }
+    }
+  }
+  screen.writeStr(rightX, cy, rightTxt, { dim: true });
   cy++;
   screen.hline(cy, '─', { dim: true });
   cy++;
@@ -1479,26 +1745,53 @@ export function renderLocal(screen, y, h) {
   const focusStatus = appState.localFocus !== 'history';
   _rowMap = [];
   _regions = { colY0: cy, colY1: cy, splitX: -1, diffY0: -1, diffY1: -1 };
+  const wantDiff = !!appState.localDiff;
+  if (wantDiff && _diffFullscreen) {
+    // Fullscreen diff (F): the columns step aside entirely so long diffs
+    // get every row below the header. Esc steps back to split (see back()).
+    _regions.colY1 = cy;
+    _regions.diffY0 = cy;
+    cy = renderDiffBox(screen, cy, endY, W);
+    _regions.diffY1 = cy;
+    publishLocalBounds();
+    if (_branchPicker) renderBranchPickerOverlay(screen);
+    return;
+  }
+  const diffH = wantDiff ? Math.max(6, Math.min(14, Math.floor(h * 0.4))) : 0;
+  const canReserve = wantDiff && h >= 14 && (endY - diffH - 1) > cy + 4;
+  const listEndY = canReserve ? endY - diffH - 1 : endY;
   if (isNarrow) {
-    cy = renderStatusColumn(screen, 2, cy, endY, W, focusStatus, W - 4);
-    if (cy < endY) cy = renderHistoryInner(screen, 2, cy, endY, W - 4, !focusStatus);
+    cy = renderStatusColumn(screen, 2, cy, listEndY, W, focusStatus, W - 4);
+    if (cy < listEndY) cy = renderHistoryInner(screen, 2, cy, listEndY, W - 4, !focusStatus);
   } else {
     const splitX = Math.floor(W * 0.45);
     const leftW = splitX - 4;
     const rightX = splitX + 1;
     const rightW = W - rightX - 2;
-    const leftEnd = renderStatusColumn(screen, 2, cy, endY, W, focusStatus, leftW);
-    const rightEnd = renderHistoryInner(screen, rightX, cy, endY, rightW, !focusStatus);
+    const leftEnd = renderStatusColumn(screen, 2, cy, listEndY, W, focusStatus, leftW);
+    const rightEnd = renderHistoryInner(screen, rightX, cy, listEndY, rightW, !focusStatus);
     cy = Math.max(leftEnd, rightEnd);
     _regions.splitX = splitX;
   }
   _regions.colY1 = cy;
-  if (appState.localDiff && cy < endY) {
+  if (wantDiff && canReserve) {
+    screen.hline(listEndY, '─', { dim: true });
+    _regions.diffY0 = listEndY + 1;
+    cy = renderDiffBox(screen, listEndY + 1, endY, W);
+    _regions.diffY1 = cy;
+  } else if (wantDiff && cy < endY) {
+    // Tiny terminal: best effort below the columns (old behavior).
     _regions.diffY0 = cy;
     cy = renderDiffBox(screen, cy, endY, W);
     _regions.diffY1 = cy;
   }
   // Hit geometry for the mouse layer (click/hover/wheel/dblclick).
+  publishLocalBounds();
+  if (_branchPicker) renderBranchPickerOverlay(screen);
+}
+
+// Publish renderLocal's hit geometry for the mouse layer.
+function publishLocalBounds() {
   appState._localBounds = {
     focus: appState.localFocus,
     rows: _rowMap,
@@ -1511,7 +1804,6 @@ export function renderLocal(screen, y, h) {
     historyCount: (appState.localHistory || []).length,
     hasDiff: !!appState.localDiff,
   };
-  if (_branchPicker) renderBranchPickerOverlay(screen);
 }
 
 function renderBranchPickerOverlay(screen) {
@@ -1586,8 +1878,27 @@ function renderStatusColumn(screen, x, y, endY, W, focused, colW) {
       const code = entry.code && entry.code !== '??' ? entry.code + ' ' : '';
       screen.writeStr(x, cy, (selected ? '▶ ' : '  ') + icon + ' ' + code, statusStyle(sec.kind, selected));
       const nameX = x + 2 + icon.length + 1 + code.length;
-      screen.writeStr(nameX, cy, truncateToWidth(entry.path, Math.max(4, x + colW - nameX + 2), ''),
+      // Line stat (`+A -D`) after the path; the path yields room for it.
+      const stat = statusStat(sec.kind, entry.path);
+      const statW = stat ? displayWidth(stat.text) + 1 : 0;
+      const shown = truncateToWidth(entry.path, Math.max(4, x + colW - nameX + 2 - statW), '');
+      screen.writeStr(nameX, cy, shown,
         selected ? color('selection') : null);
+      if (stat) {
+        const selStyle = selected ? color('selection') : null;
+        const sx = nameX + displayWidth(shown) + 1;
+        const m = stat.binary ? null : stat.text.match(/^(\+\d+)?\s?(-\d+)?$/);
+        if (!m) {
+          screen.writeStr(sx, cy, stat.text, selStyle || { dim: true });
+        } else {
+          let ox = sx;
+          if (m[1]) {
+            screen.writeStr(ox, cy, m[1], selStyle || color('gitDiffAdd') || { fg: 'green' });
+            ox += m[1].length + 1;
+          }
+          if (m[2]) screen.writeStr(ox, cy, m[2], selStyle || color('gitDiffDel') || { fg: 'red' });
+        }
+      }
       if (idx >= 0) _rowMap.push({ y: cy, kind: 'status', index: idx });
       cy++;
       rendered++;
@@ -1662,25 +1973,60 @@ function renderDiffBox(screen, y, endY, W) {
   let cy = y;
   const d = appState.localDiff;
   if (!d) return cy;
+  const full = _diffFullscreen;
+  const hint = truncateToWidth(full
+    ? '[F] split · [n] file · [z] fold · [Enter] close · [↑↓] scroll'
+    : '[F] full · [n] file · [z] fold · [Enter] close · [↑↓] scroll',
+    Math.max(10, W - 4), '');
   if (cy < endY) {
-    screen.writeStr(2, cy, 'DIFF · ' + truncateToWidth(d.path || '', Math.max(10, W - 12), ''),
-      color('title') || { bold: true });
+    // Title row doubles as the fullscreen click target (see difftoggle in
+    // dispatchLocalClick) — the [F] tag advertises both the key and that.
+    const modeTag = full ? '[F] split' : '[F] full';
+    const label = 'DIFF · ' + truncateToWidth(d.path || '', Math.max(10, W - 14 - modeTag.length), '');
+    screen.writeStr(2, cy, label, color('title') || { bold: true });
+    const tagX = 2 + displayWidth(label) + 2;
+    if (tagX + modeTag.length < W - 1) screen.writeStr(tagX, cy, modeTag, { dim: true });
+    _rowMap.push({ y: cy, kind: 'difftoggle', index: 0 });
     cy++;
   }
   if (cy < endY) { screen.hline(cy, '─', { dim: true }); cy++; }
-  const lines = String(d.text || '').split(/\r?\n/);
-  _diffScroll = Math.max(0, Math.min(_diffScroll, Math.max(0, lines.length - 1)));
-  for (let i = _diffScroll; i < lines.length && cy < endY; i++) {
-    const ln = lines[i];
-    let style = null;
-    if (ln.startsWith('+') && !ln.startsWith('+++')) style = color('gitDiffAdd') || { fg: 'green' };
-    else if (ln.startsWith('-') && !ln.startsWith('---')) style = color('gitDiffDel') || { fg: 'red' };
-    else if (ln.startsWith('@@')) style = color('gitDiffHunk') || { dim: true };
-    screen.writeStr(2, cy, truncateToWidth(ln, Math.max(10, W - 4), ''), style);
+  const { rows, starts, count, files } = diffVisibleRows();
+  clampDiffScroll(rows.length);
+  // Sticky position bar (multi-file diffs only): which file the viewport
+  // sits on. Recomputed from the scroll offset every frame, so it never
+  // scrolls away itself.
+  const posText = () => {
+    if (count < 2) return null;
+    const cur = diffFileAt(starts, _diffScroll);
+    if (cur < 0) return 'top · ' + count + ' files';
+    return 'file ' + (cur + 1) + '/' + count + ' · ' + files[cur].path + diffFileStat(files[cur]);
+  };
+  if (endY - cy >= 2) {
+    const contentEnd = endY - 1;
+    const pos = posText();
+    if (pos && cy < contentEnd) {
+      screen.writeStr(2, cy, truncateToWidth(pos, Math.max(10, W - 4), ''), { dim: true });
+      cy++;
+    }
+    for (let i = _diffScroll; i < rows.length && cy < contentEnd; i++) {
+      const r = rows[i];
+      screen.writeStr(2, cy, truncateToWidth(r.text, Math.max(10, W - 4), ''), r.style);
+      if (r.header) _rowMap.push({ y: cy, kind: 'difffile', index: r.file });
+      cy++;
+    }
+    screen.writeStr(2, endY - 1, hint, { dim: true });
+    return endY;
+  }
+  // Tiny box (single row left): rows without the position bar, hint only
+  // if it fits.
+  for (let i = _diffScroll; i < rows.length && cy < endY; i++) {
+    const r = rows[i];
+    screen.writeStr(2, cy, truncateToWidth(r.text, Math.max(10, W - 4), ''), r.style);
+    if (r.header) _rowMap.push({ y: cy, kind: 'difffile', index: r.file });
     cy++;
   }
   if (cy < endY) {
-    screen.writeStr(2, cy, '[Enter] close   [↑↓] scroll', { dim: true });
+    screen.writeStr(2, cy, hint, { dim: true });
     cy++;
   }
   return cy;

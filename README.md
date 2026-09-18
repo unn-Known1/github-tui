@@ -382,8 +382,8 @@ Every tab module exports `render(screen, y, h)`, an optional `keys` map for tab-
 
 ### 7 · Local
 - Local git workspace (`6`) — works inside any checkout, offline, no login required. Branch + upstream + ahead/behind header, auto-refresh poll, freshness badge.
-- **Changes:** staged / unstaged / untracked / conflicted sections with counts, merge-rebase-cherry-pick banners, per-file diff preview (untracked read from disk, binary/size guarded).
-- **History:** paginated local `git log` with author + relative age, commit diff preview, `Space` appends more.
+- **Changes:** staged / unstaged / untracked / conflicted sections with counts and per-file `+added`/`-deleted` line stats, merge-rebase-cherry-pick banners, per-file diff preview (untracked read from disk, binary/size guarded).
+- **History:** paginated local `git log` with author + relative age, commit diff preview with file navigator (`n`/`N` jump between files, `z`/click folds a file, `F` fullscreen, `Esc` steps back), `Space` appends more.
 - **Write actions:** stage/unstage per file (`a`), stage-all / unstage-all toggle (`A`), discard with double danger-confirm (`X`), commit with subject + optional body (`c`), amend (`C`), fetch (`f`), pull `--rebase --autostash` (`p`), push with `-u` + lease-only force (`P`), branch picker with checkout/create/delete (`B`).
 - **Safety:** every destructive action shows a detail popup (action, target, scope, exact command, consequence); irreversible ones need a literal `y` — `Enter` never confirms those. Non-interactive git (`GIT_TERMINAL_PROMPT=0`), timeouts, abortable runs.
 - **Mouse:** click select, double-click open, hover highlight, per-pane wheel scroll. Full keyboard parity.

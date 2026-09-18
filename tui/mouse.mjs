@@ -1032,6 +1032,18 @@ function dispatchLocalClick(sx, sy) {
     localTab.setBranchCursor(hit.index);
     return;
   }
+  // Diff title row toggles split ↔ fullscreen (same as F). It must come
+  // before the status/history assignment below (whose else would swallow it
+  // as a history row).
+  if (hit.kind === 'difftoggle') {
+    localTab.toggleDiffFullscreen();
+    return;
+  }
+  // Diff file header rows fold/unfold that file (same as z).
+  if (hit.kind === 'difffile') {
+    localTab.toggleDiffFile(hit.index);
+    return;
+  }
   // Selecting another row closes an open diff (same as keyboard nav).
   if (hit.kind === 'status') {
     appState.localFocus = 'status';

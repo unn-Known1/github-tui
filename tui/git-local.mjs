@@ -111,6 +111,109 @@ export function parsePorcelainV1Z(input) {
   return out;
 }
 
+// ─── Numstat (per-file +added/-deleted for status rows) ─────
+// Input: raw stdout of `git diff --numstat --no-renames -z [--cached]`.
+// With `-z` every record is exactly `<add>\t<del>\t<path>\0` — no quoting
+// games for spaces/unicode, and `--no-renames` keeps renames as plain
+// delete(old)+add(new) rows so there are never two-record pairs to stitch.
+// Binary files report `-` for both counts.
+// Output: { [path]: { add, del, binary } }.
+export function parseNumstatZ(input) {
+  const out = {};
+  const text = typeof input === 'string' ? input : String(input || '');
+  if (!text) return out;
+  // NUL written via fromCharCode so the byte survives verbatim.
+  const NUL = String.fromCharCode(0);
+  for (const rec of text.split(NUL)) {
+    if (!rec) continue;
+    // Path itself may contain literal tabs (raw under -z): the counts are
+    // always the first two tab-fields, the rest re-joined is the path.
+    const parts = rec.split('\t');
+    if (parts.length < 3) continue;
+    const [a, d, ...rest] = parts;
+    const path = rest.join('\t');
+    if (!path) continue;
+    const binary = a === '-' || d === '-';
+    out[path] = {
+      add: binary ? 0 : parseInt(a, 10) || 0,
+      del: binary ? 0 : parseInt(d, 10) || 0,
+      binary,
+    };
+  }
+  return out;
+}
+
+// ─── Diff file sections (navigable commit/file diffs) ──────
+// Input: full text of `git show` / `git diff` output (or any preview text).
+// Splits on `diff --git ` boundaries into per-file sections with add/del
+// counts; everything before the first boundary (commit meta + stat block)
+// becomes `summary`. Text without any boundary (untracked file content,
+// binary placeholders) becomes a single pseudo-file so navigation code
+// stays uniform.
+// Output: { summary: [line], files: [{ path, lines: [line], add, del, binary }] }
+export function parseDiffFiles(text) {
+  const lines = String(text || '').split(/\r?\n/);
+  const summary = [];
+  const files = [];
+  let cur = null;
+  const push = () => {
+    if (!cur) return;
+    let add = 0, del = 0, binary = false;
+    let plus = null, minus = null;
+    for (const ln of cur.lines) {
+      if (ln.startsWith('+') && !ln.startsWith('+++')) add++;
+      else if (ln.startsWith('-') && !ln.startsWith('---')) del++;
+      else if (ln.startsWith('Binary files ')) binary = true;
+      else if (ln.startsWith('+++ ')) plus = ln.slice(4).trim();
+      else if (ln.startsWith('--- ')) minus = ln.slice(4).trim();
+    }
+    cur.add = binary ? 0 : add;
+    cur.del = binary ? 0 : del;
+    cur.binary = binary;
+    cur.path = pickDiffPath(cur.gitLine, plus, minus);
+    files.push(cur);
+    cur = null;
+  };
+  for (const ln of lines) {
+    if (ln.startsWith('diff --git ')) {
+      push();
+      cur = { gitLine: ln, lines: [ln], path: '', add: 0, del: 0, binary: false };
+      continue;
+    }
+    if (!cur) { summary.push(ln); continue; }
+    cur.lines.push(ln);
+  }
+  push();
+  if (files.length === 0) {
+    // No diff markers at all — one pseudo-file over the whole text.
+    return { summary: [], files: [{ path: '(content)', lines, add: 0, del: 0, binary: false }] };
+  }
+  return { summary, files };
+}
+
+// Resolve a display path: prefer the `+++` side, fall back to `---` for
+// deletions (`+++ /dev/null`), then the `diff --git` line. Strips the
+// `a/`/`b/` prefixes and surrounding quotes (core.quotePath); octal-escaped
+// unicode is left raw (display quirk, never a crash).
+function pickDiffPath(gitLine, plus, minus) {
+  const clean = (p) => {
+    let s = String(p || '').trim();
+    if (s.length >= 2 && s.startsWith('"') && s.endsWith('"')) s = s.slice(1, -1);
+    if ((s.startsWith('a/') || s.startsWith('b/')) && s !== '/dev/null') s = s.slice(2);
+    return s;
+  };
+  if (plus && plus !== '/dev/null') return clean(plus);
+  if (minus && minus !== '/dev/null') return clean(minus);
+  const gl = String(gitLine || '');
+  const m = gl.match(/^diff --git "(.*)" "(.*)"\s*$/) || gl.match(/^diff --git (\S+) (\S+)\s*$/);
+  if (m) {
+    const b = clean(m[2]);
+    if (b && b !== '/dev/null') return b;
+    return clean(m[1]) || '(unknown)';
+  }
+  return '(unknown)';
+}
+
 // ─── Branch list ────────────────────────────────────────────────
 // Input: stdout of `git branch -a --no-color`.
 // Output: [{ name, current, remote }]. `name` keeps the `remotes/` prefix
@@ -176,6 +279,13 @@ export function diffArgs({ staged = false, path = null } = {}) {
   const args = ['diff', '--no-color', '--unified=3'];
   if (staged) args.push('--cached');
   if (path) args.push('--', path);
+  return args;
+}
+// Per-file line stats for the status column. `--no-renames` keeps output
+// to single-record rows (see parseNumstatZ); `-z` keeps odd paths raw.
+export function numstatArgs(staged = false) {
+  const args = ['diff', '--no-color', '--numstat', '--no-renames', '-z'];
+  if (staged) args.push('--cached');
   return args;
 }
 export function showArgs(sha) {

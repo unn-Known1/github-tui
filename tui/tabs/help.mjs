@@ -155,6 +155,9 @@ const CATEGORIES = [
   { id: 'local',      name: 'LOCAL',             shortcuts: [
     { key: '6',         desc: 'Go to Local tab (git status / history / diff)' },
     { key: 'Enter',     desc: 'Diff selected file / commit (Enter again closes)' },
+    { key: 'F',         desc: 'Diff fullscreen toggle: split ↔ full (click title works too)' },
+    { key: 'n / N',     desc: 'Next / previous file in the open diff' },
+    { key: 'z',         desc: 'Fold current diff file (columns otherwise; click file headers too)' },
     { key: '↑↓ / j k',  desc: 'Navigate changes / history (scrolls diff when open)' },
     { key: '[ / ]',     desc: 'Switch focus between changes and history' },
     { key: 'Space',     desc: 'Load more commits (append)' },
@@ -169,7 +172,7 @@ const CATEGORIES = [
     { key: 'B / b',     desc: 'Branch picker (checkout / new / delete)' },
     { key: 'n / d',     desc: 'New branch / delete branch (in picker)' },
     { key: 'z / Z / X*', desc: 'Collapse toggle / collapse all (*X discards in Local)' },
-    { key: 'Esc / h',   desc: 'Close diff first, then back to Dashboard' },
+    { key: 'Esc / h',   desc: 'Step back: fullscreen → split → closed → Dashboard' },
   ]},
   { id: 'settings',   name: 'SETTINGS',          shortcuts: [
     { key: '↑↓',        desc: 'Navigate menu items' },

@@ -617,6 +617,9 @@ export const appState = {
   localStatusSelected: 0, localStatusScroll: 0,
   localHistorySelected: 0, localHistoryScroll: 0,
   localFocus: 'status',      // 'status' | 'history'
+  localNumstatStaged: {},    // { path: { add, del, binary } } — `diff --cached --numstat`
+  localNumstatUnstaged: {},  // { path: { add, del, binary } } — worktree-vs-index numstat
+  localUntrackedLines: {},   // { path: { lines } | { binary: true } } — new-file sizes
   localDiff: null,           // { path, staged, text } | null
   localAutoPoll: true,       // persisted in session.json
   localLastFetched: null,    // ms timestamp — freshness badge
