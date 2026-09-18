@@ -5,9 +5,9 @@ All notable changes to this project will be documented in this file.
 ## [0.8.0] - 2026-09-18
 
 ### Added
-- **Local tab (`7`)** — git workspace for any checkout, offline, no login: branch/upstream/ahead-behind header, auto-refresh poll, freshness badge, op-state (merge/rebase) banners
+- **Local tab (`6`)** — git workspace for any checkout, offline, no login: branch/upstream/ahead-behind header, auto-refresh poll, freshness badge, op-state (merge/rebase) banners
 - Status sections (staged/unstaged/untracked/conflicted) with counts, paginated `git log` history, staged/unstaged/commit/untracked diff preview (binary/size guarded)
-- Stage/unstage per file (`a`), stage-all (`A`), discard with double danger-confirm (`X`), commit with subject + optional body (`c`), amend (`C`)
+- Stage/unstage per file (`a`), stage-all / unstage-all toggle (`A`), discard with double danger-confirm (`X`), commit with subject + optional body (`c`), amend (`C`)
 - Fetch `--prune` (`f`), pull `--rebase --autostash` (`p`), push with `-u` tracking and lease-only force (`P`), branch picker with checkout/create/delete (`B`)
 - **Detailed confirms** — structured popup (action/target/scope/command/consequence), dynamic height, danger mode where `Enter` never confirms, clickable `[Yes]`/`[Cancel]` mouse buttons
 - **Shortcut ownership** — Local keys dispatch before Which-Key (stub `c`/`b`/`f`/`z`/`d`/`w` prefix groups removed, fixing dead Repos-`c` and Inbox-`f` too)

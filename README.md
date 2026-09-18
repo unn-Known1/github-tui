@@ -19,7 +19,7 @@ A fast, zero-dependency terminal user interface for GitHub — seven tabs, a com
 - 🔍 **Explore any public repo** — search, 2-column detail view (metadata + languages bar + top contributors + latest releases), pane tabs `[O] Overview / [i] Issues / [P] PRs / [R] README / [F] Files / [A] Packages / [T] Traffic / [K] Checks / [S] Security / [D] Compare`, branch/ref comparison, file history, local blame, and parallel ahead/behind compares on forks.
 - 📊 **Repo Analytics** — Traffic (views/clones/popular paths/referrers), Checks/CI (pass/fail/pending summary), Security (Dependabot alerts with severity icons), cross-repository security aggregation, health scoring, and branch comparison.
 - 📥 **Inbox triage** — color-coded notification types, grouping, snoozing, saved filters, mark-as-read (`m`) / mark-all (`M`) / unsubscribe (`u`) / filter cycle (`f`: all/unread/mentions/review), repo-grouped summary.
-- 🗂️ **Local git workspace** — `7` opens a working-tree tab in any checkout (no login needed): live status (staged/unstaged/untracked/conflicted), commit history with diff preview, stage (`a`), discard (`X`, double-confirmed), commit with body (`c`), fetch/pull/push (`f`/`p`/`P`, lease-only force), branch picker (`B`). Full mouse support; destructive actions always confirm with details.
+- 🗂️ **Local git workspace** — `6` opens a working-tree tab in any checkout (no login needed): live status (staged/unstaged/untracked/conflicted), commit history with diff preview, stage (`a`), discard (`X`, double-confirmed), commit with body (`c`), fetch/pull/push (`f`/`p`/`P`, lease-only force), branch picker (`B`). Full mouse support; destructive actions always confirm with details.
 - 🎨 **Themes** — `light` (default) and `default` (dark) — each with a fully distinct palette using true-color (24-bit) and 256-color rendering. Persisted across sessions.
 - ⚡ **Command Palette** — `Ctrl-P` or `:` opens a fuzzy-search modal listing every action.
 - 📖 **README viewer** — `R` on the details pane renders the repo's README in-terminal with naive Markdown styling.
@@ -381,10 +381,10 @@ Every tab module exports `render(screen, y, h)`, an optional `keys` map for tab-
 - Triage actions: `m`/`M`/`u`/`f`.
 
 ### 7 · Local
-- Local git workspace (`7`) — works inside any checkout, offline, no login required. Branch + upstream + ahead/behind header, auto-refresh poll, freshness badge.
+- Local git workspace (`6`) — works inside any checkout, offline, no login required. Branch + upstream + ahead/behind header, auto-refresh poll, freshness badge.
 - **Changes:** staged / unstaged / untracked / conflicted sections with counts, merge-rebase-cherry-pick banners, per-file diff preview (untracked read from disk, binary/size guarded).
 - **History:** paginated local `git log` with author + relative age, commit diff preview, `Space` appends more.
-- **Write actions:** stage/unstage per file (`a`), stage-all (`A`), discard with double danger-confirm (`X`), commit with subject + optional body (`c`), amend (`C`), fetch (`f`), pull `--rebase --autostash` (`p`), push with `-u` + lease-only force (`P`), branch picker with checkout/create/delete (`B`).
+- **Write actions:** stage/unstage per file (`a`), stage-all / unstage-all toggle (`A`), discard with double danger-confirm (`X`), commit with subject + optional body (`c`), amend (`C`), fetch (`f`), pull `--rebase --autostash` (`p`), push with `-u` + lease-only force (`P`), branch picker with checkout/create/delete (`B`).
 - **Safety:** every destructive action shows a detail popup (action, target, scope, exact command, consequence); irreversible ones need a literal `y` — `Enter` never confirms those. Non-interactive git (`GIT_TERMINAL_PROMPT=0`), timeouts, abortable runs.
 - **Mouse:** click select, double-click open, hover highlight, per-pane wheel scroll. Full keyboard parity.
 

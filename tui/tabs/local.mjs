@@ -24,7 +24,8 @@ import { color } from '../theme.mjs';
 import {
   emptyState, collapsibleHeader, loadingIndicator, scrollIndicators,
 } from '../render.mjs';
-import { existsSync, readFileSync, statSync } from 'fs';
+import { existsSync, readFileSync, realpathSync, statSync } from 'fs';
+import { execFileSync } from 'child_process';
 import { join, resolve, sep } from 'path';
 
 const HISTORY_PAGE_SIZE = 50;
@@ -107,18 +108,25 @@ function detectOpState(gitDir) {
 
 export async function loadLocalStatus(opts = {}) {
   const quiet = !!opts.quiet;
-  const meta = getLocalGitMeta();
-  if (!meta.isRepo) {
-    appState.localIsRepo = false;
-    appState.localStatusError = null;
-    if (!quiet) render();
-    return;
+  // Quiet polls reuse the cached root/gitDir: re-running 4 sync spawns
+  // (rev-parse ×3 + symbolic-ref) every 1.5s tick blocks the UI thread for
+  // no benefit — the status header below already carries branch/upstream.
+  // Manual refreshes always re-validate (covers `git init` after launch).
+  const skipMeta = quiet && appState.localIsRepo && appState.localRoot;
+  if (!skipMeta) {
+    const meta = getLocalGitMeta();
+    if (!meta.isRepo) {
+      appState.localIsRepo = false;
+      appState.localStatusError = null;
+      if (!quiet) render();
+      return;
+    }
+    appState.localIsRepo = true;
+    appState.localRoot = meta.root || '';
+    appState.localGitDir = meta.gitDir || '';
+    appState.localBranch = meta.branch || '';
+    appState.localUpstream = meta.upstream || null;
   }
-  appState.localIsRepo = true;
-  appState.localRoot = meta.root || '';
-  appState.localGitDir = meta.gitDir || '';
-  appState.localBranch = meta.branch || '';
-  appState.localUpstream = meta.upstream || null;
   appState.localOpState = detectOpState(appState.localGitDir);
   const root = appState.localRoot;
   const gen = startAsync('local-status');
@@ -128,12 +136,26 @@ export async function loadLocalStatus(opts = {}) {
     if (isStale(gen)) return;
     if (r.code !== 0) {
       appState.localStatusError = (r.stderr || 'git status failed').trim().split(/\r?\n/)[0];
+      // A quiet poll that suddenly fails may mean the repo went away
+      // (deleted dir, `git` removed) — re-validate once so the tab falls
+      // back to the honest empty state instead of frozen stale rows.
+      if (skipMeta && !getLocalGitMeta().isRepo) {
+        appState.localIsRepo = false;
+        appState.localStatusError = null;
+      }
     } else {
       const p = parsePorcelainV1Z(r.stdout);
-      appState.localBranch = p.branch || appState.localBranch;
-      // Header carries upstream + ahead/behind when known; never blank a
-      // boot-time upstream with an empty parse (older git, odd states).
-      if (p.upstream) appState.localUpstream = p.upstream;
+      // The porcelain header is authoritative for branch/upstream/ahead/behind.
+      // Upstream MUST be assigned (not only when truthy) so switching to a
+      // branch without upstream clears a stale value instead of displaying it.
+      if (p.branch) {
+        // Porcelain reports detached HEAD generically (`HEAD (detached)`)
+        // without the SHA — keep the boot-time `HEAD (detached <sha>)`
+        // label when we already have it.
+        const hasDetachedSha = /^HEAD \(detached [0-9a-f]+\)$/i.test(String(appState.localBranch || ''));
+        if (!(p.detached && hasDetachedSha)) appState.localBranch = p.branch;
+      }
+      appState.localUpstream = p.upstream || null;
       appState.localAhead = p.ahead || 0;
       appState.localBehind = p.behind || 0;
       appState.localStaged = p.staged;
@@ -158,11 +180,11 @@ export async function loadLocalStatus(opts = {}) {
 export async function loadLocalHistory(opts = {}) {
   if (!appState.localIsRepo || !appState.localRoot) return;
   const append = !!opts.append;
+  const quiet = !!opts.quiet;
   const page = append ? (appState.localHistoryPage || 1) + 1 : 1;
   const skip = (page - 1) * HISTORY_PAGE_SIZE;
   const gen = startAsync('local-history');
-  beginLoading(gen);
-  render();
+  if (!quiet) { beginLoading(gen); render(); }
   try {
     const r = await runGit(logArgs(HISTORY_PAGE_SIZE, skip),
       { cwd: appState.localRoot, signal: gen.signal, timeoutMs: 30000 });
@@ -184,11 +206,11 @@ export async function loadLocalHistory(opts = {}) {
     }
     clampList(appState.localHistory, 'localHistorySelected', 'localHistoryScroll');
   } catch (e) {
-    if (!isStale(gen) && e && e.code !== 'EABORTED') {
+    if (!quiet && !isStale(gen) && e && e.code !== 'EABORTED') {
       showMessage('History: ' + ((e && e.message) || 'failed').split(/\r?\n/)[0], 'error');
     }
   } finally {
-    finishLoading(gen);
+    if (!quiet) finishLoading(gen);
   }
   if (!isStale(gen)) render();
 }
@@ -200,6 +222,19 @@ function readUntrackedFile(root, rel) {
   const prefix = root.endsWith(sep) ? root : root + sep;
   if (target !== root && !target.startsWith(prefix)) {
     throw new Error('Path escapes repo: ' + rel);
+  }
+  // Resolve symlinks: a link inside the repo may point outside it — the
+  // preview must not leak files the repo doesn't contain.
+  try {
+    const real = realpathSync(target);
+    const realRoot = realpathSync(root);
+    const realPrefix = realRoot.endsWith(sep) ? realRoot : realRoot + sep;
+    if (real !== realRoot && !real.startsWith(realPrefix)) {
+      throw new Error('Path escapes repo: ' + rel);
+    }
+  } catch (e) {
+    if (e && /escapes repo/.test(String(e.message || ''))) throw e;
+    // Dangling link or race — fall through to the stat/read errors below.
   }
   const size = statSync(target).size;
   if (!Number.isFinite(size) || size > MAX_VIEW_BYTES) {
@@ -240,6 +275,15 @@ export async function loadLocalDiff() {
       label = (row.section === 'staged' ? 'staged · ' : '') + row.path;
       if (row.section === 'untracked') {
         text = readUntrackedFile(appState.localRoot, row.path);
+      } else if (row.section === 'conflicted') {
+        // Unmerged paths have no plain worktree diff (`git diff` prints
+        // nothing) — diff against HEAD so both sides show.
+        staged = false;
+        const r = await runGit(['diff', 'HEAD', '--no-color', '--unified=3', '--', row.path],
+          { cwd: appState.localRoot, signal: gen.signal, timeoutMs: 30000 });
+        if (isStale(gen)) return;
+        if (r.code !== 0) throw new Error((r.stderr || 'git diff failed').trim().split(/\r?\n/)[0]);
+        text = r.stdout || '(no diff against HEAD)';
       } else {
         staged = row.section === 'staged';
         const r = await runGit(diffArgs({ staged, path: row.path }),
@@ -249,10 +293,19 @@ export async function loadLocalDiff() {
         text = r.stdout || (staged ? '(staged, no textual diff)' : '(no unstaged changes)');
       }
     }
+    const clean = stripAnsi(text);
+    // Binary guard (mirrors the untracked reader): a forced text diff on a
+    // binary blob would paint garbage — hide it instead. NUL byte written
+    // as an explicit escape so it survives the edit layer verbatim.
+    const NUL = String.fromCharCode(0);
+    const body = clean.slice(0, 8000).includes(NUL)
+      ? 'Binary file — preview hidden.'
+      : clean.slice(0, MAX_DIFF_PREVIEW_CHARS) +
+        (clean.length > MAX_DIFF_PREVIEW_CHARS ? '\n… truncated (12KB preview cap)' : '');
     appState.localDiff = {
       path: label,
       staged,
-      text: stripAnsi(text).slice(0, MAX_DIFF_PREVIEW_CHARS),
+      text: body,
     };
     _diffScroll = 0;
   } catch (e) {
@@ -286,7 +339,15 @@ export function ensureLocalPoll() {
       if (appState.inputMode || appState.confirmAction) return;
       _pollTick++;
       if (tabState.current !== 5 && (_pollTick % 4) !== 0) return;
+      const beforeBranch = appState.localBranch;
       await loadLocalStatus({ quiet: true });
+      // History is cheap to miss and expensive to poll: refresh it when the
+      // branch changed under us (checkout/branch ops outside the TUI) or when
+      // we have none yet (fresh `git init` + first commit from a shell).
+      if (appState.localIsRepo &&
+          (appState.localBranch !== beforeBranch || (appState.localHistory || []).length === 0)) {
+        await loadLocalHistory({ quiet: true });
+      }
     } catch { /* poller never throws into the interval */ }
   }, 1500);
   if (_pollTimer.unref) _pollTimer.unref();
@@ -437,9 +498,16 @@ export function bottom() {
   if (appState.localDiff) { _diffScroll = 999999; render(); return; }
   closeDiff();
   if (appState.localFocus === 'history') {
-    appState.localHistorySelected = Math.max(0, (appState.localHistory || []).length - 1);
+    const n = (appState.localHistory || []).length;
+    appState.localHistorySelected = Math.max(0, n - 1);
+    // Keep the selection on screen: pin the scroll window to the end.
+    const vis = Math.max(1, _historyVisible);
+    appState.localHistoryScroll = Math.max(0, n - vis);
   } else {
-    appState.localStatusSelected = Math.max(0, getStatusList().length - 1);
+    const n = getStatusList().length;
+    appState.localStatusSelected = Math.max(0, n - 1);
+    const vis = Math.max(1, _statusVisible);
+    appState.localStatusScroll = Math.max(0, n - vis);
   }
   render();
 }
@@ -501,6 +569,7 @@ export async function fetchFlow() {
     }
     showMessage('Fetched', 'success');
     await loadLocalStatus({ quiet: true });
+    if (_branchPicker) await loadBranches();
   } catch (e) {
     if (!isStale(gen) && e && e.code !== 'EABORTED') showMessage('Fetch: ' + String(e.message || e).slice(0, 120), 'error');
   } finally {
@@ -559,16 +628,36 @@ async function _pullImpl() {
   if (!isStale(gen)) render();
 }
 
+// First configured remote wins (`origin` preferred); falls back to `origin`
+// when the listing fails. Synchronous (one fast local-only spawn on an
+// explicit keypress — same precedent as getLocalGitMeta) so pushFlow stays
+// synchronous and its confirm appears before the caller returns.
+function resolvePushRemote() {
+  try {
+    const out = execFileSync('git', ['remote'], {
+      cwd: appState.localRoot,
+      stdio: ['ignore', 'pipe', 'pipe'],
+      timeout: 8000,
+      encoding: 'utf-8',
+    });
+    const names = String(out || '').split(/\s+/).filter(Boolean);
+    if (names.includes('origin')) return 'origin';
+    if (names.length > 0) return names[0];
+  } catch {}
+  return 'origin';
+}
+
 export function pushFlow() {
   if (!needRepo()) return;
   const blocked = syncBlocked();
   if (blocked) { showMessage(blocked, blocked === 'Not a git repository' ? 'warning' : 'error'); return; }
   const branch = appState.localBranch || '';
   if (!appState.localUpstream) {
+    const remote = resolvePushRemote();
     confirm('Push & set upstream — ' + branch +
-      '\n\n`git push -u origin ' + branch + '`' +
+      '\n\n`git push -u ' + remote + ' ' + branch + '`' +
       '\n\nCreates the remote branch and tracks it.',
-      () => _pushImpl(['push', '-u', 'origin', branch], 'push -u'),
+      () => _pushImpl(['push', '-u', remote, branch], 'push -u'),
       'Push & set upstream');
     return;
   }
@@ -642,9 +731,10 @@ function gitFailed(action, r) {
 }
 
 // `git restore` needs git ≥2.23 — fall back to the classic spelling when
-// the binary reports an unknown option (covers old git without probing).
+// the binary reports an unknown option *or* an unknown subcommand (old git
+// says `git: 'restore' is not a git command`, which has no "unknown option").
 function isUnknownOption(r) {
-  return r && r.code !== 0 && /unknown option/i.test(String(r.stderr || ''));
+  return r && r.code !== 0 && /unknown option|not a git command|unknown command/i.test(String(r.stderr || ''));
 }
 
 export async function toggleStage() {
@@ -696,8 +786,25 @@ async function _unstagePath(path) {
 
 export function stageAll() {
   if (!needRepo()) return;
-  const n = (appState.localUnstaged || []).length + (appState.localUntracked || []).length;
-  if (n === 0) { showMessage('Nothing to stage — working tree matches the index', 'info'); return; }
+  const toStage = (appState.localUnstaged || []).length + (appState.localUntracked || []).length;
+  const staged = (appState.localStaged || []).length;
+  // Toggle semantics (matches the `a` per-file toggle): when there is nothing
+  // left to stage but the index holds entries, `A` unstages everything behind
+  // the same confirm gate instead of toasting "nothing to do".
+  if (toStage === 0 && staged > 0) {
+    const sample = [...appState.localStaged]
+      .slice(0, 5).map(e => '  ' + e.path).join('\n');
+    confirm(
+      'Unstage all — ' + staged + ' file' + (staged === 1 ? '' : 's') + '\n\n' + sample +
+      (staged > 5 ? '\n  … +' + (staged - 5) + ' more' : '') +
+      '\n\n`git restore --staged -- .` (falls back to `git reset` on old git)' +
+      '\n\nWorking-tree files are kept; only the index is cleared.',
+      () => _unstageAllImpl(),
+      'Unstage all');
+    return;
+  }
+  if (toStage === 0) { showMessage('Nothing to stage — working tree matches the index', 'info'); return; }
+  const n = toStage;
   const sample = [...appState.localUnstaged, ...appState.localUntracked]
     .slice(0, 5).map(e => '  ' + e.path).join('\n');
   confirm(
@@ -726,6 +833,29 @@ async function _stageAllImpl() {
   if (!isStale(gen)) render();
 }
 
+async function _unstageAllImpl() {
+  const gen = startAsync('local-stage');
+  beginLoading(gen);
+  render();
+  try {
+    let r = await runGit(['restore', '--staged', '--', '.'],
+      { cwd: appState.localRoot, signal: gen.signal, timeoutMs: 60000 });
+    if (isUnknownOption(r)) {
+      r = await runGit(['reset', 'HEAD', '--', '.'],
+        { cwd: appState.localRoot, signal: gen.signal, timeoutMs: 60000 });
+    }
+    if (isStale(gen)) return;
+    if (r.code !== 0) { gitFailed('Unstage all', r); return; }
+    showMessage('Unstaged all', 'success');
+    await loadLocalStatus({ quiet: true });
+  } catch (e) {
+    if (!isStale(gen) && e && e.code !== 'EABORTED') showMessage('Unstage all: ' + String(e.message || e).slice(0, 120), 'error');
+  } finally {
+    finishLoading(gen);
+  }
+  if (!isStale(gen)) render();
+}
+
 // ─── Discard (double danger confirm — irreversible) ────────────
 
 export function discardFlow() {
@@ -734,6 +864,10 @@ export function discardFlow() {
   if (!row) { showMessage('Nothing to discard', 'warning'); return; }
   if (row.section === 'staged') {
     showMessage('Unstage first (`a`), then discard — staged work is protected', 'warning');
+    return;
+  }
+  if (row.section === 'conflicted') {
+    showMessage('Resolve the conflict first — discarding a conflicted file would destroy one side silently', 'warning');
     return;
   }
   const untracked = row.section === 'untracked';
@@ -1032,6 +1166,7 @@ export function commitFlow() {
   if (!needRepo()) return;
   const n = (appState.localStaged || []).length;
   if (n === 0) { showMessage('Nothing staged — press `a` on a file first', 'warning'); return; }
+  _pendingSubject = '';
   _pendingBodyPrefill = '';
   startInput('Commit subject: ', 'local-commit-subject');
 }
@@ -1043,6 +1178,7 @@ export async function amendFlow() {
     await loadLocalHistory();
     if ((appState.localHistory || []).length === 0) { showMessage('No commits to amend', 'warning'); return; }
   }
+  _pendingSubject = '';
   const head = appState.localHistory[0];
   _pendingBodyPrefill = head.body || '';
   startInput('Amend subject: ', 'local-amend-subject', false, head.subject || '');
@@ -1296,11 +1432,12 @@ export function renderLocal(screen, y, h) {
   let cy = y;
   const endY = y + h;
   // ── Header status card ──
-  const branchLabel = '⑂ ' + (appState.localBranch || '?');
+  const a11y = !!appState.accessible;
+  const branchLabel = (a11y ? 'branch: ' : '⑂ ') + (appState.localBranch || '?');
   screen.writeStr(2, cy, branchLabel, color('gitBranch') || color('accent') || { bold: true });
   let hx = 2 + branchLabel.length + 1;
   if (appState.localUpstream) {
-    const up = '→ ' + appState.localUpstream;
+    const up = (a11y ? '-> ' : '→ ') + appState.localUpstream;
     screen.writeStr(hx, cy, up, color('gitUpstream') || { dim: true });
     hx += up.length + 1;
   } else {
@@ -1310,7 +1447,7 @@ export function renderLocal(screen, y, h) {
   const ahead = appState.localAhead || 0;
   const behind = appState.localBehind || 0;
   if (ahead > 0 || behind > 0) {
-    const pills = '↑' + ahead + ' ↓' + behind;
+    const pills = a11y ? ('up' + ahead + ' down' + behind) : ('↑' + ahead + ' ↓' + behind);
     screen.writeStr(hx, cy, pills, behind > 0 ? (color('gitBehind') || { fg: 'yellow' }) : (color('gitAhead') || { fg: 'green' }));
     hx += pills.length + 1;
   }
@@ -1320,7 +1457,7 @@ export function renderLocal(screen, y, h) {
   } else {
     screen.writeStr(hx, cy, '· local only', { dim: true });
   }
-  const autoBadge = appState.localAutoPoll ? '● auto' : '○ manual';
+  const autoBadge = appState.localAutoPoll ? (a11y ? '[auto]' : '● auto') : (a11y ? '[manual]' : '○ manual');
   const ageBadge = 'Updated ' + ageLabel();
   const rightTxt = autoBadge + ' · ' + ageBadge;
   screen.writeStr(Math.max(2, W - rightTxt.length - 2), cy, rightTxt, { dim: true });
@@ -1418,7 +1555,13 @@ function renderBranchPickerOverlay(screen) {
 function renderStatusColumn(screen, x, y, endY, W, focused, colW) {
   let cy = y;
   const scroll = Math.max(0, appState.localStatusScroll || 0);
-  let ri = 0; // running row index across sections (for scroll windowing)
+  // Unified rows once (not per entry): the scroll window is over unified
+  // indices so collapsed sections above still consume scroll positions and
+  // stay aligned with localStatusSelected.
+  const rows = getStatusList();
+  const idxByKey = new Map(rows.map((r, i) => [r.section + '' + r.path, i]));
+  let rendered = 0;
+  let capped = 0;
   for (const sec of SECTION_META) {
     if (cy >= endY) break;
     const list = sec.list();
@@ -1428,11 +1571,11 @@ function renderStatusColumn(screen, x, y, endY, W, focused, colW) {
     cy++;
     if (!open) continue;
     if (list.length === 0) continue;
-    const rows = getStatusList();
     for (const entry of list) {
-      if (ri < scroll) { ri++; continue; }
+      const idx = idxByKey.get(sec.kind + '' + entry.path) ?? -1;
+      if (idx >= 0 && idx < scroll) continue;
+      if (rendered >= MAX_STATUS_ROWS) { capped++; continue; }
       if (cy >= endY) break;
-      const idx = rows.findIndex(r => r.section === sec.kind && r.path === entry.path);
       const selected = focused && idx === (appState.localStatusSelected || 0);
       if (selected) {
         for (let xx = x; xx < Math.min(W - 1, x + colW + 6); xx++) {
@@ -1447,8 +1590,12 @@ function renderStatusColumn(screen, x, y, endY, W, focused, colW) {
         selected ? color('selection') : null);
       if (idx >= 0) _rowMap.push({ y: cy, kind: 'status', index: idx });
       cy++;
-      ri++;
+      rendered++;
     }
+  }
+  if (capped > 0 && cy < endY) {
+    screen.writeStr(x, cy, '… +' + capped + ' more (200-row cap)', { dim: true });
+    cy++;
   }
   if (cy < endY && getStatusList().length === 0 && !appState.localStatusError) {
     screen.writeStr(x, cy, 'Clean — nothing to commit ✓', { fg: 'green' });

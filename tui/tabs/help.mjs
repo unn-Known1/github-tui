@@ -160,7 +160,7 @@ const CATEGORIES = [
     { key: 'Space',     desc: 'Load more commits (append)' },
     { key: 'y / o',     desc: 'Copy SHA/path, open commit/repo on GitHub' },
     { key: 'r',         desc: 'Refresh status + history' },
-    { key: 'g / G',     desc: 'Jump to top / bottom (g is two-press: g g)' },
+    { key: 'g / G',     desc: 'Jump to top / bottom (single-press on Local)' },
     { key: 'a / A',     desc: 'Stage / unstage file, stage-all / unstage-all' },
     { key: 'X',         desc: 'Discard changes (double danger-confirm)' },
     { key: 'c / C',     desc: 'Commit (subject + body), amend last commit' },

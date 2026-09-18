@@ -707,7 +707,7 @@ function statusLine() {
       return ' [↑↓jk] Nav' + sep + '[Enter] View runs' + sep + '[/] Filter' + sep + '[F] Failures' + sep + '[R] Rescan' + sep + '[?] Help';
     }
     case 4: return ' [↑↓jk] Nav' + sep + '[Enter] Open' + sep + '[m] Read' + sep + '[M] All' + sep + '[f] Filter' + sep + '[H] Hide processed' + sep + '[u] Unsubscribe';
-    case 5: return ' [Enter] Diff' + sep + '[a] Stage' + sep + '[X] Discard' + sep + '[c] Commit' + sep + '[f] Fetch' + sep + '[p] Pull' + sep + '[P] Push' + sep + '[B] Branch' + sep + '[/] Focus';
+    case 5: return ' [Enter] Diff' + sep + '[a] Stage' + sep + '[X] Discard' + sep + '[c] Commit' + sep + '[f] Fetch' + sep + '[p] Pull' + sep + '[P] Push' + sep + '[B] Branch' + sep + '[[ ] ] Focus';
     case 6: return ' [↑↓] Nav' + sep + '[Enter] Select' + sep + '[s] Star repo' + sep + '[c] Clear account cache' + sep + '[?] Help';
   }
   return '';
@@ -778,7 +778,7 @@ function doRender() {
   // the terminal. Covers all switch paths (keys, mouse, palette, auto
   // setTab on auth expiry) since they all funnel through doRender.
   const viewKey = tabState.current + '|' + appState.analyzeView + '|' +
-    appState.detailsPane + '|' + appState.actionsView;
+    appState.detailsPane + '|' + appState.actionsView + '|' + (appState.localBranch || '');
   if (viewKey !== _lastViewKey) {
     _lastViewKey = viewKey;
     screen.invalidate();
