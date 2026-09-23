@@ -155,7 +155,9 @@ export function writeJson(path, value) {
   // truncated JSON file — bookmarks/pins/searches would be silently wiped
   // or quarantined on the next load.
   const tmp = path + '.tmp';
-  writeFileSync(tmp, JSON.stringify(value, null, 2));
+  // GT-01 hardening: create the temp file with 0600 atomically so the
+  // secret is never world-readable between write and chmod (umask window).
+  writeFileSync(tmp, JSON.stringify(value, null, 2), { encoding: 'utf8', mode: 0o600 });
   try { chmodSync(tmp, 0o600); } catch {}
   renameSync(tmp, path);
 }

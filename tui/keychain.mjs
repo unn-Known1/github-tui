@@ -7,7 +7,7 @@
 // The module never throws — every public function returns a value or null/false
 // so callers can always fall back to plaintext gracefully.
 
-import { execFileSync } from 'child_process';
+import { execFileSync, spawnSync } from 'child_process';
 import { appendFileSync, mkdirSync, existsSync } from 'fs';
 import { join } from 'path';
 import { platform, homedir } from 'os';
@@ -189,17 +189,40 @@ function _removeSecretTool() {
 // ── Windows Credential Manager (cmdkey + PowerShell) ────────────────
 
 function _saveWindows(token) {
-  // LIMITATION: cmdkey has no stdin mode — /pass: is the only way to store
-  // non-interactively, so the secret is briefly visible in the process list
-  // to the same user. This is an OS-tool constraint (no native dep allowed);
-  // the token is never logged, never shelled, and the child lives <5s.
-  // Prefer secret-tool/macOS backends where available.
-  execFileSync(
-    'cmdkey',
-    ['/generic:' + SERVICE, '/user:' + ACCOUNT, '/pass:' + String(token)],
-    { stdio: 'pipe', timeout: 5000 }
-  );
-  return true;
+  // GT-02: never interpolate the token into a PowerShell/cmdline string.
+  // Primary path pipes the token via stdin ([Console]::In.ReadLine()) so it
+  // never appears in argv/ps output and PowerShell metacharacters (', $, `)
+  // cannot break out. Falls back to cmdkey only when the Vault API is
+  // unavailable (cmdkey has no stdin mode — OS-tool constraint, token
+  // briefly visible to the same user; never logged, never shelled).
+  const t = String(token);
+  if (!t || /[\r\n\0]/.test(t)) return false;
+  try {
+    const script =
+      `$token = [Console]::In.ReadLine();\n` +
+      `if ([string]::IsNullOrEmpty($token)) { exit 1 }\n` +
+      `[Windows.Security.Credentials.PasswordVault, Windows.Security.Credentials, ContentType = WindowsRuntime] | Out-Null;\n` +
+      `$vault = New-Object Windows.Security.Credentials.PasswordVault;\n` +
+      `$vault.Add((New-Object Windows.Security.Credentials.PasswordCredential ('github-tui', 'token', $token)));`;
+    const res = spawnSync('powershell.exe',
+      ['-NoProfile', '-NonInteractive', '-Command', script],
+      { input: t + '\n', encoding: 'utf8', timeout: 5000, windowsHide: true, stdio: ['pipe', 'pipe', 'pipe'] });
+    if (res && res.status === 0) return true;
+  } catch (e) {
+    _noteSpawnError(e);
+  }
+  try {
+    execFileSync(
+      'cmdkey',
+      ['/generic:' + SERVICE, '/user:' + ACCOUNT, '/pass:' + t],
+      { stdio: 'pipe', timeout: 5000 }
+    );
+    return true;
+  } catch (e) {
+    _noteSpawnError(e);
+    _debug('keychain _saveWindows failed:', e.message);
+    return false;
+  }
 }
 
 function _loadWindows() {

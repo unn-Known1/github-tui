@@ -3,6 +3,7 @@
 
 import {
   readFileSync, writeFileSync, mkdirSync, chmodSync, renameSync, statSync,
+  existsSync, copyFileSync,
 } from 'fs';
 import { dirname, resolve, join } from 'path';
 import {
@@ -96,9 +97,24 @@ function writeConfigFile(path, value) {
   const dir = dirname(path);
   mkdirSync(dir, { recursive: true });
   const tmp = `${path}.tmp.${process.pid}`;
-  writeFileSync(tmp, JSON.stringify(value, null, 2));
+  writeFileSync(tmp, JSON.stringify(value, null, 2), { encoding: 'utf8', mode: 0o600 });
   try { chmodSync(tmp, 0o600); } catch {}
   renameSync(tmp, path);
+}
+
+// GT-20: importing a bundle overwrote user config irreversibly. Snapshot a
+// timestamped .bak copy of every file we are about to replace so a bad
+// import can be rolled back by hand.
+export function backupConfigFile(path) {
+  try {
+    if (!existsSync(path)) return null;
+    const backup = `${path}.bak.${new Date().toISOString().replace(/[:.]/g, '-')}`;
+    copyFileSync(path, backup);
+    try { chmodSync(backup, 0o600); } catch {}
+    return backup;
+  } catch {
+    return null;
+  }
 }
 
 export function exportPortableConfig(path) {
@@ -136,21 +152,23 @@ export function importPortableConfig(path, { merge = true } = {}) {
     ? { ...current, ...bundle }
     : { ...current, ...Object.fromEntries(Object.entries(bundle).filter(([, v]) => v !== undefined)) };
   // Import is intentionally explicit and never writes token/cache files.
-  if (next.bookmarks !== undefined) writeConfigFile(BOOKMARKS_FILE, next.bookmarks);
-  if (next.savedSearches !== undefined) writeConfigFile(SAVED_SEARCHES_FILE, next.savedSearches);
-  if (next.pins !== undefined) writeConfigFile(PINS_FILE, next.pins);
-  if (next.repoPreferences !== undefined) writeConfigFile(REPO_PREFS_FILE, next.repoPreferences);
-  if (next.sections !== undefined) writeConfigFile(SECTIONS_FILE, next.sections);
-  if (next.keybindings !== undefined) writeConfigFile(KEYBINDINGS_FILE, next.keybindings);
+  // GT-20: back up each existing file before overwriting it.
+  if (next.bookmarks !== undefined) { backupConfigFile(BOOKMARKS_FILE); writeConfigFile(BOOKMARKS_FILE, next.bookmarks); }
+  if (next.savedSearches !== undefined) { backupConfigFile(SAVED_SEARCHES_FILE); writeConfigFile(SAVED_SEARCHES_FILE, next.savedSearches); }
+  if (next.pins !== undefined) { backupConfigFile(PINS_FILE); writeConfigFile(PINS_FILE, next.pins); }
+  if (next.repoPreferences !== undefined) { backupConfigFile(REPO_PREFS_FILE); writeConfigFile(REPO_PREFS_FILE, next.repoPreferences); }
+  if (next.sections !== undefined) { backupConfigFile(SECTIONS_FILE); writeConfigFile(SECTIONS_FILE, next.sections); }
+  if (next.keybindings !== undefined) { backupConfigFile(KEYBINDINGS_FILE); writeConfigFile(KEYBINDINGS_FILE, next.keybindings); }
   // Theme is a RAW string file (theme.mjs reads it with trim(), no JSON
   // parsing) — write it as a bare string, not through writeConfigFile's
   // JSON.stringify. Same atomicity + 0600 guarantee, hand-rolled here.
   if (next.theme) {
+    backupConfigFile(THEME_FILE);
     const tmp = THEME_FILE + '.tmp.' + process.pid;
-    writeFileSync(tmp, String(next.theme));
+    writeFileSync(tmp, String(next.theme), { encoding: 'utf8', mode: 0o600 });
     try { chmodSync(tmp, 0o600); } catch {}
     renameSync(tmp, THEME_FILE);
   }
-  if (next.session) writeConfigFile(SESSION_FILE, next.session);
+  if (next.session) { backupConfigFile(SESSION_FILE); writeConfigFile(SESSION_FILE, next.session); }
   return next;
 }

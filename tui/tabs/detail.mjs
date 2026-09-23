@@ -14,6 +14,9 @@ import { showError } from '../error-recovery.mjs';
 
 const REACTIONS = ['+1', '-1', 'laugh', 'confused', 'heart', 'hooray', 'rocket', 'eyes'];
 
+// GT-09: cap for the synchronous diff preview (event-loop freeze guard).
+export const MAX_DIFF_PREVIEW_LINES = 1500;
+
 // Convert a hex color string (e.g. "d73a4a") to the nearest terminal named color.
 function hexToNamedColor(hex) {
   if (!hex) return 'darkGray';
@@ -343,7 +346,20 @@ export function viewFileDiff(index) {
   const file = appState.detailFiles[index];
   appState.detailDiffView = true;
   appState.detailDiffFile = file;
-  appState.detailDiffContent = file.patch || '(no diff available)';
+  // GT-09: large PR diffs (>1500 lines / >2MB generated files) froze the
+  // single-threaded event loop during synchronous tokenization. Cap the
+  // preview with an informative banner; the full diff stays on GitHub.
+  const raw = file.patch || '(no diff available)';
+  const lines = String(raw).split(/\r?\n/);
+  if (lines.length > MAX_DIFF_PREVIEW_LINES) {
+    appState.detailDiffContent = lines.slice(0, MAX_DIFF_PREVIEW_LINES).join('\n') +
+      '\n… truncated: showing first ' + MAX_DIFF_PREVIEW_LINES + ' of ' +
+      lines.length + ' lines (open in browser for the full diff)';
+    appState.detailDiffTruncated = { shown: MAX_DIFF_PREVIEW_LINES, total: lines.length };
+  } else {
+    appState.detailDiffContent = raw;
+    appState.detailDiffTruncated = null;
+  }
   appState.detailDiffScroll = 0;
   render();
 }
@@ -352,6 +368,7 @@ export function closeDiffView() {
   appState.detailDiffView = false;
   appState.detailDiffFile = null;
   appState.detailDiffContent = '';
+  appState.detailDiffTruncated = null;
   appState.detailDiffScroll = 0;
   render();
 }

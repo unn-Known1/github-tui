@@ -84,9 +84,53 @@ registerInputHandler('release-publish-id', (value) => {
 
 export function editRelease() {
   if (!requireRepoAuth()) return;
-  startInput('Release id and JSON patch (id|{"name":"..."}): ', 'release-edit');
+  // GT-19: guided form instead of raw JSON — sequential prompts (id → title
+  // → tag → notes) with per-field validation, so a typo cannot silently
+  // produce invalid JSON. The legacy one-shot `id|JSON` handler below is
+  // kept for backward compatibility (scripts / muscle memory).
+  appState._releaseEdit = {};
+  startInput('Release id to edit: ', 'release-edit-id');
 }
+registerInputHandler('release-edit-id', (value) => {
+  const id = String(value || '').trim();
+  if (!id) { showMessage('Release id is required — flow cancelled', 'warning'); appState._releaseEdit = null; render(); return; }
+  appState._releaseEdit.id = id;
+  startInput('New title (empty to keep): ', 'release-edit-title');
+});
+registerInputHandler('release-edit-title', (value) => {
+  if (!appState._releaseEdit) return;
+  const title = String(value ?? '').trim();
+  if (title) appState._releaseEdit.name = title;
+  startInput('New tag (empty to keep): ', 'release-edit-tag');
+});
+registerInputHandler('release-edit-tag', (value) => {
+  if (!appState._releaseEdit) return;
+  const tag = String(value ?? '').trim();
+  if (tag) appState._releaseEdit.tag_name = tag;
+  startInput('New notes (empty to keep): ', 'release-edit-body');
+});
+registerInputHandler('release-edit-body', (value) => {
+  const draft = appState._releaseEdit;
+  if (!draft || !draft.id) { showMessage('Release edit flow expired — start again', 'warning'); return; }
+  const body = String(value ?? '');
+  if (body.trim()) draft.body = body;
+  const { id, ...patch } = draft;
+  appState._releaseEdit = null;
+  const allowed = ['tag_name', 'target_commitish', 'name', 'body', 'draft', 'prerelease'];
+  const filtered = Object.fromEntries(Object.entries(patch).filter(([key]) => allowed.includes(key)));
+  if (Object.keys(filtered).length === 0) {
+    showMessage('Nothing to update — all fields left empty', 'warning');
+    render();
+    return;
+  }
+  const [owner, name] = appState.repoDetails.full_name.split('/');
+  confirm('Update release ' + String(id).trim() + ' on ' + appState.repoDetails.full_name + '?', async () => {
+    try { await updateRelease(appState.token, owner, name, String(id).trim(), filtered); showMessage('Release updated', 'success'); render(); }
+    catch (e) { showMessage('Release update failed: ' + e.message, 'error'); }
+  }, 'Edit release');
+});
 registerInputHandler('release-edit', (value) => {
+  // Legacy one-shot `id|JSON` path — kept for scripts/muscle memory.
   // Split on the FIRST pipe only — the JSON patch itself may contain '|'
   // (e.g. in a release body), and split('|') silently truncated it.
   const text = String(value || '');

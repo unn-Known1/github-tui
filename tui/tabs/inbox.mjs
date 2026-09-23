@@ -47,11 +47,30 @@ export function saveSnoozedState() {
 let _filterCache = { key: null, result: null };
 export function bumpInboxFilterGen() { _filterCache.key = null; }
 
+// GT-17: expired snoozes were only pruned on startup, so 1h snoozes stayed
+// hidden for whole day-long sessions. Prune on every load (and lazily in
+// the filter pipeline via the minute-bucketed cache key) so expiry surfaces
+// without a restart.
+export function pruneExpiredSnoozes() {
+  const snoozed = appState.inboxSnoozed || {};
+  const now = Date.now();
+  let changed = false;
+  for (const id of Object.keys(snoozed)) {
+    if (!(snoozed[id] > now)) { delete snoozed[id]; changed = true; }
+  }
+  if (changed) {
+    saveSnoozedState();
+    bumpInboxFilterGen();
+  }
+  return changed;
+}
+
 export async function loadNotifications() {
   if (!appState.token) {
     showMessage('Login required to view notifications', 'warning');
     return;
   }
+  pruneExpiredSnoozes();
   const gen = startAsync('inbox');
   beginLoading(gen);
   appState.inboxPage = 1;
@@ -270,7 +289,7 @@ export function markAllRead() {
       if (!(snoozed[m.id] > now)) targets.push(m);
     }
   }
-  confirm('Mark ' + targets.length + ' visible as read? (filtered view; snoozed excluded)', async () => {
+  confirm('Mark ' + targets.length + ' visible as read? (filtered view; snoozed excluded; cannot be undone on GitHub)', async () => {
     if (!appState.token) return;
     // Snapshot targets now: the user may navigate away / state may change
     // while the batch is in flight — members captured earlier stay accurate.
@@ -285,7 +304,9 @@ export function markAllRead() {
         }
       }
       normalizeInboxCursor();
-      showMessage('✓ Marked ' + done + ' as read', 'success');
+      // GT-21: GitHub has no bulk "unmark read" endpoint — a local undo
+      // would lie (refresh re-pulls "read" from the server). Say so plainly.
+      showMessage('✓ Marked ' + done + ' as read (cannot be undone on GitHub server)', 'success');
     } catch (e) {
       showMessage('Failed after ' + done + '/' + batch.length + ': ' + e.message, 'error');
     } finally {

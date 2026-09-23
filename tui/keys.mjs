@@ -972,7 +972,7 @@ function handlePageUp() {
   if (t === 0) dashboard.pageUp();
   else if (t === 1) repos.pageUp();
   else if (t === 2) analyze.pageUp();
-  else if (t === 3) actions.up();
+  else if (t === 3) actions.pageUp();
   else if (t === 4) inbox.pageUp();
   else if (t === 5) local.pageUp();
 }
@@ -981,7 +981,7 @@ function handlePageDown() {
   if (t === 0) dashboard.pageDown();
   else if (t === 1) repos.pageDown();
   else if (t === 2) analyze.pageDown();
-  else if (t === 3) actions.down();
+  else if (t === 3) actions.pageDown();
   else if (t === 4) inbox.pageDown();
   else if (t === 5) local.pageDown();
 }
@@ -1011,7 +1011,7 @@ function handleTop() {
   } else if (t === 2) {
     analyze.jumpTop();
   } else if (t === 3) {
-    if (appState.actionsLog) appState.actionsLogScroll = 0;
+    if (appState.actionsLog) actions.logTop();
     else { appState.actionsSelected = 0; appState.actionsScroll = 0; }
     render();
   } else if (t === 4) {
@@ -1065,9 +1065,7 @@ function handleBottom() {
     render();
   } else if (t === 3) {
     if (appState.actionsLog) {
-      const lines = String(appState.actionsLog.text || '').split(/\r?\n/);
-      appState.actionsLogScroll = Math.max(0, lines.length - 1);
-      render();
+      actions.logBottom();
     } else {
       actions.bottom(screen);
       render();

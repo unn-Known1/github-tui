@@ -338,6 +338,11 @@ export function handleOnboardingKey(key) {
   }
   if (key === '\x1b[D' || key === 'h') {
     stepIdx = Math.max(0, stepIdx - 1);
+    // GT-23: backward navigation must not retain dirty validation flags from
+    // later steps — clear transient per-step error state on every transition
+    // so step 0 never shows stale warnings.
+    appState._onboardingError = null;
+    appState._onboardingValidation = null;
     render();
     return true;
   }

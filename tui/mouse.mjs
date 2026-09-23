@@ -1573,6 +1573,13 @@ function scrollUp(sx, sy) {
   } else if (t === 2) {
     if (appState.detailsScroll > 0) { appState.detailsScroll--; render(); }
   } else if (t === 3) {
+    // A log overlay owns the viewport — the wheel must scroll the LOG, not
+    // the run list hiding underneath it (previously wheel-over-log silently
+    // moved the invisible list, so the log felt frozen).
+    if (appState.actionsLog) {
+      import('./tabs/actions.mjs').then(m => m.logWheel(-3)).catch(() => {});
+      return;
+    }
     if (appState.actionsView === 'repos') {
       if (appState.actionsRepoScroll > 0) { appState.actionsRepoScroll--; render(); }
     } else {
@@ -1609,6 +1616,10 @@ function scrollDown(sx, sy) {
     appState.detailsScroll++;
     render();
   } else if (t === 3) {
+    if (appState.actionsLog) {
+      import('./tabs/actions.mjs').then(m => m.logWheel(3)).catch(() => {});
+      return;
+    }
     if (appState.actionsView === 'repos') {
       const maxV = Math.max(1, screen.height - 12);
       if (appState.actionsRepoScroll + maxV < appState.actionsRepos.length) { appState.actionsRepoScroll++; render(); }

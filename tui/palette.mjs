@@ -76,7 +76,10 @@ export function filter(query) {
   const all = actions
     .map(a => ({ a, s: score(query, a.label) }))
     .filter(x => x.s >= 0)
-    .sort((a, b) => b.s - a.s)
+    // GT-18: deterministic tie-breaker — identical fuzzy scores previously
+    // sorted non-deterministically across V8 versions, making matches jump
+    // between keystrokes. Secondary key is the display title.
+    .sort((a, b) => (b.s - a.s) || a.a.label.localeCompare(b.a.label))
     .slice(0, 20)  // Increased from 15 to accommodate categories
     .map(x => x.a);
 

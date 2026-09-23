@@ -11,7 +11,7 @@ import {
   dispatchWorkflow, rerunWorkflow, cancelWorkflowRun,
 } from '../github.mjs';
 import { validateWorkflowInputs, buildFailureQueue } from '../recommended-features.mjs';
-import { openUrl, relTime, truncate, displayWidth } from '../utils.mjs';
+import { openUrl, relTime, truncate, displayWidth, stripAnsi } from '../utils.mjs';
 import { color } from '../theme.mjs';
 import { emptyState, loadingIndicator, scrollIndicators, collapsibleHeader } from '../render.mjs';
 import { startInput, registerInputHandler } from '../input.mjs';
@@ -242,6 +242,10 @@ async function submitWorkflowDispatch(dispatch, ref, inputs) {
 }
 
 registerInputHandler('actions-dispatch-workflow', (value) => {
+  // GT-07: Escape cancels the input modal without invoking this handler, but
+  // a null/undefined value must never resolve to a default workflow — treat
+  // it as an explicit cancel so no CI run fires.
+  if (value === null || value === undefined) { showMessage('Workflow dispatch cancelled', 'info'); return; }
   const dispatch = appState.actionsDispatch;
   const workflows = appState.actionsWorkflowList || [];
   const raw = String(value || '').trim();
@@ -253,9 +257,13 @@ registerInputHandler('actions-dispatch-workflow', (value) => {
 });
 
 registerInputHandler('actions-dispatch-ref', (value) => {
+  // GT-07: cancelling the ref prompt must NOT fall back to 'main' and fire a
+  // live run. Null/undefined (or empty after validation) aborts the flow.
+  if (value === null || value === undefined) { showMessage('Workflow dispatch cancelled', 'info'); return; }
   const dispatch = appState.actionsDispatch;
   if (!dispatch) return;
   const ref = String(value || '').trim();
+  if (!ref) { showMessage('Workflow dispatch cancelled — a branch or tag is required', 'info'); return; }
   const declared = dispatch.workflow.inputs || dispatch.workflow.workflow_dispatch?.inputs || {};
   if (Object.keys(declared).length) {
     dispatch.ref = ref;
@@ -265,6 +273,7 @@ registerInputHandler('actions-dispatch-ref', (value) => {
   submitWorkflowDispatch(dispatch, ref, {});
 });
 registerInputHandler('actions-dispatch-inputs', (value) => {
+  if (value === null || value === undefined) { showMessage('Workflow dispatch cancelled', 'info'); return; }
   const dispatch = appState.actionsDispatch;
   if (!dispatch) return;
   let inputs;
@@ -482,6 +491,7 @@ export function goBack() {
   if (appState.actionsLog) {
     appState.actionsLog = null;
     appState.actionsLogScroll = 0;
+    invalidateLogLines();
     render();
     return;
   }
@@ -507,8 +517,14 @@ function renderWorkflowLog(screen, y, h, W) {
   screen.writeStr(Math.max(2, W - 28), y, log?.truncated ? 'TRUNCATED' : 'FULL LOG', log?.truncated ? { fg: 'yellow', bold: true } : { dim: true });
   screen.hline(y + 1, '─', color('dim'));
   if (appState.actionsLoading && !log?.text) { loadingIndicator(screen, 2, y + 3, 'loading log'); return; }
-  const lines = String(log?.text || '(empty log)').split(/\r?\n/);
+  // Cached split+sanitized lines (see getLogLines): a 2MB log re-split on
+  // every frame/keypress janked scrolling badly enough to feel broken.
+  const lines = getLogLines();
   const rows = Math.max(1, h - 5);
+  // Publish viewport geometry for paging (pageUp/pageDown), the mouse wheel
+  // handler, and g/G clamping — previously every consumer recomputed (or
+  // guessed) rows differently, so PgDn moved one line and G overshot.
+  appState._actionsLogRows = rows;
   const maxScroll = Math.max(0, lines.length - rows);
   appState.actionsLogScroll = Math.max(0, Math.min(maxScroll, appState.actionsLogScroll || 0));
   for (let i = 0; i < rows && i + appState.actionsLogScroll < lines.length; i++) {
@@ -516,9 +532,81 @@ function renderWorkflowLog(screen, y, h, W) {
     const style = /error|fail|exception|fatal/i.test(line) ? { fg: 'red' } : /warning|warn/i.test(line) ? { fg: 'yellow' } : null;
     screen.writeStr(2, y + 2 + i, truncate(line, W - 4), style);
   }
+  scrollIndicators(screen, y + 2, y + 2 + rows - 1, appState.actionsLogScroll, lines.length);
   screen.writeStr(2, y + 2 + Math.min(rows, lines.length),
     'Lines ' + (appState.actionsLogScroll + 1) + '-' + Math.min(appState.actionsLogScroll + rows, lines.length) +
-    ' of ' + lines.length + '   [Esc] back  [g/G] top/bottom', { dim: true });
+    ' of ' + lines.length + '   [Esc] back  [g/G] top/bottom  [PgUp/PgDn] page', { dim: true });
+}
+
+// ── Workflow log scroll model ────────────────────────────────────
+// Single source of truth for the log viewport so keyboard, mouse wheel,
+// and g/G all clamp to the same maxScroll (lines - visible rows). The old
+// code clamped to lines.length - 1 in four different places, letting the
+// stored scroll drift past the viewport and snap back on the next render.
+
+let _logLinesCache = { ref: null, lines: [] };
+
+// Split + sanitize once per loaded log. Strips ANSI color codes (CI logs
+// are full of them — they broke truncate()'s width math and could bleed
+// styles into following rows) and normalizes CRLF.
+export function getLogLines() {
+  const log = appState.actionsLog;
+  if (!log) return [];
+  if (_logLinesCache.ref === log) return _logLinesCache.lines;
+  const lines = String(log.text || '(empty log)').split(/\r?\n/).map(l => stripAnsi(l));
+  _logLinesCache = { ref: log, lines };
+  return lines;
+}
+
+export function invalidateLogLines() { _logLinesCache = { ref: null, lines: [] }; }
+
+export function getLogRows() {
+  return Math.max(1, appState._actionsLogRows || 10);
+}
+
+export function getLogMaxScroll() {
+  return Math.max(0, getLogLines().length - getLogRows());
+}
+
+function clampLogScroll(v) {
+  return Math.max(0, Math.min(getLogMaxScroll(), Number.isFinite(+v) ? +v : 0));
+}
+
+export function logTop() {
+  appState.actionsLogScroll = 0;
+  render();
+}
+
+export function logBottom() {
+  appState.actionsLogScroll = getLogMaxScroll();
+  render();
+}
+
+export function logPageUp() {
+  appState.actionsLogScroll = clampLogScroll((appState.actionsLogScroll || 0) - getLogRows());
+  render();
+}
+
+export function logPageDown() {
+  appState.actionsLogScroll = clampLogScroll((appState.actionsLogScroll || 0) + getLogRows());
+  render();
+}
+
+// Mouse wheel step (3 lines, clamped). Exported so mouse.mjs can share the
+// same clamping instead of guessing geometry.
+export function logWheel(delta) {
+  appState.actionsLogScroll = clampLogScroll((appState.actionsLogScroll || 0) + delta);
+  render();
+}
+
+export function pageUp() {
+  if (appState.actionsLog) { logPageUp(); return; }
+  up();
+}
+
+export function pageDown() {
+  if (appState.actionsLog) { logPageDown(); return; }
+  down();
 }
 
 export function renderActions(screen, y, h) {
@@ -802,7 +890,7 @@ export const keys = {
 
 export function up() {
   if (appState.actionsLog) {
-    appState.actionsLogScroll = Math.max(0, appState.actionsLogScroll - 1);
+    appState.actionsLogScroll = clampLogScroll(appState.actionsLogScroll - 1);
     render();
   } else if (appState.actionsView === 'failures') {
     const maxVisible = appState._actionsListBounds?.maxRows || Math.max(1, 10);
@@ -829,8 +917,7 @@ export function up() {
 
 export function down() {
   if (appState.actionsLog) {
-    const lines = String(appState.actionsLog.text || '').split(/\r?\n/);
-    appState.actionsLogScroll = Math.min(Math.max(0, lines.length - 1), appState.actionsLogScroll + 1);
+    appState.actionsLogScroll = clampLogScroll(appState.actionsLogScroll + 1);
     render();
   } else if (appState.actionsView === 'failures') {
     const failures = appState.actionsFailures || [];
@@ -859,8 +946,7 @@ export function down() {
 
 export function bottom(screen) {
   if (appState.actionsLog) {
-    const lines = String(appState.actionsLog.text || '').split(/\r?\n/);
-    appState.actionsLogScroll = Math.max(0, lines.length - 1);
+    appState.actionsLogScroll = getLogMaxScroll();
   } else if (appState.actionsView === 'repos') {
     const repos = getFilteredRepos();
     appState.actionsRepoSelected = Math.max(0, repos.length - 1);
