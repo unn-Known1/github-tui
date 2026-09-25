@@ -723,7 +723,7 @@ export function renderDashboard(screen, y, h) {
       title: 'Welcome to GitHub TUI',
       message: 'Sign in with a Personal Access Token to see your dashboard.',
       hint: '',
-      keyHint: 'Press [6] for Settings  →  [Enter] on Login',
+      keyHint: 'Press [0] for Settings  →  [Enter] on Login',
     });
     return;
   }

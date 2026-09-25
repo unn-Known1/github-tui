@@ -171,13 +171,14 @@ function buildSteps() {
       icon: '■',
       title: 'The keyboard is your friend',
       body: [
-        'Six numbered tabs at the top:',
+        'Numbered tabs at the top:',
         '  [1] Dash      · greeting, activity, stats, trending',
         '  [2] Repos     · your repos with filters, sort, pins',
         '  [3] Explore   · search any public repo, view details',
         '  [4] Actions   · CI / workflow runs',
         '  [5] Inbox     · triage notifications',
-        '  [6] Settings  · theme, login, system info',
+        '  [6] Local     · local git status, history, sync',
+        '  [0] Settings  · theme, login, system info',
         '',
         'Power keys (work everywhere):',
         '  [Ctrl-P / :]  open the command palette',
@@ -419,7 +420,7 @@ export function renderOnboarding(screen, opts = {}) {
       cx += text.length + 1;
     }
     bodyY++;
-    screen.writeStr(x0 + 3, bodyY, 'Change theme later with [6] Settings → Appearance.', { dim: true });
+    screen.writeStr(x0 + 3, bodyY, 'Change theme later with [0] Settings → Appearance.', { dim: true });
   }
 
   const hintY = y0 + boxH - 3;

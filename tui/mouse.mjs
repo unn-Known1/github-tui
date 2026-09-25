@@ -370,6 +370,20 @@ export function handleMouseEvent(event) {
     // Actions tab list. Renderers publish separate origins because the repo
     // list and workflow-run list have different headers/offsets.
     if (t === 3) {
+      if (appState.actionsLog) return;
+      // Runs view with an expanded run publishes a per-row map (run + job)
+      // so hover lands on jobs/steps, not just run headers.
+      const rowMap = appState._actionsRowMap;
+      if (appState.actionsView === 'runs' && Array.isArray(rowMap)) {
+        const hit = rowMap.find(r => r.y === sy);
+        if (hit) {
+          let changed = false;
+          if (hit.runIdx !== appState.actionsSelected) { appState.actionsSelected = hit.runIdx; changed = true; }
+          if (hit.jobIdx >= 0 && hit.jobIdx !== (appState.actionsJobSelected || 0)) { appState.actionsJobSelected = hit.jobIdx; changed = true; }
+          if (changed) render();
+        }
+        return;
+      }
       const bounds = appState._actionsListBounds;
       if (bounds && sy >= bounds.rowStart && sy < bounds.rowStart + bounds.maxRows) {
         const absIdx = sy - bounds.rowStart + bounds.scroll;
@@ -1506,6 +1520,30 @@ function dispatchInboxClick(sy) {
 }
 
 function dispatchActionsClick(sx, sy) {
+  void sx;
+  // Fullscreen log owns all clicks — the hidden run list must not mutate underneath.
+  if (appState.actionsLog) return;
+  // Runs view with row map: click selects run AND job; double-click a job
+  // opens that job's log, double-click a run header toggles detail.
+  if (appState.actionsView === 'runs' && Array.isArray(appState._actionsRowMap)) {
+    const hit = appState._actionsRowMap.find(r => r.y === sy);
+    if (!hit) return;
+    appState.actionsSelected = hit.runIdx;
+    if (hit.jobIdx >= 0) appState.actionsJobSelected = hit.jobIdx;
+    const key = hit.runIdx + ':' + hit.jobIdx;
+    if (appState._actionsClickedIndex === key) {
+      appState._actionsClickedIndex = null;
+      if (hit.jobIdx >= 0) {
+        import('./tabs/actions.mjs').then(m => m.openSelectedJobLog()).catch((e) => showMessage((e && e.message) || 'Action failed', 'error'));
+      } else {
+        import('./tabs/actions.mjs').then(m => m.enter()).catch((e) => showMessage((e && e.message) || 'Action failed', 'error'));
+      }
+    } else {
+      appState._actionsClickedIndex = key;
+      render();
+    }
+    return;
+  }
   const bounds = appState._actionsListBounds;
   if (!bounds || sy < bounds.rowStart || sy >= bounds.rowStart + bounds.maxRows) return;
   const itemIdx = sy - bounds.rowStart + bounds.scroll;

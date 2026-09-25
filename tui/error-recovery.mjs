@@ -9,7 +9,7 @@ import { showMessage, setRetryHandler, clearRetryHandler } from './state.mjs';
 const RECOVERY_PATTERNS = [
   {
     pattern: /401|Bad credentials|Unauthorized/i,
-    recovery: 'Check your token in Settings [6] — press Enter on the sign-in step',
+    recovery: 'Check your token in Settings [0] — press Enter on the sign-in step',
   },
   {
     pattern: /403|rate limit|abuse/i,

@@ -2,6 +2,13 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.8.1] - 2026-09-25
+
+### Fixed
+- **Actions per-job logs** — expanded runs now have a job cursor (`J`/`K` or `[`/`]` to move, `l` or double-click to open that job's log); fullscreen log header shows job name + position (`2/5`), `J`/`K` flips prev/next job without leaving the viewer, each job keeps its own scroll position, and `Enter`/`Space`/clicks no longer mutate the hidden run list while a log is open
+- **Stale Settings key** — Dashboard/Actions/Inbox/Repos empty states, error-recovery hint, and onboarding now say `[0] Settings` (was `[6]`); onboarding tab list updated to include `[6] Local` + `[0] Settings`
+- **Local footer** — `[[ ] ] Focus` corrected to `[[ / ]] Focus` (`[`/`]` switches status/history focus); Actions footer gains `[J/K] Job` and a dedicated log-viewer footer
+
 ## [0.8.0] - 2026-09-18
 
 ### Added

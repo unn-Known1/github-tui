@@ -538,7 +538,7 @@ export function renderRepos(screen, y, h) {
       title: hasFilters ? 'No matching repos' : 'No repositories',
       message: hasFilters
         ? 'Try clearing filters with [c] or click ✕ on a chip above'
-        : 'Load repos by logging in at Settings [6]',
+        : 'Load repos by logging in at Settings [0]',
       hint: hasFilters ? '[c] Clear all filters' : '',
     });
     return;

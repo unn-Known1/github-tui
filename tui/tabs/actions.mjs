@@ -173,14 +173,48 @@ export async function rescanWorkflowRepos() {
   await loadActionsRepos();
 }
 
+export function getExpandedJobs() {
+  const runId = appState.actionsExpandedRun;
+  if (!runId) return [];
+  return appState.actionsJobs[runId] || [];
+}
+
+// Jobs for job-cursor navigation: prefer the selected run when its jobs are
+// loaded (user moved selection after expanding), else fall back to the
+// expanded run so J/K keep working without re-expanding.
+export function getActiveJobs() {
+  const run = appState.actionsRuns[appState.actionsSelected];
+  if (run && appState.actionsJobs[run.id]?.length) return appState.actionsJobs[run.id];
+  return getExpandedJobs();
+}
+
+export function getSelectedJob() {
+  const jobs = getExpandedJobs();
+  if (!jobs.length) return null;
+  const idx = Math.max(0, Math.min(jobs.length - 1, appState.actionsJobSelected || 0));
+  return jobs[idx] || null;
+}
+
+function persistLogScroll() {
+  const id = appState.actionsLog?.jobId;
+  if (id != null) {
+    if (!appState.actionsLogScrolls || typeof appState.actionsLogScrolls !== 'object') appState.actionsLogScrolls = {};
+    appState.actionsLogScrolls[id] = appState.actionsLogScroll || 0;
+  }
+}
+
 export async function openWorkflowLog(jobId) {
   const repo = activeRepo();
   if (!repo || !jobId) return;
+  // Remember scroll of the log we're leaving so each job keeps its own
+  // viewport — switching jobs restores where you were.
+  persistLogScroll();
   const [owner, name] = repo.full_name.split('/');
   const gen = startAsync('actions-log');
   appState.actionsLoading = true;
   appState.actionsLog = { jobId, text: '', truncated: false, bytes: 0 };
-  appState.actionsLogScroll = 0;
+  const saved = appState.actionsLogScrolls?.[jobId];
+  appState.actionsLogScroll = Number.isFinite(+saved) ? +saved : 0;
   render();
   try {
     const result = await getWorkflowJobLogs(appState.token, owner, name, jobId, gen.signal);
@@ -347,6 +381,7 @@ export async function loadWorkflowRuns() {
   appState.actionsRuns = [];
   appState.actionsSelected = 0;
   appState.actionsScroll = 0;
+  appState.actionsJobSelected = 0;
   render();
   try {
     const result = await getWorkflowRuns(appState.token, owner, name, 1, RUNS_PER_PAGE, gen.signal);
@@ -359,10 +394,13 @@ export async function loadWorkflowRuns() {
       appState.actionsExpandedRun = keepExpanded;
       appState.actionsJobs = keepJobs;
       appState.actionsJobSteps = keepSteps;
+      const jobs = keepJobs[keepExpanded] || [];
+      if ((appState.actionsJobSelected || 0) >= jobs.length) appState.actionsJobSelected = 0;
     } else {
       appState.actionsExpandedRun = null;
       appState.actionsJobs = {};
       appState.actionsJobSteps = {};
+      appState.actionsJobSelected = 0;
     }
     appState.actionsRunsPage = 1;
     appState.actionsRunsHasMore = runs.length >= RUNS_PER_PAGE;
@@ -402,6 +440,41 @@ export async function loadMoreWorkflowRuns() {
   }
 }
 
+export function jobCursorDown() {
+  const jobs = getActiveJobs();
+  if (!jobs.length) { showMessage('Expand a run first to pick a job', 'warning'); return; }
+  // When a fullscreen log is open, J flips straight to the next job's log
+  // (per-job scrolling without Esc → J → l round-trips).
+  if (appState.actionsLog) { openJobLogAt((appState.actionsJobSelected || 0) + 1); return; }
+  appState.actionsJobSelected = Math.min(jobs.length - 1, (appState.actionsJobSelected || 0) + 1);
+  render();
+}
+
+export function jobCursorUp() {
+  const jobs = getActiveJobs();
+  if (!jobs.length) { showMessage('Expand a run first to pick a job', 'warning'); return; }
+  if (appState.actionsLog) { openJobLogAt((appState.actionsJobSelected || 0) - 1); return; }
+  appState.actionsJobSelected = Math.max(0, (appState.actionsJobSelected || 0) - 1);
+  render();
+}
+
+function openJobLogAt(idx) {
+  const jobs = getActiveJobs();
+  if (!jobs.length) return;
+  const clamped = Math.max(0, Math.min(jobs.length - 1, idx));
+  appState.actionsJobSelected = clamped;
+  const job = jobs[clamped];
+  if (job) openWorkflowLog(job.id);
+}
+
+export function openSelectedJobLog() {
+  const jobs = getActiveJobs();
+  if (!jobs || !jobs.length) { showMessage('Expand a run first to load its jobs', 'warning'); return; }
+  const idx = Math.max(0, Math.min(jobs.length - 1, appState.actionsJobSelected || 0));
+  const job = jobs[idx] || jobs.find(j => j.conclusion === 'failure') || jobs[0];
+  if (job) openWorkflowLog(job.id);
+}
+
 export async function toggleRunDetail() {
   const run = appState.actionsRuns[appState.actionsSelected];
   if (!run) return;
@@ -409,11 +482,13 @@ export async function toggleRunDetail() {
 
   if (appState.actionsExpandedRun === runId) {
     appState.actionsExpandedRun = null;
+    appState.actionsJobSelected = 0;
     render();
     return;
   }
 
   appState.actionsExpandedRun = runId;
+  appState.actionsJobSelected = 0;
   if (!appState.actionsJobs[runId]) {
     const repo = activeRepo();
     if (!repo) return;
@@ -489,6 +564,7 @@ function openSelectedRun() {
 
 export function goBack() {
   if (appState.actionsLog) {
+    persistLogScroll();
     appState.actionsLog = null;
     appState.actionsLogScroll = 0;
     invalidateLogLines();
@@ -511,9 +587,28 @@ export function goBack() {
   // repos view: fall through to handleBack → setTab(0)
 }
 
+function findLogJob() {
+  const id = appState.actionsLog?.jobId;
+  if (id == null) return { jobs: [], idx: -1, job: null };
+  const active = getActiveJobs();
+  let idx = active.findIndex(j => j.id === id);
+  if (idx >= 0) return { jobs: active, idx, job: active[idx] };
+  for (const list of Object.values(appState.actionsJobs || {})) {
+    if (!Array.isArray(list)) continue;
+    idx = list.findIndex(j => j.id === id);
+    if (idx >= 0) return { jobs: list, idx, job: list[idx] };
+  }
+  return { jobs: active, idx: -1, job: null };
+}
+
 function renderWorkflowLog(screen, y, h, W) {
   const log = appState.actionsLog;
-  screen.writeStr(2, y, 'WORKFLOW LOG #' + (log?.jobId || '?'), color('title'));
+  const { jobs, idx: jobIdx, job } = findLogJob();
+  const jobName = job?.name || null;
+  const title = 'WORKFLOW LOG #' + (log?.jobId || '?') +
+    (jobName ? ' ' + truncate(jobName, 24) : '') +
+    (jobIdx >= 0 && jobs.length > 1 ? ' (' + (jobIdx + 1) + '/' + jobs.length + ')' : '');
+  screen.writeStr(2, y, title, color('title'));
   screen.writeStr(Math.max(2, W - 28), y, log?.truncated ? 'TRUNCATED' : 'FULL LOG', log?.truncated ? { fg: 'yellow', bold: true } : { dim: true });
   screen.hline(y + 1, '─', color('dim'));
   if (appState.actionsLoading && !log?.text) { loadingIndicator(screen, 2, y + 3, 'loading log'); return; }
@@ -535,7 +630,7 @@ function renderWorkflowLog(screen, y, h, W) {
   scrollIndicators(screen, y + 2, y + 2 + rows - 1, appState.actionsLogScroll, lines.length);
   screen.writeStr(2, y + 2 + Math.min(rows, lines.length),
     'Lines ' + (appState.actionsLogScroll + 1) + '-' + Math.min(appState.actionsLogScroll + rows, lines.length) +
-    ' of ' + lines.length + '   [Esc] back  [g/G] top/bottom  [PgUp/PgDn] page', { dim: true });
+    ' of ' + lines.length + '   [Esc] back  [J/K] prev/next job  [g/G] top/bottom  [PgUp/PgDn] page', { dim: true });
 }
 
 // ── Workflow log scroll model ────────────────────────────────────
@@ -572,30 +667,35 @@ function clampLogScroll(v) {
   return Math.max(0, Math.min(getLogMaxScroll(), Number.isFinite(+v) ? +v : 0));
 }
 
+function setLogScroll(v) {
+  appState.actionsLogScroll = clampLogScroll(v);
+  persistLogScroll();
+}
+
 export function logTop() {
-  appState.actionsLogScroll = 0;
+  setLogScroll(0);
   render();
 }
 
 export function logBottom() {
-  appState.actionsLogScroll = getLogMaxScroll();
+  setLogScroll(getLogMaxScroll());
   render();
 }
 
 export function logPageUp() {
-  appState.actionsLogScroll = clampLogScroll((appState.actionsLogScroll || 0) - getLogRows());
+  setLogScroll((appState.actionsLogScroll || 0) - getLogRows());
   render();
 }
 
 export function logPageDown() {
-  appState.actionsLogScroll = clampLogScroll((appState.actionsLogScroll || 0) + getLogRows());
+  setLogScroll((appState.actionsLogScroll || 0) + getLogRows());
   render();
 }
 
 // Mouse wheel step (3 lines, clamped). Exported so mouse.mjs can share the
 // same clamping instead of guessing geometry.
 export function logWheel(delta) {
-  appState.actionsLogScroll = clampLogScroll((appState.actionsLogScroll || 0) + delta);
+  setLogScroll((appState.actionsLogScroll || 0) + delta);
   render();
 }
 
@@ -611,14 +711,21 @@ export function pageDown() {
 
 export function renderActions(screen, y, h) {
   const W = screen.width;
-  if (appState.actionsLog) { renderWorkflowLog(screen, y, h, W); return; }
+  if (appState.actionsLog) {
+    // Clear list geometry while the fullscreen log owns the viewport so
+    // clicks/hover can't mutate the hidden run list underneath.
+    appState._actionsListBounds = null;
+    appState._actionsRowMap = null;
+    renderWorkflowLog(screen, y, h, W);
+    return;
+  }
   appState._actionsListBounds = null;
   if (!appState.token) {
     emptyState(screen, y, h, {
       icon: '🔒  NOT SIGNED IN',
       title: 'CI / Actions',
       message: 'Sign in to view your workflow runs.',
-      keyHint: 'Press [6] for Settings  →  [Enter] on Login',
+      keyHint: 'Press [0] for Settings  →  [Enter] on Login',
     });
     return;
   }
@@ -754,6 +861,10 @@ function renderRunList(screen, y, h, W) {
 
   const maxVisible = Math.max(1, h - 3);
   appState._actionsListBounds = { rowStart: y, maxRows: maxVisible, scroll: appState.actionsScroll, length: runs.length };
+  // Row map for mouse hit-testing: each painted row knows whether it's a
+  // run header or a job row (runIdx + jobIdx). Steps are mapped to their
+  // parent job so clicking a step still selects the right job.
+  const rowMap = [];
   let curY = y;
   let drawn = 0;
 
@@ -766,7 +877,10 @@ function renderRunList(screen, y, h, W) {
 
     if (curY >= y + maxVisible) break;
     const row = curY;
-    if (sel) {
+    if (sel && !isExpanded) {
+      for (let x = 0; x < W; x++) screen.styleBuf[row][x] = color('selection');
+    } else if (sel && isExpanded) {
+      // Run header still gets selection bg so the expanded block reads as one group.
       for (let x = 0; x < W; x++) screen.styleBuf[row][x] = color('selection');
     }
     const icon = getStatusIcon(run);
@@ -785,11 +899,14 @@ function renderRunList(screen, y, h, W) {
     screen.writeStr(40, row, branch, sel ? color('selection') : { fg: 'cyan' });
     screen.writeStr(56, row, event, sel ? color('selection') : color('dim'));
     screen.writeStr(68, row, when, sel ? color('selection') : { dim: true });
+    rowMap.push({ y: curY, runIdx: idx, jobIdx: -1 });
     curY++;
     drawn++;
 
     if (isExpanded) {
       const jobs = appState.actionsJobs[run.id] || [];
+      // Clamp the job cursor whenever jobs (re)load so `l` can't open a stale index.
+      if (jobs.length && (appState.actionsJobSelected || 0) >= jobs.length) appState.actionsJobSelected = jobs.length - 1;
       if (jobs.length === 0 && appState.actionsLoading) {
         if (curY < y + maxVisible) {
           screen.writeStr(6, curY, 'Loading jobs...', { dim: true });
@@ -797,23 +914,29 @@ function renderRunList(screen, y, h, W) {
           drawn++;
         }
       } else {
-        for (const job of jobs) {
+        for (let ji2 = 0; ji2 < jobs.length; ji2++) {
+          const job = jobs[ji2];
           if (curY >= y + maxVisible) break;
           const ji = jobStatusIcon(job);
+          const isJobSel = sel && ji2 === (appState.actionsJobSelected || 0);
+          if (isJobSel) {
+            for (let x = 0; x < W; x++) screen.styleBuf[curY][x] = color('selection');
+          }
           const jobName = truncate(job.name || '?', W - 16);
           const jobWhen = job.started_at ? relTime(job.started_at) : '';
           const jobDur = job.completed_at && job.started_at
             ? Math.round((new Date(job.completed_at) - new Date(job.started_at)) / 1000) + 's'
             : '';
 
-          screen.writeStr(6, curY, '  ');
-          screen.writeStr(8, curY, ji.ch, ji.style);
-          screen.writeStr(10, curY, jobName, color('repoName') || { fg: 'white' });
+          screen.writeStr(6, curY, isJobSel ? '▶ ' : '  ', isJobSel ? color('selection') : null);
+          screen.writeStr(8, curY, ji.ch, isJobSel ? color('selection') : ji.style);
+          screen.writeStr(10, curY, jobName, isJobSel ? color('selection') : (color('repoName') || { fg: 'white' }));
           // Workflow/job names are user content — measure cells so CJK/emoji
           // names can't slide under the duration.
           if (jobDur && 10 + displayWidth(jobName) + 2 < W) {
-            screen.writeStr(10 + displayWidth(jobName) + 2, curY, jobDur, { dim: true });
+            screen.writeStr(10 + displayWidth(jobName) + 2, curY, jobDur, isJobSel ? color('selection') : { dim: true });
           }
+          rowMap.push({ y: curY, runIdx: idx, jobIdx: ji2 });
           curY++;
           drawn++;
 
@@ -825,6 +948,7 @@ function renderRunList(screen, y, h, W) {
             screen.writeStr(10, curY, '  ');
             screen.writeStr(12, curY, si.ch, si.style);
             screen.writeStr(14, curY, stepName, color('dim'));
+            rowMap.push({ y: curY, runIdx: idx, jobIdx: ji2 });
             curY++;
             drawn++;
           }
@@ -832,6 +956,7 @@ function renderRunList(screen, y, h, W) {
       }
     }
   }
+  appState._actionsRowMap = rowMap;
 
   scrollIndicators(screen, y, y + maxVisible - 1, appState.actionsScroll, runs.length);
 
@@ -840,7 +965,7 @@ function renderRunList(screen, y, h, W) {
     screen.hline(hintY, '─', { dim: true });
       const moreHint = appState.actionsRunsHasMore ? '   [Space] Load more' : '';
     const hint = appState.actionsExpandedRun
-      ? '[Enter] Close detail   [o] Open in browser   [r] Re-run   [x] Cancel   [Esc] Back' + moreHint
+      ? '[Enter] Close   [J/K] job   [l] log   [o] Browser   [r] Re-run   [x] Cancel   [Esc] Back' + moreHint
       : '[Enter] Expand jobs   [o] Open in browser   [r] Re-run   [x] Cancel   [Esc] Back' + moreHint;
     screen.writeStr(2, hintY + 1, hint, { dim: true });
   }
@@ -851,46 +976,53 @@ registerInputHandler('actions-filter', (value) => {
   appState.actionsRepoScroll = 0;
   appState.actionsRepoSelected = 0;
   appState.actionsExpandedRun = null;
+  appState.actionsJobSelected = 0;
   showMessage(appState.actionsFilter
     ? 'Filtering repos: "' + appState.actionsFilter + '"'
     : 'Repo filter cleared', 'info');
   render();
 });
 
+export function resolveActionsRow(sy) {
+  const map = appState._actionsRowMap;
+  if (!Array.isArray(map)) return null;
+  return map.find(r => r.y === sy) || null;
+}
+
 export const keys = {
-  '/': () => startInput('Filter repos: ', 'actions-filter'),
-  'F': () => { appState.actionsView = 'failures'; appState.actionsSelected = 0; appState.actionsScroll = 0; loadFailureQueue(); },
-  'd': () => { if (appState.actionsView === 'runs') startWorkflowDispatch(); },
+  '/': () => { if (!appState.actionsLog) startInput('Filter repos: ', 'actions-filter'); },
+  'F': () => { if (!appState.actionsLog) { appState.actionsView = 'failures'; appState.actionsSelected = 0; appState.actionsScroll = 0; loadFailureQueue(); } },
+  'd': () => { if (appState.actionsView === 'runs' && !appState.actionsLog) startWorkflowDispatch(); },
+  'J': () => { if (appState.actionsView === 'runs') jobCursorDown(); },
+  ']': () => { if (appState.actionsView === 'runs') jobCursorDown(); },
+  'K': () => { if (appState.actionsView === 'runs') jobCursorUp(); },
+  '[': () => { if (appState.actionsView === 'runs') jobCursorUp(); },
   'l': () => {
-    if (appState.actionsView === 'runs') {
-      const repo = activeRepo();
-      if (!repo) return;
-      const run = appState.actionsRuns[appState.actionsSelected];
-      const jobs = run && appState.actionsJobs[run.id];
-      const job = jobs && jobs.find(j => j.conclusion === 'failure') || jobs && jobs[0];
-      if (job) openWorkflowLog(job.id); else showMessage('Expand a run first to load its jobs', 'warning');
-    }
+    if (appState.actionsView === 'runs' && !appState.actionsLog) openSelectedJobLog();
   },
   't': () => {
+    if (appState.actionsLog) return;
     if (appState.actionsView === 'runs' || appState.actionsView === 'failures') {
       appState.actionsView = 'repos';
       appState.actionsExpandedRun = null;
+      appState.actionsJobSelected = 0;
       render();
     }
   },
   'o': () => {
-    if (appState.actionsView === 'runs') openSelectedRun();
+    if (appState.actionsView === 'runs' && !appState.actionsLog) openSelectedRun();
   },
   'R': () => {
+    if (appState.actionsLog) return;
     if (appState.actionsView === 'runs') rerunSelected();
     else if (appState.actionsView === 'repos') rescanWorkflowRepos();
   },
-  'x': () => { if (appState.actionsView === 'runs') cancelSelected(); else if (appState.actionsView === 'repos' && appState.actionsScanning) cancelWorkflowScan(); },
+  'x': () => { if (appState.actionsLog) return; if (appState.actionsView === 'runs') cancelSelected(); else if (appState.actionsView === 'repos' && appState.actionsScanning) cancelWorkflowScan(); },
 };
 
 export function up() {
   if (appState.actionsLog) {
-    appState.actionsLogScroll = clampLogScroll(appState.actionsLogScroll - 1);
+    setLogScroll((appState.actionsLogScroll || 0) - 1);
     render();
   } else if (appState.actionsView === 'failures') {
     const maxVisible = appState._actionsListBounds?.maxRows || Math.max(1, 10);
@@ -907,7 +1039,9 @@ export function up() {
   } else {
     const runs = appState.actionsRuns;
     if (runs.length === 0) return;
+    const prev = appState.actionsSelected;
     appState.actionsSelected = Math.max(0, appState.actionsSelected - 1);
+    if (appState.actionsSelected !== prev) appState.actionsJobSelected = 0;
     const maxVisible = appState._actionsListBounds?.maxRows || Math.max(1, 10);
     appState.actionsScroll = followScroll(appState.actionsSelected, appState.actionsScroll, maxVisible);
     // Don't auto-collapse expanded run on arrow navigation
@@ -917,7 +1051,7 @@ export function up() {
 
 export function down() {
   if (appState.actionsLog) {
-    appState.actionsLogScroll = clampLogScroll(appState.actionsLogScroll + 1);
+    setLogScroll((appState.actionsLogScroll || 0) + 1);
     render();
   } else if (appState.actionsView === 'failures') {
     const failures = appState.actionsFailures || [];
@@ -937,7 +1071,9 @@ export function down() {
     const runs = appState.actionsRuns;
     const maxVisible = Math.max(1, (process.stdout.rows || 24) - 16);
     if (runs.length === 0) return;
+    const prev = appState.actionsSelected;
     appState.actionsSelected = Math.min(runs.length - 1, appState.actionsSelected + 1);
+    if (appState.actionsSelected !== prev) appState.actionsJobSelected = 0;
     appState.actionsScroll = followScroll(appState.actionsSelected, appState.actionsScroll, maxVisible);
     // Don't auto-collapse expanded run on arrow navigation
     render();
@@ -946,7 +1082,7 @@ export function down() {
 
 export function bottom(screen) {
   if (appState.actionsLog) {
-    appState.actionsLogScroll = getLogMaxScroll();
+    setLogScroll(getLogMaxScroll());
   } else if (appState.actionsView === 'repos') {
     const repos = getFilteredRepos();
     appState.actionsRepoSelected = Math.max(0, repos.length - 1);
@@ -962,6 +1098,7 @@ export function bottom(screen) {
 }
 
 export function enter() {
+  if (appState.actionsLog) return;
   if (appState.actionsView === 'repos') {
     loadWorkflowRuns();
   } else if (appState.actionsView === 'failures') {
@@ -976,6 +1113,7 @@ export function enter() {
 }
 
 export function space() {
+  if (appState.actionsLog) return;
   if (appState.actionsView === 'failures') { loadFailureQueue(); return; }
   if (appState.actionsView === 'repos') {
     // Repository metadata is loaded in the Repos tab.

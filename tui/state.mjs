@@ -111,8 +111,10 @@ export function resetAccountState() {
   appState.actionsRunsHasMore = false;
   appState.actionsJobs = {};
   appState.actionsJobSteps = {};
+  appState.actionsJobSelected = 0;
   appState.actionsLog = null;
   appState.actionsLogScroll = 0;
+  appState.actionsLogScrolls = {};
   appState.actionsWorkflowList = [];
   appState.actionsWorkflowCursor = 0;
   appState.actionsDispatch = null;
@@ -644,8 +646,10 @@ export const appState = {
   actionsExpandedRun: null,   // run id when expanded to show jobs
   actionsJobs: {},            // { [runId]: jobs[] }
   actionsJobSteps: {},        // { [jobId]: steps[] }
+  actionsJobSelected: 0,      // job cursor within expanded run (per-job log picking)
   actionsLog: null,           // { jobId, text, truncated, bytes }
   actionsLogScroll: 0,
+  actionsLogScrolls: {},      // { [jobId]: scroll } — individual scroll per job log
   actionsWorkflowList: [],
   actionsWorkflowCursor: 0,
   actionsDispatch: null,
