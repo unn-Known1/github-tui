@@ -8,7 +8,7 @@
 // so callers can always fall back to plaintext gracefully.
 
 import { execFileSync, spawnSync } from 'child_process';
-import { appendFileSync, mkdirSync, existsSync } from 'fs';
+import { appendFileSync, mkdirSync, existsSync, statSync, readFileSync, writeFileSync } from 'fs';
 import { join } from 'path';
 import { platform, homedir } from 'os';
 
@@ -274,12 +274,19 @@ function _hasCommand(cmd) {
 function _debug(...args) {
   if (process.env.DEBUG || process.env.GITHUB_TUI_DEBUG) {
     try {
-      const dir = join(homedir(), '.github-tui');
+      const dir = process.env.GITHUB_TUI_HOME || join(homedir(), '.github-tui');
       try { if (!existsSync(dir)) mkdirSync(dir, { recursive: true }); } catch {}
-      appendFileSync(
-        join(dir, 'debug.log'),
-        '[keychain] ' + args.join(' ') + '\n'
-      );
+      const p = join(dir, 'debug.log');
+      try {
+        const st = statSync(p);
+        if (st && st.size > 2 * 1024 * 1024) {
+          const raw = readFileSync(p, 'utf8');
+          const half = raw.slice(Math.floor(raw.length / 2));
+          const nl = half.indexOf('\n');
+          writeFileSync(p, nl >= 0 ? half.slice(nl + 1) : half);
+        }
+      } catch {}
+      appendFileSync(p, '[keychain] ' + args.join(' ') + '\n');
     } catch {}
   }
 }

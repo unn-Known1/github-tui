@@ -10,7 +10,7 @@ import {
 import { startInput, registerInputHandler } from '../input.mjs';
 import { truncate, relTime, copyToClipboard, displayWidth } from '../utils.mjs';
 import { color } from '../theme.mjs';
-import { showError } from '../error-recovery.mjs';
+import { showError, isAuthError, handleAuthFailure } from '../error-recovery.mjs';
 
 const REACTIONS = ['+1', '-1', 'laugh', 'confused', 'heart', 'hooray', 'rocket', 'eyes'];
 
@@ -103,6 +103,12 @@ async function loadDetail() {
     }
   } catch (e) {
     if (!isStale(gen, 'detail')) {
+      if (isAuthError(e)) {
+        appState.detailLoading = false;
+        finishLoading(gen);
+        await handleAuthFailure(e, loadDetail);
+        return;
+      }
       // Keep the popup OPEN with an inline error instead of silently
       // closing it — a flash-close reads as "Enter did nothing" (e.g. a
       // rate-limit or 404 on the detail fetch). `r` and the error toast
@@ -728,7 +734,7 @@ export const keys = {
     confirm('Checkout branch "' + branch + '"?', async () => {
       try {
         const { spawnSync } = await import('child_process');
-        const opts = { stdio: 'pipe', timeout: 30000 };
+        const opts = { stdio: 'pipe', timeout: 30000, env: { ...process.env, GIT_TERMINAL_PROMPT: '0' }, cwd: process.cwd() };
         let success = false;
         // 1. Try github-cli first, which is the most robust and sets up correct remotes
         const ghResult = spawnSync('gh', ['pr', 'checkout', String(pr.number)], opts);

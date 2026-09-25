@@ -4,7 +4,7 @@
 
 import { appState, TABS, tabState, bindRender, checkLoadingWatchdog, getUnreadCount, render } from './state.mjs';
 import { Screen } from './screen.mjs';
-import { lastRateLimit, offlineState, getCacheStats } from './github.mjs';
+import { lastRateLimit, offlineState, getCacheStats, cacheAgeLabel } from './github.mjs';
 import { color, isAccessible as _isA11y } from './theme.mjs';
 import { truncate, truncateToWidth, displayWidth } from './utils.mjs';
 import { readFileSync } from 'fs';
@@ -237,6 +237,17 @@ export function buildBreadcrumb() {
           segments.push('Files');
           if (appState.filesPath) segments.push(appState.filesPath);
         }
+        else if (appState.detailsPane === 'packages') segments.push('Packages');
+        else if (appState.detailsPane === 'traffic') segments.push('Traffic');
+        else if (appState.detailsPane === 'checks') segments.push('Checks');
+        else if (appState.detailsPane === 'security') {
+          segments.push('Security');
+          if (appState.securitySubPane) segments.push(appState.securitySubPane);
+        }
+        else if (appState.detailsPane === 'compare') segments.push('Compare');
+        else if (appState.detailsPane === 'overview' || !appState.detailsPane) segments.push('Overview');
+      } else if (appState.analyzeView === 'security-aggregate') {
+        segments.push('Security aggregate');
       } else if (appState.analyzeView === 'forks') {
         if (appState.repoDetails) segments.push(appState.repoDetails.full_name);
         segments.push('Forks');
@@ -247,18 +258,38 @@ export function buildBreadcrumb() {
       if (appState.actionsView === 'runs' && appState.actionsRepos[appState.actionsRepoSelected]) {
         segments.push(appState.actionsRepos[appState.actionsRepoSelected].full_name);
       }
+      if ((appState.actionsFailures || []).length) segments.push(appState.actionsFailures.length + ' failures');
       break;
     case 4:
       segments.push('Inbox');
       if (appState.inboxFilter !== 'all') segments.push(appState.inboxFilter);
+      if (appState.searchType && appState.searchType !== 'repos') segments.push(appState.searchType);
+      if (appState.inboxTextFilter) segments.push('"' + String(appState.inboxTextFilter).slice(0, 24) + '"');
       break;
     case 5:
       segments.push('Local');
       if (appState.localBranch) segments.push(appState.localBranch);
+      if (appState.localFocus) segments.push(appState.localFocus);
+      if (appState.localDiff) segments.push('diff:' + String(appState.localDiff.path || '').slice(0, 32));
       break;
     case 6: segments.push('Settings'); break;
   }
+  // Narrow terminals: keep the TAIL (repo/view) visible, drop leading
+  // segments first — truncating from the left pushed the repo name off.
   return segments;
+}
+
+export function formatBreadcrumb(segments, maxW) {
+  if (!maxW || segments.join(' › ').length <= maxW) return segments.join(' › ');
+  const tail = [];
+  let len = 0;
+  for (let i = segments.length - 1; i >= 0; i--) {
+    const add = (tail.length ? 3 : 0) + segments[i].length;
+    if (len + add > maxW && tail.length) break;
+    tail.unshift(segments[i]);
+    len += add;
+  }
+  return (tail.length < segments.length ? '… › ' : '') + tail.join(' › ');
 }
 
 // Draw a centered empty-state card: icon + title + message + optional hint.
@@ -384,10 +415,18 @@ function renderHeader(W) {
   screen.writeStr(15, 0, version, { fg: 'gray', dim: true });
 
   // Offline banner — shows when offline, truncated before the login reserve.
+  // Includes per-pane staleness: "(cached Xm ago)" / "(stale)" so cached
+  // fallbacks are never misread as live (offline may serve up to 30min old).
   if (offlineState.isOffline) {
     const maxOff = (login ? loginX : W - 2) - 22 - 1;
     if (maxOff > 0) {
-      screen.writeStr(22, 0, truncateToWidth(offlineBanner, maxOff, ''), { fg: 'yellow', bold: true });
+      let banner = offlineBanner;
+      try {
+        const age = cacheAgeLabel();
+        if (age) banner += a11y ? ' (cached ' + age + ')' : ' (cached ' + age + ')';
+        else if (offlineState.lastServedStaleAt && !offlineState.lastServedFresh) banner += ' (stale)';
+      } catch {}
+      screen.writeStr(22, 0, truncateToWidth(banner, maxOff, ''), { fg: 'yellow', bold: true });
     }
   }
 
@@ -671,7 +710,10 @@ function renderFooter(W, H) {
 
 // Status-line composer — context aware.
 function statusLine() {
-  if (appState.confirmAction) return ' [y] Confirm    [n] Cancel';
+  if (appState.confirmAction) {
+    if (appState._confirmDanger) return ' [y] Destroy    [n] Cancel    (Enter will NOT confirm)';
+    return ' [y] Confirm    [n] Cancel';
+  }
   if (appState.showDetail) {
     return ' [Esc] Close   [↑↓] Scroll   [c] Comment   [r] React   [x] Close/Reopen   [y] Copy URL   [M] Merge';
   }
@@ -710,7 +752,7 @@ function statusLine() {
       return ' [↑↓jk] Nav' + sep + '[Enter] View runs' + sep + '[/] Filter' + sep + '[F] Failures' + sep + '[R] Rescan' + sep + '[?] Help';
     }
     case 4: return ' [↑↓jk] Nav' + sep + '[Enter] Open' + sep + '[m] Read' + sep + '[M] All' + sep + '[f] Filter' + sep + '[H] Hide processed' + sep + '[u] Unsubscribe';
-    case 5: return ' [Enter] Diff' + sep + '[F] Full' + sep + '[a] Stage' + sep + '[X] Discard' + sep + '[c] Commit' + sep + '[f] Fetch' + sep + '[p] Pull' + sep + '[P] Push' + sep + '[B] Branch' + sep + '[[ / ]] Focus';
+    case 5: return ' [a/A] Stage' + sep + '[X] Discard' + sep + '[c/C] Commit' + sep + '[f] Fetch' + sep + '[p/P] Pull/Push' + sep + '[B] Branches' + sep + '[n/N] New/del' + sep + '[z] Collapse' + sep + '[y/o/r] Copy/Open/Refresh' + sep + '[g/G] Top' + sep + '[Space] Page';
     case 6: return ' [↑↓] Nav' + sep + '[Enter] Select' + sep + '[s] Star repo' + sep + '[c] Clear account cache' + sep + '[?] Help';
   }
   return '';
@@ -725,7 +767,10 @@ function renderCompact(W, H) {
   const title = labels[tabState.current] || 'View';
   screen.writeStr(1, 4, title + (appState.loading ? ' …' : ''), { fg: 'cyan', bold: true });
   const context = appState.repoDetails?.full_name || appState.user?.login ||
-    (appState.message && appState.message.text) || 'Use number keys to switch tabs';
+    ((appState.actionsFailures || []).length ? appState.actionsFailures.length + ' failures | ' : '') +
+    ((appState.securityAggregate || []).length ? appState.securityAggregate.length + ' alerts | ' : '') +
+    (appState.localDiff ? 'diff:' + (appState.localDiff.path || '') + ' | ' : '') +
+    ((appState.message && appState.message.text) || 'Use number keys to switch tabs');
   screen.writeStr(1, 6, truncate(context, W - 2), { dim: true });
   screen.writeStr(1, H - 2, '[0-6] tabs  [q] quit  [?] help', { dim: true });
   screen.hline(H - 1, '─', { dim: true });
@@ -744,12 +789,15 @@ function renderLinear(W, H) {
     lines.push('Repositories: ' + appState.repos.length);
     lines.push('Unread notifications: ' + getUnreadCount());
     for (const item of (appState.dashboardAttentionItems || [])) lines.push('Attention: ' + item.label + ' (' + item.count + ')');
+    if ((appState.securityAggregate || []).length) lines.push('Security alerts: ' + appState.securityAggregate.length);
+    for (const sec of (appState.customSections || []).slice(0, 5)) lines.push('Section ' + (sec.title || sec.id || '?') + ': ' + ((sec.items || []).length + ' items'));
   } else if (tabState.current === 1) {
     for (const repo of appState.repos.slice(0, Math.max(1, H - 7))) lines.push((repo.full_name || '?') + ' — ' + (repo.description || ''));
   } else if (tabState.current === 2) {
     lines.push('Search: ' + (appState.searchQuery || '(none)'));
     for (const repo of (appState.searchResults || []).slice(0, Math.max(1, H - 7))) lines.push((repo.full_name || '?') + ' — ' + (repo.description || ''));
   } else if (tabState.current === 3) {
+    if ((appState.actionsFailures || []).length) lines.push('Failures: ' + appState.actionsFailures.length + ' failed runs (F to rescan)');
     for (const run of (appState.actionsRuns || []).slice(0, Math.max(1, H - 7))) lines.push((run.name || '?') + ' #' + (run.run_number || run.id || '?') + ' ' + (run.conclusion || run.status || ''));
   } else if (tabState.current === 4) {
     for (const note of (appState.notifications || []).slice(0, Math.max(1, H - 7))) lines.push((note.unread ? '[unread] ' : '') + (note.repository?.full_name || '?') + ' — ' + (note.subject?.title || ''));
@@ -759,6 +807,7 @@ function renderLinear(W, H) {
       lines.push('Branch: ' + (appState.localBranch || '?') + (appState.localUpstream ? ' → ' + appState.localUpstream : ' (no upstream)'));
       lines.push('Staged: ' + (appState.localStaged || []).length + '  Unstaged: ' + (appState.localUnstaged || []).length +
         '  Untracked: ' + (appState.localUntracked || []).length + '  Conflicted: ' + (appState.localConflicted || []).length);
+      if (appState.localDiff) lines.push('Diff: ' + (appState.localDiff.path || '?') + ' (' + String(appState.localDiff.text || '').split(String.fromCharCode(10)).length + ' lines)');
       for (const c of (appState.localHistory || []).slice(0, Math.max(0, H - 9))) lines.push((c.sha || '').slice(0, 8) + ' ' + (c.subject || ''));
     }
   } else lines.push('Settings menu. Use arrow keys and Enter.');
@@ -781,7 +830,10 @@ function doRender() {
   // the terminal. Covers all switch paths (keys, mouse, palette, auto
   // setTab on auth expiry) since they all funnel through doRender.
   const viewKey = tabState.current + '|' + appState.analyzeView + '|' +
-    appState.detailsPane + '|' + appState.actionsView + '|' + (appState.localBranch || '');
+    appState.detailsPane + '|' + appState.actionsView + '|' + (appState.localBranch || '') + '|' +
+    (appState.reposView || '') + '|' + (appState.inboxFilter || '') + '|' + (appState.securitySubPane || '') + '|' +
+    (appState.filesPath || '') + '|' + (appState.fileViewing ? '1' : '0') + '|' + (appState.showDetail ? '1' : '0') + '|' +
+    (appState.dashboardFocusZone || '') + '|' + (appState.localFocus || '') + '|' + (appState.localDiff ? appState.localDiff.path : '');
   if (viewKey !== _lastViewKey) {
     _lastViewKey = viewKey;
     screen.invalidate();
@@ -910,11 +962,16 @@ export function renderConfirmDialog(screen) {
       continue;
     }
     let line = '';
-    for (const w of para.split(/\s+/)) {
+    for (let w of para.split(/\s+/)) {
       if ((line + ' ' + w).trim().length > innerW) {
         if (line) lines.push(line);
-        // An unbreakable token wider than the box still gets its own row.
-        line = w.length > innerW ? w.slice(0, innerW) : w;
+        // An unbreakable token wider than the box wraps by characters
+        // instead of being sliced (no content loss).
+        while (w.length > innerW) {
+          lines.push(w.slice(0, innerW));
+          w = w.slice(innerW);
+        }
+        line = w;
       } else {
         line = line ? line + ' ' + w : w;
       }
@@ -923,8 +980,8 @@ export function renderConfirmDialog(screen) {
   }
   const maxLines = Math.max(1, H - 10);
   const truncated = lines.length > maxLines;
-  const shown = lines.slice(0, maxLines);
-  if (truncated) shown.push('…');
+  // Reserve the last row for the ellipsis so content never overflows the box.
+  const shown = truncated ? [...lines.slice(0, Math.max(1, maxLines - 1)), '… (' + (lines.length - maxLines + 1) + ' more)'] : lines.slice(0, maxLines);
   const boxH = Math.min(H - 2, Math.max(8, shown.length + 6));
   const x = Math.floor((W - boxW) / 2);
   const y = Math.floor((H - boxH) / 2);

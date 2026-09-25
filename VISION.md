@@ -44,11 +44,11 @@
 | **Clipboard** — OSC-52 copy (`y`) works over SSH/tmux | ✅ |
 | **Rate limit indicator** — visual `█░` bar in header | ✅ |
 | **Security pane** — Dependabot alerts with severity icons, plus cross-repository aggregation | ✅ |
-| **Traffic/Milestones/Labels/Checks panes** | ✅ |
+| **Traffic/Checks/Security panes** (Milestone/Label tabs removed v0.7.1; state kept for issue-edit) | ✅ |
 | **Modular architecture** — focused modules with one file per tab and feature helpers | ✅ |
 | **Zero dependencies** — just `node app.mjs` | ✅ |
-| **416+ tests** — Node built-in test runner, zero deps (v0.7.6) | ✅ |
-| **Local Git workspace** — 7th tab: status/history/diff, stage/discard/commit, fetch/pull/push, branch picker (v0.8.0) | ✅ |
+| **500+ tests** — Node built-in test runner, zero deps (v0.8.1) | ✅ |
+| **Local Git workspace** — Local tab (key 6, 7th position counting Settings on key 0): status/history/diff, stage/discard/commit, fetch/pull/push, branch picker (v0.8.0) | ✅ |
 | **OSC 8 hyperlinks** — truncated URLs display short but open complete (v0.7.4) | ✅ |
 | **Graceful shutdown** — atomic handlers, raw mode restore, crash logging | ✅ |
 | **Cross-platform rendering** — ASCII box fallback, FORCE_COLOR/NO_COLOR | ✅ |
@@ -246,7 +246,7 @@
 | Plugin system | 🎯 v2.0 |
 | Release automation | 🟡 partial in unreleased v0.7; full assistant remains 🎯 v2.0 |
 | Offline + disk cache | ✅ v0.6 |
-| Test suite (416+ tests) | ✅ shipped |
+| Test suite (500+ tests) | ✅ shipped |
 | Graceful shutdown + crash logging | ✅ shipped |
 
 ---

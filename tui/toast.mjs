@@ -16,6 +16,21 @@ const VARIANT_STYLES = {
 // Toast storage
 const toasts = [];
 let toastIdCounter = 0;
+const _toastTimers = new Map();
+
+function clearToastTimer(id) {
+  const t = _toastTimers.get(id);
+  if (t) {
+    try { clearTimeout(t); } catch {}
+    _toastTimers.delete(id);
+  }
+}
+
+export function shutdownToasts() {
+  for (const [, t] of _toastTimers) { try { clearTimeout(t); } catch {} }
+  _toastTimers.clear();
+  toasts.length = 0;
+}
 
 /**
  * Show a toast notification.
@@ -45,9 +60,14 @@ export function showToast({ message, variant = 'info', duration = 3000, title })
 
   // Auto-dismiss
   if (duration > 0) {
-    setTimeout(() => {
+    const timer = setTimeout(() => {
+      _toastTimers.delete(id);
       removeToast(id);
     }, duration);
+    // Never keep the process alive and never fire into a dead screen after
+    // shutdown — shutdownToasts() clears all pending timers.
+    if (timer.unref) timer.unref();
+    _toastTimers.set(id, timer);
   }
 
   appRender();
@@ -58,6 +78,7 @@ export function showToast({ message, variant = 'info', duration = 3000, title })
  * Remove a toast by ID.
  */
 export function removeToast(id) {
+  clearToastTimer(id);
   const idx = toasts.findIndex(t => t.id === id);
   if (idx !== -1) {
     toasts.splice(idx, 1);
@@ -69,6 +90,8 @@ export function removeToast(id) {
  * Clear all toasts.
  */
 export function clearToasts() {
+  for (const [, t] of _toastTimers) { try { clearTimeout(t); } catch {} }
+  _toastTimers.clear();
   toasts.length = 0;
   appRender();
 }

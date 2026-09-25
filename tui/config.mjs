@@ -28,7 +28,11 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 export const APP_VERSION = JSON.parse(readFileSync(join(__dirname, '..', 'package.json'), 'utf8')).version;
 
-export const CONFIG_DIR = join(homedir(), '.github-tui');
+export function resolveTuiHome() {
+  return process.env.GITHUB_TUI_HOME || join(homedir(), '.github-tui');
+}
+
+export const CONFIG_DIR = resolveTuiHome();
 export const TOKEN_FILE = join(CONFIG_DIR, 'token');
 // New in v0.3 — on-disk stores for the feature roadmap.
 export const BOOKMARKS_FILE = join(CONFIG_DIR, 'bookmarks.json');

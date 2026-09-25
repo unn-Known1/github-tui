@@ -82,6 +82,10 @@ export function invalidateAccountAsync() {
 /** Clear all account/private UI data while preserving user preferences. */
 export function resetAccountState() {
   invalidateAccountAsync();
+  // Always clear the github rate-limit mirror + cached OAuth scopes, even
+  // when the caller forgot resetRateLimit() — otherwise Settings keeps
+  // showing the previous account's scopes/budget (stale header).
+  import('./github.mjs').then(m => { try { m.resetRateLimit(); } catch {} }).catch(() => {});
   appState.token = null;
   appState.user = null;
   appState.repos = [];
@@ -625,7 +629,7 @@ export const appState = {
   localDiff: null,           // { path, staged, text } | null
   localAutoPoll: true,       // persisted in session.json
   localLastFetched: null,    // ms timestamp — freshness badge
-  _localBounds: null,        // published hit geometry for mouse { statusRows, historyRows, actionBar, diffBox }
+  _localBounds: null,        // published hit geometry for mouse { focus, rows[{y,kind,index}], colY0/colY1/splitX/diffY0/diffY1, statusCount/historyCount, hasDiff }
 
   // ── Custom sections ──
   customSections: [],        // [{ title, type, query, items: [], selected: 0, scroll: 0 }]
@@ -809,6 +813,7 @@ export function showMessage(text, type = 'info', durationMs = 3000) {
       render();
     }
   }, durationMs);
+  if (appState.messageTimer.unref) appState.messageTimer.unref();
   render();
 }
 
@@ -1052,6 +1057,7 @@ export function confirmAsync(message, title = 'Confirm') {
       if (settled) return;
       settled = true;
       if (interval) clearInterval(interval);
+      _setConfirmPoller(null);
       appState.confirmAction = null;
       appState.confirmMessage = '';
       appState.confirmTitle = 'Confirm';
@@ -1069,6 +1075,8 @@ export function confirmAsync(message, title = 'Confirm') {
     interval = setInterval(() => {
       if (appState.confirmAction === null) settle(false);
     }, 50);
+    if (interval.unref) interval.unref();
+    _setConfirmPoller(interval);
 
     render();
   });
@@ -1317,4 +1325,17 @@ let _sessionSaveTimer = null;
 export function scheduleSessionSave() {
   if (_sessionSaveTimer) clearTimeout(_sessionSaveTimer);
   _sessionSaveTimer = setTimeout(saveSession, 2000);
+  if (_sessionSaveTimer.unref) _sessionSaveTimer.unref();
+}
+
+export function shutdownSessionTimer() {
+  try { if (_sessionSaveTimer) { clearTimeout(_sessionSaveTimer); _sessionSaveTimer = null; } } catch {}
+}
+
+// Confirm-poller shutdown: confirmAsync() 50ms interval must not outlive the
+// process or fire into a dead screen. Tracked here so shutdown can clear it.
+let _confirmPoller = null;
+export function _setConfirmPoller(t) { _confirmPoller = t; }
+export function shutdownConfirmPoller() {
+  try { if (_confirmPoller) { clearInterval(_confirmPoller); _confirmPoller = null; } } catch {}
 }

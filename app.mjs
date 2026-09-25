@@ -9,20 +9,23 @@
 import {
   appState, tabState, TABS, showMessage,
   loadCollapsed, loadSession, registerShutdownCallback, runShutdownCallbacks,
+  invalidateAccountAsync, shutdownSessionTimer, shutdownConfirmPoller,
 } from './tui/state.mjs';
 import { enableMouse, disableMouse } from './tui/mouse.mjs';
 import { requestTerminalSize } from './tui/screen.mjs';
 import { enableBracketedPaste, disableBracketedPaste } from './tui/input.mjs';
 import { loadToken } from './tui/config.mjs';
 import { loadTheme, setAccessible } from './tui/theme.mjs';
+import { shutdownToasts } from './tui/toast.mjs';
+import { shutdownWhichKey } from './tui/which-key.mjs';
 import { initScreen, render } from './tui/render.mjs';
 import { handleKey, registerCoreActions } from './tui/keys.mjs';
 import { loadUserData } from './tui/tabs/repos.mjs';
 import { loadBookmarks, loadSavedSearches, loadPins, loadInboxFilters, loadRepoPrefs, saveRepoPrefs } from './tui/store.mjs';
-import { getRateLimit, resyncRateLimit, resetRateLimit, getUserRepositories, getNotifications, getWorkflowRuns } from './tui/github.mjs';
+import { getRateLimit, resyncRateLimit, resetRateLimit, getUserRepositories, getNotifications, getWorkflowRuns, shutdownGithubCache } from './tui/github.mjs';
 import { exportPortableConfig, importPortableConfig } from './tui/portability.mjs';
 
-import { readFileSync, appendFileSync, writeFileSync, mkdirSync } from 'fs';
+import { readFileSync, appendFileSync, writeFileSync, mkdirSync, statSync } from 'fs';
 import { fileURLToPath } from 'url';
 import { dirname, join } from 'path';
 import { homedir } from 'os';
@@ -34,9 +37,23 @@ const pkg = JSON.parse(readFileSync(join(__dirname, 'package.json'), 'utf8'));
 let rateLimitInterval = null;
 let autoRefreshInterval = null;
 
-// ── Structured debug logger — writes to ~/.github-tui/debug.log ──
+// ── Structured debug logger — writes to $GITHUB_TUI_HOME/debug.log ──
 const DEBUG = !!process.env.DEBUG || !!process.env.GITHUB_TUI_DEBUG;
-const _debugLogPath = join(homedir(), '.github-tui', 'debug.log');
+const MAX_DEBUG_BYTES = 2 * 1024 * 1024;
+function _debugLogPath() {
+  return join(process.env.GITHUB_TUI_HOME || join(homedir(), '.github-tui'), 'debug.log');
+}
+function _rotateDebugLog(path) {
+  try {
+    let size = 0;
+    try { size = statSync(path).size; } catch { return; }
+    if (size < MAX_DEBUG_BYTES) return;
+    const raw = readFileSync(path, 'utf8');
+    const half = raw.slice(Math.floor(raw.length / 2));
+    const nl = half.indexOf('\n');
+    writeFileSync(path, nl >= 0 ? half.slice(nl + 1) : half);
+  } catch {}
+}
 function debug(...args) {
   if (!DEBUG) return;
   // Use async append to avoid blocking the event loop in debug mode.
@@ -44,15 +61,28 @@ function debug(...args) {
   try {
     // Ensure the config dir exists (fresh machine / CI) — a logging failure
     // must never propagate out of a crash handler.
-    mkdirSync(dirname(_debugLogPath), { recursive: true });
-    appendFileSync(_debugLogPath, line); // kept sync for crash handlers (safe — debug only)
+    const p = _debugLogPath();
+    mkdirSync(dirname(p), { recursive: true });
+    _rotateDebugLog(p);
+    appendFileSync(p, line); // kept sync for crash handlers (safe — debug only)
+  } catch {}
+}
+function crashLog(...args) {
+  // Always written, even when DEBUG is off — default crashes were traceless.
+  const line = `[${new Date().toISOString()}] [CRASH] ${args.join(' ')}\n`;
+  try {
+    const p = _debugLogPath();
+    mkdirSync(dirname(p), { recursive: true });
+    _rotateDebugLog(p);
+    appendFileSync(p, line);
   } catch {}
 }
 // Non-blocking debug for hot paths — fire-and-forget writeStream.
 function debugAsync(...args) {
   if (!DEBUG) return;
   const line = `[${new Date().toISOString()}] ${args.join(' ')}\n`;
-  import('fs').then(({ appendFile }) => appendFile(_debugLogPath, line, () => {})).catch(() => {});
+  const p = _debugLogPath();
+  import('fs').then(({ appendFile, mkdir }) => mkdir(dirname(p), { recursive: true }, () => appendFile(p, line, () => {}))).catch(() => {});
 }
 
 // ── Terminal environment detection ──
@@ -88,10 +118,29 @@ globalThis._startAutoRefresh = startAutoRefresh;
 
 // Poll the core budget every 60s as a backstop (per-request headers in
 // github.mjs keep the counter live between polls).
+let _ratePollEpoch = 0;
+export function bumpRatePollEpoch() { _ratePollEpoch++; }
 async function refreshRateLimit() {
   if (!appState.token) return;
+  // Epoch guard: a slow poll started before logout/login must never resync
+  // the NEW account's mirror with the OLD account's /rate_limit body.
+  const tokenAtStart = appState.token;
+  const epochAtStart = _ratePollEpoch;
+  const ctl = new AbortController();
+  const timeout = setTimeout(() => { try { ctl.abort(); } catch {} }, 15000);
+  if (timeout.unref) timeout.unref();
   try {
-    const data = await getRateLimit(appState.token);
+    const { getAccountEpoch } = await import('./tui/state.mjs');
+    const acctAtStart = getAccountEpoch();
+    const data = await getRateLimit(tokenAtStart, ctl.signal);
+    clearTimeout(timeout);
+    // Drop late results from a previous account session.
+    if (appState.token !== tokenAtStart) return;
+    if (epochAtStart !== _ratePollEpoch) return;
+    try {
+      const { getAccountEpoch: getEpochNow } = await import('./tui/state.mjs');
+      if (getEpochNow() !== acctAtStart) return;
+    } catch {}
     const core = data?.resources?.core || data?.rate || null;
     // Window-guarded resync: corrects drift inside the current window, in
     // both directions. A poll from a different window than the live header
@@ -102,14 +151,22 @@ async function refreshRateLimit() {
       render();
     }
   } catch (e) {
+    try { clearTimeout(timeout); } catch {}
+    if (e && /aborted|abandoned/i.test(e.message || '')) return;
     // An expired/revoked token surfaces here first when the user is idle
     // (no repo open). Mirror the repos/explore 401 flow: wipe auth state
     // and counter so the header doesn't keep showing a stale budget.
     if (e && (e.status === 401 || /401|Bad credentials|Unauthorized/i.test(e.message || ''))) {
+      // Ignore if the account already changed under us.
+      if (appState.token !== tokenAtStart || epochAtStart !== _ratePollEpoch) return;
       try {
-        const { resetAccountState, showMessage } = await import('./tui/state.mjs');
+        const { resetAccountState, showMessage, getAccountEpoch } = await import('./tui/state.mjs');
         const { removeToken } = await import('./tui/config.mjs');
+        const { clearAccountCache } = await import('./tui/github.mjs');
+        try { clearAccountCache(tokenAtStart); } catch {}
         resetAccountState();
+        bumpRatePollEpoch();
+        try { void getAccountEpoch; } catch {}
         resetRateLimit();
         removeToken();
         showMessage('Token expired or invalid — please log in again in Settings', 'error', 8000);
@@ -132,30 +189,70 @@ async function runCliCommand(args) {
     const path = pathArg || (format === 'markdown' ? 'github-tui-config.md' : 'github-tui-config.json');
     if (format === 'markdown') {
       const bundle = (await import('./tui/portability.mjs')).buildPortableConfig();
-      const lines = ['# GitHub TUI configuration', '', '- Schema: ' + bundle.schemaVersion, '- App version: ' + bundle.appVersion, '- Exported: ' + bundle.exportedAt, '', '## Counts', '', '- Bookmarks: ' + bundle.bookmarks.length, '- Saved searches: ' + bundle.savedSearches.length, '- Pins: ' + bundle.pins.length, '- Custom sections: ' + bundle.sections.length, ''];
+      const lines = ['# GitHub TUI configuration', '', '- Schema: ' + bundle.schemaVersion, '- App version: ' + bundle.appVersion, '- Exported: ' + bundle.exportedAt, '', '## Counts', '', '- Bookmarks: ' + (bundle.bookmarks?.length ?? 0), '- Saved searches: ' + (bundle.savedSearches?.length ?? 0), '- Pins: ' + (bundle.pins?.length ?? 0), '- Custom sections: ' + (bundle.sections?.length ?? 0), '',
+        '> Note: markdown export is human-readable only and cannot be re-imported.',
+        '> Use `--format json` (default) for a portable bundle that `github-tui import` accepts.', '',
+        '## Full bundle (JSON)', '', '```json', JSON.stringify(bundle, null, 2), '```', ''];
       writeFileSync(path, lines.join('\n'));
       console.log(path);
     } else console.log(exportPortableConfig(path));
     return true;
   }
   if (command === 'import') {
-    const path = args[1];
-    if (!path) throw new Error('Usage: github-tui import <config.json>');
-    importPortableConfig(path);
-    console.log('Imported configuration from ' + path);
+    const path = args[1] && !args[1].startsWith('-') ? args[1] : args.find(a => !a.startsWith('-') && a !== 'import');
+    if (!path) throw new Error('Usage: github-tui import <config.json> [--replace|--no-merge]');
+    // Replace mode was previously unreachable from the CLI (merge always true).
+    const merge = !(args.includes('--replace') || args.includes('--no-merge') || args.includes('--merge=false'));
+    importPortableConfig(path, { merge });
+    console.log('Imported configuration from ' + path + (merge ? ' (merged)' : ' (replaced)'));
     return true;
   }
   const token = loadToken();
   if (!token) throw new Error('Not authenticated. Log in from Settings first.');
   let rows = [];
+  let truncatedNote = '';
   if (command === 'repos') {
-    rows = await getUserRepositories(token, 1, 100);
+    // Paginate (up to 5×100) instead of silently truncating past 100.
+    rows = [];
+    for (let page = 1; page <= 5; page++) {
+      const batch = await getUserRepositories(token, page, 100);
+      if (!Array.isArray(batch) || batch.length === 0) break;
+      rows.push(...batch);
+      if (batch.length < 100) break;
+    }
+    if (rows.length >= 500) truncatedNote = '(truncated at 500 — use the TUI for full pagination)';
   } else if (command === 'inbox') {
-    rows = await getNotifications(token, 1, 100);
-    if (args.includes('--unread')) rows = rows.filter(n => n.unread);
+    // --unread filters client-side, so page until we have enough unread or
+    // run out (up to 5×100) instead of hiding unread beyond the first 100.
+    const wantUnread = args.includes('--unread');
+    const acc = [];
+    for (let page = 1; page <= 5; page++) {
+      const batch = await getNotifications(token, page, 100);
+      if (!Array.isArray(batch) || batch.length === 0) break;
+      acc.push(...batch);
+      if (wantUnread) {
+        const unreadSoFar = acc.filter(n => n.unread);
+        if (unreadSoFar.length >= 100 || batch.length < 100) { rows = unreadSoFar; break; }
+        continue;
+      }
+      rows = acc;
+      if (batch.length < 100) break;
+    }
+    if (wantUnread && (!rows || rows.length === 0)) rows = acc.filter(n => n.unread);
+    if (acc.length >= 500) truncatedNote = '(scanned first 500 — use the TUI for full pagination)';
   } else if (command === 'actions') {
-    const repos = await getUserRepositories(token, 1, 20);
+    // Scan up to 50 repos (paginated) instead of first 20; per-repo failures
+    // are counted and reported instead of silently treated as clean.
+    const allRepos = [];
+    for (let page = 1; page <= 3; page++) {
+      const batch = await getUserRepositories(token, page, 30);
+      if (!Array.isArray(batch) || batch.length === 0) break;
+      allRepos.push(...batch);
+      if (batch.length < 30 || allRepos.length >= 50) break;
+    }
+    const repos = allRepos.slice(0, 50);
     const groups = [];
+    let failedRepos = 0;
     for (const repo of repos) {
       const [owner, name] = String(repo.full_name || '').split('/');
       if (!owner || !name) continue;
@@ -164,10 +261,13 @@ async function runCliCommand(args) {
         const runs = result?.workflow_runs || [];
         groups.push(...runs.filter(r => !args.includes('--failed') || ['failure', 'timed_out', 'startup_failure', 'action_required'].includes(r.conclusion))
           .map(r => ({ ...r, repository: repo.full_name })));
-      } catch {}
+      } catch { failedRepos++; }
     }
     rows = groups;
+    if (failedRepos > 0) truncatedNote = '(' + failedRepos + ' repos failed to scan — partial results)';
+    else if (allRepos.length >= 50) truncatedNote = '(scanned first 50 repos)';
   }
+  if (truncatedNote && !json) console.error(truncatedNote);
   if (json) {
     process.stdout.write(JSON.stringify(rows, null, 2) + '\n');
   } else if (command === 'repos') {
@@ -223,13 +323,25 @@ async function main() {
   }
 
   // register shutdown-side message-timer cleanup so shutdown()
-  // doesn't call an undefined global. Also register uncaughtException path.
+  // doesn't call an undefined global. Node timers are objects, not numbers —
+  // check truthiness (the old typeof === 'number' check never fired).
   registerShutdownCallback(() => {
-    if (typeof appState.messageTimer === 'number') {
-      clearTimeout(appState.messageTimer);
-      appState.messageTimer = null;
-    }
+    try {
+      if (appState.messageTimer) {
+        clearTimeout(appState.messageTimer);
+        appState.messageTimer = null;
+      }
+    } catch {}
   });
+  // Async registrations (ESM-safe, no require in ESM scope).
+  registerShutdownCallback(() => { try { shutdownToasts(); } catch {} });
+  registerShutdownCallback(() => { try { shutdownWhichKey(); } catch {} });
+  registerShutdownCallback(() => {
+    try { shutdownGithubCache(); } catch {}
+    try { invalidateAccountAsync(); } catch {}
+  });
+  registerShutdownCallback(() => { try { shutdownSessionTimer(); } catch {} });
+  registerShutdownCallback(() => { try { shutdownConfirmPoller(); } catch {} });
 
   process.stdout.write('\x1b[?25l');
   if (!process.argv.includes('--no-mouse')) enableMouse();
@@ -244,6 +356,10 @@ async function main() {
   appState.inboxSavedFilters = loadInboxFilters();
   loadCollapsed();
   loadSession();
+  try {
+    const { resetFocus } = await import('./tui/focus.mjs');
+    resetFocus(tabState.current);
+  } catch {}
 
   const repoPrefs = loadRepoPrefs();
   if (repoPrefs.repoSort) appState.repoSort = repoPrefs.repoSort;
@@ -313,9 +429,16 @@ let _shuttingDown = false;function shutdown() {
   _shuttingDown = true;
   // each cleanup step wrapped in try/catch so one failure doesn't
   // strand other cleanup (multiple modules register their own exit hooks).
-  try { if (rateLimitInterval) clearInterval(rateLimitInterval); } catch (e) { debug('shutdown rate-limit interval clear failed:', e.message); }
-  try { if (autoRefreshInterval) clearInterval(autoRefreshInterval); } catch (e) { debug('shutdown auto-refresh interval clear failed:', e.message); }
+  try { if (rateLimitInterval) { clearInterval(rateLimitInterval); rateLimitInterval = null; } } catch (e) { debug('shutdown rate-limit interval clear failed:', e.message); }
+  try { if (autoRefreshInterval) { clearInterval(autoRefreshInterval); autoRefreshInterval = null; } } catch (e) { debug('shutdown auto-refresh interval clear failed:', e.message); }
   try { saveCurrentRepoPrefs(); } catch (e) { debug('shutdown saveRepoPrefs failed:', e.message); }
+  // Abort in-flight account requests so sockets don't linger past exit.
+  try { invalidateAccountAsync(); bumpRatePollEpoch(); } catch {}
+  try { shutdownGithubCache(); } catch {}
+  try { shutdownToasts(); } catch {}
+  try { shutdownWhichKey(); } catch {}
+  try { shutdownSessionTimer(); } catch {}
+  try { shutdownConfirmPoller(); } catch {}
   // Run callbacks registered by state and other modules.
   runShutdownCallbacks();
   try { process.stdin.setRawMode(false); } catch {}
@@ -361,9 +484,13 @@ if (process.platform === 'win32') {
   // Start the Local tab poller (it no-ops when not in a repo or disabled).
   // Shutdown cleanup rides the state callback registry (already imported).
   try {
-    const { ensureLocalPoll, stopLocalPoll } = await import('./tui/tabs/local.mjs');
+    const { ensureLocalPoll, stopLocalPoll, refreshLocal } = await import('./tui/tabs/local.mjs');
     ensureLocalPoll();
     registerShutdownCallback(stopLocalPoll);
+    // Seed ahead/behind/opState on boot: the hoist above only sets
+    // root/branch/upstream — without a first refresh the header shows stale
+    // zeros until the user visits the tab. Fire-and-forget quiet refresh.
+    try { if (appState.localIsRepo) refreshLocal().catch(() => {}); } catch {}
   } catch {}
 
   if (appState.token) {
@@ -398,6 +525,7 @@ if (process.platform === 'win32') {
 // pending toast timer so the terminal isn't left in a weird state.
 main().catch(err => {
   debug('Fatal:', err.message, err.stack);
+  crashLog('Fatal:', err.message, err.stack);
   // Delegate to shutdown() so timers are cleared, mouse/paste modes are
   // disabled, and prefs are persisted — same cleanup as a normal exit.
   try { shutdown(); } catch {}
@@ -413,11 +541,19 @@ main().catch(err => {
 // ── Catch async errors that escape main() ──
 process.on('unhandledRejection', (reason) => {
   debug('Unhandled rejection:', String(reason));
+  crashLog('Unhandled rejection:', String(reason && reason.stack || reason));
 });
 process.on('uncaughtException', (err) => {
   debug('Uncaught exception:', err.message, err.stack);
+  crashLog('Uncaught exception:', err.message, err.stack);
+  // Restore the terminal via shutdown() — otherwise raw mode, mouse capture
+  // and bracketed paste are left on and the shell is unusable.
+  try { shutdown(); } catch {}
   try {
     process.stdout.write('\x1b[?25h');
+    try { disableMouse(); } catch {}
+    try { disableBracketedPaste(); } catch {}
+    try { process.stdin.setRawMode(false); } catch {}
     process.stdout.write('\x1b[2J\x1b[H');
     console.error('Uncaught exception:', err.message);
   } catch {}

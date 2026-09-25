@@ -165,11 +165,15 @@ describe('local mouse — double-click, hover, wheel', () => {
     assert.equal(appState.localFocus, 'status');
   });
 
-  it('hover follows selection without stealing the tab', () => {
+  it('hover is click-only: does NOT move selection (plan §6.7)', () => {
+    const beforeStatus = appState.localStatusSelected;
+    const beforeHistory = appState.localHistorySelected;
+    const beforeFocus = appState.localFocus;
     const row = appState._localBounds.rows.find(r => r.kind === 'history');
     hover(60, row.y);
-    assert.equal(appState.localHistorySelected, row.index);
-    assert.equal(appState.localFocus, 'history');
+    assert.equal(appState.localHistorySelected, beforeHistory, 'hover must not reselect');
+    assert.equal(appState.localStatusSelected, beforeStatus, 'hover must not touch status');
+    assert.equal(appState.localFocus, beforeFocus, 'hover must not steal focus');
     assert.equal(tabState.current, 5);
   });
 

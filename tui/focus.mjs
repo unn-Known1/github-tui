@@ -258,5 +258,22 @@ export function getFocusedSelection() {
   if (t === 4) {
     if (zone.id === 'list') return { type: 'list', index: appState.selectedNotification, scroll: appState.inboxScroll };
   }
+  if (t === 2) {
+    if (zone.id === 'results') {
+      const type = appState.searchType || 'repos';
+      if (type === 'users') return { type: 'list', index: appState.userSelectedRepo, scroll: appState.userSearchScroll };
+      if (type === 'code') return { type: 'list', index: appState.codeSelectedRepo, scroll: appState.codeSearchScroll };
+      if (type === 'user-repos') return { type: 'list', index: appState.userReposSelected, scroll: appState.userReposScroll };
+      return { type: 'list', index: appState.selectedRepo, scroll: appState.searchScroll };
+    }
+    if (zone.id === 'panes') return { type: 'pane', pane: appState.detailsPane, scroll: appState.detailsScroll };
+  }
+  if (t === 5) {
+    if (zone.id === 'changes') return { type: 'list', index: appState.localStatusSelected, scroll: appState.localStatusScroll };
+    if (zone.id === 'history') return { type: 'list', index: appState.localHistorySelected, scroll: appState.localHistoryScroll };
+  }
+  if (t === 6) {
+    if (zone.id === 'menu') return { type: 'list', index: appState.settingsCursor, scroll: appState.settingsScroll || 0 };
+  }
   return null;
 }

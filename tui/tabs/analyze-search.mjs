@@ -8,6 +8,7 @@ import { color } from '../theme.mjs';
 import { emptyState, scrollIndicators } from '../render.mjs';
 import { addSavedSearch } from '../store.mjs';
 import { sortRepos } from '../repos-logic.mjs';
+import { isAuthError, handleAuthFailure } from '../error-recovery.mjs';
 
 const SEARCH_PER_PAGE = 15;
 const USER_SEARCH_PER_PAGE = 20;
@@ -109,7 +110,10 @@ export async function submitSearch(value) {
     appState.searchHasMore = results.length >= SEARCH_PER_PAGE;
     if (results.length === 0) showMessage('No repositories found', 'warning');
   } catch (e) {
-    if (!isStale(gen, 'analyze-search-repos')) showMessage(e.message || 'Search failed', 'error');
+    if (!isStale(gen, 'analyze-search-repos')) {
+      if (isAuthError(e)) { finishLoading(gen); await handleAuthFailure(e, () => submitSearch(appState.searchQuery)); return; }
+      showMessage(e.message || 'Search failed', 'error');
+    }
   }
   finishLoading(gen);
   if (!isStale(gen, 'analyze-search-repos')) render();
@@ -135,7 +139,10 @@ export async function submitUserSearch(value) {
     appState.userSearchHasMore = results.length >= USER_SEARCH_PER_PAGE;
     if (results.length === 0) showMessage('No users found', 'warning');
   } catch (e) {
-    if (!isStale(gen, 'analyze-search-users')) showMessage(e.message || 'User search failed', 'error');
+    if (!isStale(gen, 'analyze-search-users')) {
+      if (isAuthError(e)) { finishLoading(gen); await handleAuthFailure(e, () => submitUserSearch(appState.searchQuery)); return; }
+      showMessage(e.message || 'User search failed', 'error');
+    }
   }
   finishLoading(gen);
   if (!isStale(gen, 'analyze-search-users')) render();

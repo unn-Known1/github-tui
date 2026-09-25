@@ -1,7 +1,7 @@
 // Local tab — working-tree status, commit history, and diff preview.
-// v0.8 Phase 0/1: READ-ONLY. Write flows (stage/discard/commit/fetch/pull/
-// push/branch) land in Phase 2/3; their keys show an honest "coming soon"
-// toast so no shortcut is ever dead or hijacked (see §6.8 ownership rule).
+// v0.8 Phases 0-3 shipped: monitor/diff (Phase 1), stage/discard/commit
+// (Phase 2), sync/branches (Phase 3). Hunk staging, fs.watch, stash/rebase
+// manager, and merge tool remain deferred (see LOCAL_GIT_PLAN §deferred).
 //
 // State lives on flat appState.local* keys (tui/state.mjs). All git runs go
 // through runGit() (argv-array, GIT_TERMINAL_PROMPT=0, timeout, abortable)
@@ -20,6 +20,7 @@ import {
   parsePorcelainV1Z, parseLog, parseBranches, parseNumstatZ, parseDiffFiles,
   statusArgs, logArgs, diffArgs, numstatArgs, showArgs,
 } from '../git-local.mjs';
+import { isProbablyBinary } from './files.mjs';
 import { getLocalGitMeta } from '../git-context.mjs';
 import { color } from '../theme.mjs';
 import {
@@ -282,6 +283,20 @@ export async function loadLocalStatus(opts = {}) {
       appState.localUpstream = p.upstream || null;
       appState.localAhead = p.ahead || 0;
       appState.localBehind = p.behind || 0;
+      // Authoritative ahead/behind: porcelain -b header can miss divergence
+      // (e.g. no upstream line). rev-list --left-right --count is ground truth.
+      if (appState.localUpstream) {
+        try {
+          const rr = await runGit(['rev-list', '--left-right', '--count', 'HEAD...@{u}'], gitOpts);
+          if (!isStale(gen) && rr.code === 0) {
+            const m = String(rr.stdout || '').trim().split();
+            if (m.length >= 2 && Number.isFinite(Number(m[0])) && Number.isFinite(Number(m[1]))) {
+              appState.localAhead = Number(m[0]);
+              appState.localBehind = Number(m[1]);
+            }
+          }
+        } catch {}
+      }
       appState.localStaged = p.staged;
       appState.localUnstaged = p.unstaged;
       appState.localUntracked = p.untracked;
@@ -319,8 +334,16 @@ export async function loadLocalHistory(opts = {}) {
       { cwd: appState.localRoot, signal: gen.signal, timeoutMs: 30000 });
     if (isStale(gen)) return;
     if (r.code !== 0) {
-      // Empty repo (no commits yet) exits 128 — honest empty, not an error.
-      if (!append) {
+      // Empty repo (no commits yet) exits 128 with 'does not have any commits'.
+      // Any OTHER non-zero (corrupt repo, bad git dir) is an error, not empty.
+      const errText = String(r.stderr || r.stdout || '');
+      const isEmptyRepo = /does not have any commits|bad default revision|unknown revision/i.test(errText);
+      if (!isEmptyRepo && !append) {
+        appState.localHistory = [];
+        appState.localHistoryHasMore = false;
+        appState.localHistoryPage = 1;
+        appState.localHistoryError = errText.trim().split(/\r?\n/)[0].slice(0, 140);
+      } else if (!append) {
         appState.localHistory = [];
         appState.localHistoryHasMore = false;
         appState.localHistoryPage = 1;
@@ -351,7 +374,7 @@ const _untrackedCache = new Map(); // rel -> { size, mtimeMs, info }
 function countUntrackedLines(root, untracked) {
   const out = {};
   const seen = new Set();
-  const NUL = String.fromCharCode(0);
+  /* NUL check via shared isProbablyBinary() (files.mjs) */
   for (const e of (untracked || []).slice(0, MAX_STATUS_ROWS)) {
     const rel = e && e.path;
     if (!rel || seen.has(rel)) continue;
@@ -379,7 +402,7 @@ function countUntrackedLines(root, untracked) {
         continue;
       }
       const text = readFileSync(target, 'utf-8');
-      const info = text.slice(0, 8000).includes(NUL)
+      const info = isProbablyBinary(text)
         ? { binary: true }
         : { lines: text.length === 0 ? 0 : text.split('\n').length - (text.endsWith('\n') ? 1 : 0) };
       _untrackedCache.set(rel, { size: st.size, mtimeMs, info });
@@ -421,7 +444,7 @@ function readUntrackedFile(root, rel) {
     throw new Error('File too large to preview (' + rel + ').');
   }
   const text = readFileSync(target, 'utf-8');
-  if (text.slice(0, 8000).includes('\0')) throw new Error('Binary file — preview hidden.');
+  if (isProbablyBinary(text)) throw new Error('Binary file — preview hidden.');
   return text;
 }
 
@@ -476,8 +499,8 @@ export async function loadLocalDiff() {
     // Binary guard (mirrors the untracked reader): a forced text diff on a
     // binary blob would paint garbage — hide it instead. NUL byte written
     // as an explicit escape so it survives the edit layer verbatim.
-    const NUL = String.fromCharCode(0);
-    const body = clean.slice(0, 8000).includes(NUL)
+    /* NUL check via shared isProbablyBinary() (files.mjs) */
+    const body = isProbablyBinary(clean)
       ? 'Binary file — preview hidden.'
       : clean.slice(0, MAX_DIFF_PREVIEW_CHARS) +
         (clean.length > MAX_DIFF_PREVIEW_CHARS ? '\n… truncated (12KB preview cap)' : '');
@@ -511,10 +534,15 @@ export async function refreshLocal() {
 // 1.5s tick; skips when manual/auto conditions fail; background tabs only
 // refresh status every ~4th tick (≈6s). History is on-demand (refreshLocal,
 // Space append) — commits change it far less often than the worktree.
+// §11 250ms debounce after manual actions: a poll tick inside the window is
+// skipped so it can never clobber a just-fired stage/commit result.
+let _lastManualActionAt = 0;
+export function noteLocalManualAction() { _lastManualActionAt = Date.now(); }
 export function ensureLocalPoll() {
   if (_pollTimer) return;
   _pollTimer = setInterval(async () => {
     try {
+      if (Date.now() - _lastManualActionAt < 250) return;
       if (!appState.localAutoPoll || !appState.localIsRepo || appState.loading) return;
       if (appState.inputMode || appState.confirmAction) return;
       _pollTick++;
@@ -535,6 +563,16 @@ export function ensureLocalPoll() {
 
 export function stopLocalPoll() {
   if (_pollTimer) { clearInterval(_pollTimer); _pollTimer = null; }
+}
+
+export function toggleAutoPoll() {
+  appState.localAutoPoll = !appState.localAutoPoll;
+  try {
+    const { scheduleSessionSave } = require('../state.mjs');
+  } catch {}
+  import('../state.mjs').then(m => { try { m.scheduleSessionSave(); } catch {} }).catch(() => {});
+  showMessage('Local auto-poll ' + (appState.localAutoPoll ? 'on (1.5s)' : 'off — press r to refresh'), 'info');
+  render();
 }
 
 // ─── Navigation (up/down/enter/space/page/top/bottom) ───────────
@@ -814,6 +852,8 @@ async function _pullImpl() {
 // when the listing fails. Synchronous (one fast local-only spawn on an
 // explicit keypress — same precedent as getLocalGitMeta) so pushFlow stays
 // synchronous and its confirm appears before the caller returns.
+// Non-interactive env (GIT_TERMINAL_PROMPT=0) so a credential helper can
+// never hang the TUI.
 function resolvePushRemote() {
   try {
     const out = execFileSync('git', ['remote'], {
@@ -821,11 +861,15 @@ function resolvePushRemote() {
       stdio: ['ignore', 'pipe', 'pipe'],
       timeout: 8000,
       encoding: 'utf-8',
+      env: { ...process.env, GIT_TERMINAL_PROMPT: '0' },
     });
     const names = String(out || '').split(/\s+/).filter(Boolean);
     if (names.includes('origin')) return 'origin';
     if (names.length > 0) return names[0];
-  } catch {}
+    showMessage('No git remotes configured — push will likely fail; set one with `git remote add origin <url>`', 'warning');
+  } catch {
+    showMessage('Could not list git remotes — defaulting to `origin`', 'warning');
+  }
   return 'origin';
 }
 
@@ -927,7 +971,11 @@ export async function toggleStage() {
     await _unstagePath(row.path);
     return;
   }
-  // untracked + unstaged (+conflicted: `add` marks resolved) stage via add.
+  // untracked + unstaged stage via add. Conflicted files: `git add` marks
+  // resolved — warn explicitly so the resolve is never silent.
+  if (row.section === 'conflicted') {
+    showMessage('Staging a conflicted file marks it resolved — verify the merge first', 'warning');
+  }
   const gen = startAsync('local-stage');
   beginLoading(gen);
   try {
@@ -935,6 +983,7 @@ export async function toggleStage() {
     if (isStale(gen)) return;
     if (r.code !== 0) { gitFailed('Stage', r); return; }
     showMessage('Staged ' + row.path, 'success');
+    noteLocalManualAction();
     await loadLocalStatus({ quiet: true });
   } catch (e) {
     if (!isStale(gen) && e && e.code !== 'EABORTED') showMessage('Stage: ' + String(e.message || e).slice(0, 120), 'error');
@@ -1053,12 +1102,13 @@ export function discardFlow() {
     return;
   }
   const untracked = row.section === 'untracked';
+  const _stat = (() => { try { const n = statNumbers(row.section, row.path); if (!n) return ''; if (n.binary) return ' (binary)'; return ' (' + '+' + n.add + ' -' + n.del + ')'; } catch { return ''; } })();
   const cmd = untracked
-    ? 'git clean -f -- ' + row.path
+    ? 'git clean -fd -- ' + row.path
     : 'git restore --source=HEAD --staged --worktree -- ' + row.path;
   const what = untracked ? 'delete the untracked file' : 'throw away unstaged edits to';
   confirmDanger(
-    'Discard changes — ' + row.path + '\n\nThis will ' + what + ':\n  ' + row.path +
+    'Discard changes — ' + row.path + _stat + '\n\nThis will ' + what + ':\n  ' + row.path +
     '\n\n`' + cmd + '`',
     () => confirmDanger(
       'Confirm discard — IRREVERSIBLE\n\n' + row.path +
@@ -1076,7 +1126,7 @@ async function _discardImpl(path, untracked) {
   try {
     let r;
     if (untracked) {
-      r = await runGit(['clean', '-f', '--', path],
+      r = await runGit(['clean', '-fd', '--', path],
         { cwd: appState.localRoot, signal: gen.signal, timeoutMs: 30000 });
     } else {
       r = await runGit(['restore', '--source=HEAD', '--staged', '--worktree', '--', path],
@@ -1089,6 +1139,7 @@ async function _discardImpl(path, untracked) {
     if (isStale(gen)) return;
     if (r.code !== 0) { gitFailed('Discard', r); return; }
     showMessage('Discarded ' + path, 'success');
+    noteLocalManualAction();
     closeDiff();
     await loadLocalStatus({ quiet: true });
   } catch (e) {
@@ -1181,9 +1232,14 @@ export function checkoutSelectedBranch() {
     showMessage('Resolve conflicts first — switching branches now risks them', 'error');
     return;
   }
-  const dirty = (appState.localStaged || []).length + (appState.localUnstaged || []).length +
-    (appState.localUntracked || []).length;
-  const run = () => _checkoutImpl(target);
+  if (appState.localOpState && appState.localOpState !== 'none') {
+    showMessage('Finish the in-progress ' + appState.localOpState + ' first — checkout blocked', 'error');
+    return;
+  }
+  // Untracked files do not block checkout (git carries them); only tracked
+  // dirt (staged+unstaged) over-warns otherwise.
+  const dirty = (appState.localStaged || []).length + (appState.localUnstaged || []).length;
+  const run = () => _checkoutImpl(target, !!b.remote);
   if (dirty > 0) {
     confirm('Switch to ' + target + '?' +
       '\n\n' + dirty + ' uncommitted file(s) will be carried over.' +
@@ -1192,12 +1248,13 @@ export function checkoutSelectedBranch() {
   } else run();
 }
 
-async function _checkoutImpl(target) {
+async function _checkoutImpl(target, isRemote) {
   const gen = startAsync('local-branch');
   beginLoading(gen);
   render();
   try {
-    const r = await runGit(['checkout', target],
+    const args = isRemote ? ['checkout', '--track', target] : ['checkout', target];
+    const r = await runGit(args,
       { cwd: appState.localRoot, signal: gen.signal, timeoutMs: 30000 });
     if (isStale(gen)) return;
     if (r.code !== 0) {
@@ -1205,6 +1262,7 @@ async function _checkoutImpl(target) {
       return;
     }
     showMessage('Switched to ' + target, 'success');
+    noteLocalManualAction();
     closeDiff();
     _branchPicker = false;
     await loadLocalStatus({ quiet: true });
@@ -1346,6 +1404,14 @@ export function classifyCommitError(stderr) {
 
 export function commitFlow() {
   if (!needRepo()) return;
+  if (appState.localOpState && appState.localOpState !== 'none') {
+    showMessage('Finish the in-progress ' + appState.localOpState + ' first — commit blocked', 'error');
+    return;
+  }
+  if (/detached/i.test(String(appState.localBranch || ''))) {
+    showMessage('Detached HEAD — checkout a branch before committing', 'error');
+    return;
+  }
   const n = (appState.localStaged || []).length;
   if (n === 0) { showMessage('Nothing staged — press `a` on a file first', 'warning'); return; }
   _pendingSubject = '';
@@ -1355,15 +1421,42 @@ export function commitFlow() {
 
 export async function amendFlow() {
   if (!needRepo()) return;
+  if (appState.localOpState && appState.localOpState !== 'none') {
+    showMessage('Finish the in-progress ' + appState.localOpState + ' first — amend blocked', 'error');
+    return;
+  }
+  if (/detached/i.test(String(appState.localBranch || ''))) {
+    showMessage('Detached HEAD — checkout a branch before amending', 'error');
+    return;
+  }
+  _pendingSubject = '';
+  // Prefill from git directly (headSubjectArgs) so a stale history list can
+  // never seed the amend prompt with an old subject/body.
+  try {
+    const { headSubjectArgs } = await import('../git-local.mjs');
+    const r = await runGit(headSubjectArgs(), { cwd: appState.localRoot, timeoutMs: 8000 });
+    if (r.code === 0) {
+      const raw = String(r.stdout || '');
+      const sep = String.fromCharCode(31);
+      const idx = raw.indexOf(sep);
+      const subject = (idx >= 0 ? raw.slice(0, idx) : raw).trim();
+      const body = (idx >= 0 ? raw.slice(idx + 1) : '').trim();
+      if (subject) {
+        _pendingBodyPrefill = body || '';
+        startInput('Amend subject: ', 'local-amend-subject', false, subject);
+        return;
+      }
+    }
+  } catch {}
   if ((appState.localHistory || []).length === 0) {
     // History may simply not be loaded yet — try once before giving up.
     await loadLocalHistory();
     if ((appState.localHistory || []).length === 0) { showMessage('No commits to amend', 'warning'); return; }
   }
-  _pendingSubject = '';
+  await loadLocalHistory({ quiet: true });
   const head = appState.localHistory[0];
-  _pendingBodyPrefill = head.body || '';
-  startInput('Amend subject: ', 'local-amend-subject', false, head.subject || '');
+  _pendingBodyPrefill = (head && head.body) || '';
+  startInput('Amend subject: ', 'local-amend-subject', false, (head && head.subject) || '');
 }
 
 function commitConfirmBody(kind, subject, body, stagedList) {
@@ -1448,6 +1541,7 @@ async function _commitImpl(subject, body, amend) {
       return;
     }
     showMessage(amend ? 'Amended HEAD' : 'Committed', 'success');
+    noteLocalManualAction();
     closeDiff();
     await loadLocalStatus({ quiet: true });
     await loadLocalHistory();
@@ -1534,15 +1628,16 @@ export const keys = {
   'g': () => top(),
   'G': () => bottom(),
   ' ': () => space(),
-  // NOTE: no 'z'/'Z' entries — collapse stays on the global path via
-  // getCurrentSection()/getSections() below (Phase 1 keeps all three).
+  // NOTE: 'z' toggles section collapse via getCurrentSection()/getSections();
+  // 'Z' stays global (collapse-all) by design — see keys.mjs LOCAL_OWNED.
 };
 
 export function getSections() {
-  return ['local:conflicted', 'local:staged', 'local:unstaged', 'local:untracked', 'local:commits'];
+  return ['local:branch', 'local:conflicted', 'local:staged', 'local:unstaged', 'local:untracked', 'local:commits'];
 }
 
 export function getCurrentSection() {
+  if (_branchPicker) return 'local:branch';
   if (appState.localFocus === 'history') return 'local:commits';
   const row = getSelectedStatusRow();
   if (!row) return 'local:staged';
@@ -1704,6 +1799,8 @@ export function renderLocal(screen, y, h) {
   const ageBadge = 'Updated ' + ageLabel();
   const rightTxt = autoBadge + ' · ' + ageBadge;
   const rightX = Math.max(2, W - rightTxt.length - 2);
+  // Theme tokens gitActionBar/gitFocusRing (were defined but unused): paint the
+  // header badge background + focused-column ring so themes actually apply.
   {
     const rows = getStatusList();
     if (rows.length > 0) {
@@ -1726,7 +1823,11 @@ export function renderLocal(screen, y, h) {
       }
     }
   }
-  screen.writeStr(rightX, cy, rightTxt, { dim: true });
+  try {
+    const bar = color('gitActionBar');
+    if (bar) for (let x = 2; x < W - 2 && x >= 0; x++) { if (screen.styleBuf[cy]) screen.styleBuf[cy][x] = { ...(screen.styleBuf[cy][x] || {}), ...bar }; }
+  } catch {}
+  screen.writeStr(rightX, cy, rightTxt, color('gitFocusRing') || { dim: true });
   cy++;
   screen.hline(cy, '─', { dim: true });
   cy++;

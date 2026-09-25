@@ -67,8 +67,16 @@ export function startSequence(prefix) {
     _timeout = null;
     if (_active) close();
   }, 2000);
+  if (_timeout.unref) _timeout.unref();
   
   appRender();
+}
+
+export function shutdownWhichKey() {
+  try { if (_timeout) { clearTimeout(_timeout); _timeout = null; } } catch {}
+  _active = false;
+  _prefix = '';
+  _focusToken = null;
 }
 
 /**

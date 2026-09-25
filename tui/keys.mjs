@@ -686,6 +686,9 @@ export function handleKey(key) {
     case ':': openPalette(); return;
     case '\x0e': openQuickSettings(); return;  // Ctrl+,
     case 'r': {
+      // INTENTIONAL SHADOW (documented): global r (retry/refresh/rerun) preempts
+      // local.keys.r and settings.keys.r. Local refresh stays reachable via
+      // palette local.refresh + footer [r]; Settings refresh via palette.
       // a retry handler attached by error-recovery.mjs takes priority
       // over the per-tab refresh / Actions workflow rerun. Users in an error
       // state expect `r` to fix the failure, not re-fire a workflow.
@@ -757,7 +760,12 @@ export function handleKey(key) {
     case ' ': handleSpace(); return;
     case '\x1b[5~': handlePageUp(); return;  // PageUp
     case '\x1b[6~': handlePageDown(); return;  // PageDown
-    case 'g': handleTop(); return;
+    case 'g': {
+      // Single 'g' is the which-key prefix (g g = top, g G = bottom) except on
+      // Local, which owns g/G directly (LOCAL_OWNED). Not dead — it waits for
+      // the second key (2s overlay, Esc cancels).
+      handleTop(); return;
+    }
     case 'G': {
       // in the files pane (Analyze details + files sub-pane),
       // capital G triggers `gh repo clone` rather than jump-to-bottom.
@@ -842,6 +850,9 @@ export function handleKey(key) {
   // 5. Global star toggle.
   if (key === '*' && currentRepoForAction()) { toggleStar(); return; }
 
+  // INTENTIONAL SHADOW (documented): global s/S star handling preempts
+  // repos.keys.s and settings.keys.S (same effect — star current/github-tui
+  // repo). Files sub-pane s/S (save) is dispatched explicitly and wins.
   // lowercase 's' on repo-bearing tabs (1=Repos / 3=Explore details,
   // NOT inside Files sub-pane where 's' means saveCurrentFile) toggles star
   // for the current repo. 'S' on Settings still stars the github-tui repo.
@@ -904,6 +915,10 @@ export function handleKey(key) {
 
   // l (lowercase vi "right/forward") — acts as Enter on non-dashboard tabs
   // so vi users can drill into items without switching hands.
+  // INTENTIONAL SHADOW (documented): this global preempts repos.keys.l
+  // (palette-only) and dashboard per-tab l (localRepoFilter is dashboard-only,
+  // handled in step 6 before we get here). Actions runs-view l is dispatched
+  // explicitly above.
   if (key === 'l' && tabState.current !== 0) {
     if (tabState.current === 3 && appState.actionsView === 'runs') {
       actions.keys.l();
@@ -955,6 +970,8 @@ export function handleKey(key) {
   }
 
   // 8. Custom user keybindings (module loaded once, not per-keypress).
+  // INTENTIONAL ORDER (documented): built-in tab keys win over a colliding
+  // custom binding. Use a non-colliding key or a palette action id instead.
   if (_customKeysModule) { _customKeysModule.runCustomKey(key); }
 }
 
@@ -966,6 +983,7 @@ function handleSpace() {
   else if (t === 3) actions.space();
   else if (t === 4) inbox.space();
   else if (t === 5) local.space();
+  else if (t === 6) settings.enter();
 }
 function handlePageUp() {
   const t = tabState.current;
@@ -975,6 +993,7 @@ function handlePageUp() {
   else if (t === 3) actions.pageUp();
   else if (t === 4) inbox.pageUp();
   else if (t === 5) local.pageUp();
+  else if (t === 6) settings.up();
 }
 function handlePageDown() {
   const t = tabState.current;
@@ -984,6 +1003,7 @@ function handlePageDown() {
   else if (t === 3) actions.pageDown();
   else if (t === 4) inbox.pageDown();
   else if (t === 5) local.pageDown();
+  else if (t === 6) settings.down();
 }
 function handleTop() {
   const t = tabState.current;
@@ -1207,6 +1227,7 @@ function handleBack() {
     // no-op, breaking the expected "Esc = back" mental model.
   }
   setTab(0);
+  resetFocus(0);
 }
 
 // Palette action registry.
@@ -1225,7 +1246,7 @@ export function registerCoreActions() {
     label: 'Go to ' + t.label,
     hint: 'tab ' + t.key,
     category: 'Navigation',
-    run: () => setTab(i),
+    run: () => { setTab(i); resetFocus(i); },
   }));
 
   // ── Global Actions ──
@@ -1288,6 +1309,12 @@ export function registerCoreActions() {
         hint: 'p', category: 'Local', run: () => { setTab(5); local.pullFlow(); } });
   reg({ id: 'local.branch', label: 'Local: Branch picker',
         hint: 'B', category: 'Local', run: () => { setTab(5); local.openBranchPicker(); } });
+  reg({ id: 'local.unstageAll', label: 'Local: Unstage all (index → worktree kept)',
+        hint: 'A', category: 'Local', run: () => { setTab(5); local.stageAll(); } });
+  reg({ id: 'local.openCommit', label: 'Local: Open selected commit / file',
+        hint: 'o', category: 'Local', run: () => { setTab(5); local.openCurrent(); } });
+  reg({ id: 'local.autopoll', label: 'Local: Toggle auto-poll (status refresh)',
+        hint: 'S', category: 'Local', run: () => { setTab(5); local.toggleAutoPoll(); } });
 
   reg({ id: 'analyze.files', label: 'Open File explorer for current repo',
         hint: 'F', category: 'Explore',
@@ -1473,12 +1500,23 @@ export function registerCoreActions() {
         run: () => import('./organizations.mjs').then(m => m.loadOrganizations()) });
   reg({ id: 'plugins.scan', label: 'Scan installed read-only plugins',
         run: () => import('./plugins.mjs').then(m => { const p = m.discoverPlugins(); showMessage(p.length ? p.map(x => x.id + ': ' + x.status).join(' | ') : 'No plugins installed', 'info', 6000); }) });
+  reg({ id: 'plugins.reload', label: 'Reload plugins (re-scan read-only manifests)',
+        run: () => import('./plugins.mjs').then(m => { const p = m.discoverPlugins(); showMessage('Plugins re-scanned: ' + (p.length ? p.length + ' found' : 'none installed') + ' (runtime/hot-reload deferred — see VISION v2.x)', 'info', 6000); }) });
   reg({ id: 'smart.insight', label: 'Show rule-based repo insights',
         run: () => import('./recommended-features.mjs').then(m => {
           if (!appState.repoDetails) { showMessage('Open a repository first', 'warning'); return; }
           const insight = m.buildSmartInsight(appState.repoDetails, { openIssues: appState.repoIssues.length, lastPushDays: appState.repoDetails.pushed_at ? Math.floor((Date.now() - Date.parse(appState.repoDetails.pushed_at)) / 86400000) : null, openSecurityAlerts: appState.securityAggregate.length });
           showMessage(insight.findings.length ? insight.findings.join(' ') : 'No rule-based concerns detected', 'info', 7000);
         }) });
+  reg({ id: 'smart.since-last-visit', label: 'Since I was last here (activity since last session)',
+        run: () => import('./recommended-features.mjs').then(m => {
+          const lastSeen = appState.dashboardLastFetched || 0;
+          const items = m.sinceLastVisit({ notifications: appState.notifications, issues: appState.dashboardRecentIssues, prs: appState.dashboardRecentPRs, failures: appState.actionsFailures, lastSeenMs: lastSeen });
+          showMessage(items.length ? items.slice(0, 5).join(' | ') + (items.length > 5 ? ' (+' + (items.length - 5) + ' more)' : '') : 'No new activity since last visit', 'info', 7000);
+        }) });
+  reg({ id: 'account.switch', label: 'Multi-account: switch profile (Ctrl-A hint)',
+        hint: 'Ctrl-A', category: 'Account',
+        run: () => startInput('Profile id (re-login if account changes): ', 'profile-switch') });
 
   // Saved searches
   reg({ id: 'search.save', label: 'Save current search query...',

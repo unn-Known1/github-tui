@@ -117,3 +117,45 @@ export function createRetryHandler(operation, retryFn) {
     showError(message, operation, { retry: retryFn });
   };
 }
+
+// ── Unified auth-failure handling (401 / Bad credentials) ──
+// Every pane previously had its own variant: some wiped token+counter, some
+// showed a generic message, some left stale header/scopes behind. This one
+// helper performs the FULL wipe so no path can forget a step:
+//   clearAccountCache(token) + resetAccountState() + resetRateLimit() +
+//   removeToken() + invalidateAccountAsync() + setTab(6) + showError(retry).
+// Dynamic imports avoid cycles (state↔github↔config). Returns true when the
+// error was an auth failure and was handled, false otherwise.
+export function isAuthError(e) {
+  const msg = (e && e.message) || '';
+  const status = e && e.status;
+  return status === 401 || /401|Bad credentials|Unauthorized/i.test(msg);
+}
+
+export async function handleAuthFailure(e, retryFn) {
+  if (!isAuthError(e)) return false;
+  try {
+    const [stateMod, githubMod, configMod] = await Promise.all([
+      import('./state.mjs'),
+      import('./github.mjs'),
+      import('./config.mjs'),
+    ]);
+    let token = null;
+    try { token = stateMod.appState?.token || null; } catch {}
+    try { if (token && githubMod.clearAccountCache) githubMod.clearAccountCache(token); } catch {}
+    try { if (stateMod.invalidateAccountAsync) stateMod.invalidateAccountAsync(); } catch {}
+    try { if (stateMod.resetAccountState) stateMod.resetAccountState(); } catch {}
+    try { if (githubMod.resetRateLimit) githubMod.resetRateLimit(); } catch {}
+    try { if (configMod.removeToken) configMod.removeToken(); } catch {}
+    try { if (stateMod.setTab) stateMod.setTab(6); } catch {}
+    try {
+      if (globalThis._bumpRatePollEpoch) globalThis._bumpRatePollEpoch();
+    } catch {}
+  } catch {}
+  showError('Token expired or invalid — please log in again', 'Authentication', { retry: retryFn });
+  try {
+    const { render } = await import('./state.mjs');
+    render();
+  } catch {}
+  return true;
+}

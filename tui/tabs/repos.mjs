@@ -3,7 +3,7 @@
 
 import { appState, render, startAsync, isStale, showMessage, setTab, upsertEntity,
   beginLoading, finishLoading, resetAccountState, filterReposByWorkflowState } from '../state.mjs';
-import { getAuthenticatedUser, getUserRepositories, getStarredRepos, isStarred, starRepo, unstarRepo, getRepositoryPullRequests, resetRateLimit } from '../github.mjs';
+import { getAuthenticatedUser, getUserRepositories, getStarredRepos, isStarred, starRepo, unstarRepo, getRepositoryPullRequests, resetRateLimit, clearAccountCache } from '../github.mjs';
 import { removeToken } from '../config.mjs';
 import { startInput, registerInputHandler } from '../input.mjs';
 import { shortNum, relTime, truncate, displayWidth } from '../utils.mjs';
@@ -14,7 +14,7 @@ import { isBookmarked } from '../store.mjs';
 import { togglePin } from '../store.mjs';
 import { loadRepoDetails } from './analyze.mjs';
 import { sortRepos as _sortRepos, applyAllFilters as _applyAllFilters, floatPinsToTop as _floatPinsToTop } from '../repos-logic.mjs';
-import { showError } from '../error-recovery.mjs';
+import { showError, isAuthError } from '../error-recovery.mjs';
 
 const REPOS_PER_PAGE = 30;
 
@@ -122,16 +122,16 @@ export async function loadUserData({ loadDashboard = true, awaitBackground = fal
     }
   } catch (e) {
     if (!isStale(gen, 'repos')) {
-      const msg = (e && e.message) || '';
-      const status = e && e.status;
-      if (status === 401 || /401|Bad credentials|Unauthorized/i.test(msg)) {
+      if (isAuthError(e)) {
+        try { if (appState.token) clearAccountCache(appState.token); } catch {}
         resetAccountState();
         resetRateLimit();
         removeToken();
+        if (globalThis._bumpRatePollEpoch) { try { globalThis._bumpRatePollEpoch(); } catch {} }
         setTab(6); // Settings sits last (key 0)
         showError('Token expired or invalid — please log in again', 'Authentication', { retry: loadUserData });
       } else {
-        showError(msg || 'Unknown error', 'Load repos', { retry: loadUserData });
+        showError((e && e.message) || 'Unknown error', 'Load repos', { retry: loadUserData });
       }
     }
   }
@@ -231,22 +231,35 @@ export async function loadAllReposBackground(gen) {
 // Shared 401/expired-token recovery for loaders (mirrors loadUserData).
 // A stale token previously stranded users in a generic error message with no
 // re-auth path in loadMoreRepos / loadStarredRepos / loadMoreStarred.
+// Full wipe: per-account cache + state + counter + token, so no stale
+// header/scopes survive.
 function _recover401(e, retryFn) {
-  const msg = (e && e.message) || '';
-  const status = e && e.status;
-  if (status === 401 || /401|Bad credentials|Unauthorized/i.test(msg)) {
-    resetAccountState();
-    resetRateLimit();
-    removeToken();
-    setTab(6); // Settings sits last (key 0)
-    showError('Token expired or invalid — please log in again', 'Authentication', { retry: retryFn });
-    return true;
-  }
-  return false;
+  if (!isAuthError(e)) return false;
+  try { if (appState.token) clearAccountCache(appState.token); } catch {}
+  resetAccountState();
+  resetRateLimit();
+  removeToken();
+  if (globalThis._bumpRatePollEpoch) { try { globalThis._bumpRatePollEpoch(); } catch {} }
+  setTab(6); // Settings sits last (key 0)
+  showError('Token expired or invalid — please log in again', 'Authentication', { retry: retryFn });
+  return true;
 }
 
 export async function loadMoreRepos() {
-  if (!appState.token || !appState.reposHasMore) return;
+  // After the MAX_PAGES cap, reposHasMore is false but _moreReposAvailable is
+  // true — [Space] must resume background pagination instead of dead-ending.
+  if (!appState.token) return;
+  if (!appState.reposHasMore) {
+    if (appState._moreReposAvailable) {
+      appState._moreReposAvailable = false;
+      appState.reposHasMore = true;
+      const gen2 = startAsync('repos');
+      loadAllReposBackground(gen2).catch(() => {});
+      showMessage('Resuming repo pagination…', 'info');
+      return;
+    }
+    return;
+  }
   const gen = startAsync('repos');
   beginLoading(gen);
   render();

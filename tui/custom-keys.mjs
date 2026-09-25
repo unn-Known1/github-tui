@@ -18,7 +18,7 @@ import { spawn } from 'child_process';
 let _bindings = null;
 
 // Valid contexts for custom keybindings.
-const VALID_CONTEXTS = new Set(['any', 'detail', 'repo', 'dashboard', 'files']);
+const VALID_CONTEXTS = new Set(['any', 'detail', 'repo', 'dashboard', 'files', 'local', 'inbox', 'actions', 'settings']);
 
 // Validate a single binding entry. Returns null if valid, or an error message.
 function validateBinding(binding, index) {

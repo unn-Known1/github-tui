@@ -55,9 +55,17 @@ export function updateRateLimit(limit, remaining, reset) {
   // Late arrival from a previous window — its low `remaining` belongs to an
   // expired budget and must not drag the fresh window's counter down.
   if (resetOk && Number.isFinite(storedReset) && reset < storedReset) return lastRateLimit;
-  const effectiveLimit = limOk ? limit : lastRateLimit.limit;
-  const clampRemaining = (v) => Number.isFinite(effectiveLimit) && effectiveLimit > 0
-    ? Math.min(Math.max(v, 0), effectiveLimit)
+  // Clamp only against a limit from the SAME window: clamping a valid
+  // `remaining` against a stale effectiveLimit (e.g. after an account switch
+  // without reset) would corrupt the new account's counter. When the incoming
+  // limit is present it defines the budget; when absent, clamp against the
+  // stored limit only if we also have a same-window reset (or no reset info
+  // at all yet — baseline). Otherwise leave remaining unclamped above.
+  const clampAgainst = limOk ? limit
+    : (!resetOk || !Number.isFinite(storedReset) || (resetOk && reset === storedReset))
+      ? lastRateLimit.limit : null;
+  const clampRemaining = (v) => Number.isFinite(clampAgainst) && clampAgainst > 0
+    ? Math.min(Math.max(v, 0), clampAgainst)
     : Math.max(v, 0);
   const newWindow = resetOk && Number.isFinite(storedReset) && reset > storedReset;
   const baseline = lastRateLimit.remaining === null || lastRateLimit.remaining === undefined;
@@ -117,6 +125,13 @@ export function resyncRateLimit(limit, remaining, reset) {
   const resetOk = Number.isFinite(reset) && reset > 0;
   const storedReset = lastRateLimit.reset;
   if (resetOk && Number.isFinite(storedReset) && reset !== storedReset) return lastRateLimit;
+  // A poll with a missing reset must not overwrite limit/remaining while
+  // leaving a stale reset behind (mixed-window counter). Keep the old reset
+  // only when we already have one AND the poll carries no window info — but
+  // still accept limit/remaining as same-window drift correction only if a
+  // baseline reset exists or the poll is window-less baseline. When we have a
+  // stored reset and the poll omits reset, ignore the poll entirely.
+  if (!resetOk && Number.isFinite(storedReset)) return lastRateLimit;
   lastRateLimit.limit = limit;
   lastRateLimit.remaining = Math.min(Math.max(remaining, 0), limit);
   if (resetOk) lastRateLimit.reset = reset;
@@ -124,13 +139,80 @@ export function resyncRateLimit(limit, remaining, reset) {
 }
 
 // ── Offline detection ──
-export const offlineState = { isOffline: false, lastOnline: null };
+export const offlineState = { isOffline: false, lastOnline: null, lastServedStaleAt: null, lastServedFresh: true };
+
+// Per-pane staleness: every cache serve records the served body's original
+// timestamp here so the header can render "(cached Xm ago)" next to the
+// global OFFLINE banner instead of letting stale data be misread as live.
+export function noteCacheServe(ts, fresh) {
+  offlineState.lastServedStaleAt = typeof ts === 'number' ? ts : Date.now();
+  offlineState.lastServedFresh = !!fresh;
+}
+
+export function cacheAgeLabel(now = Date.now()) {
+  const ts = offlineState.lastServedStaleAt;
+  if (!ts) return null;
+  const mins = Math.max(0, Math.floor((now - ts) / 60000));
+  if (mins < 1) return 'just now';
+  if (mins < 60) return mins + 'm ago';
+  const hrs = Math.floor(mins / 60);
+  if (hrs < 24) return hrs + 'h ago';
+  return Math.floor(hrs / 24) + 'd ago';
+}
 
 // ── ETag cache with LRU eviction and disk persistence ──
 const etagCache = new Map();
 const ETAG_CACHE_MAX = 500;
 const ETAG_TTL = 300_000; // 5 minutes
+const ETAG_OFFLINE_TTL = ETAG_TTL * 6; // 30 min — offline may serve older than wire fallbacks
+const LAST_SYNCED_MAX = 1000;
 let _cacheDirty = false;
+// Incremental byte accounting so getCacheStats() (header render path) is O(n)
+// over scalars, not O(total-bytes) via JSON.stringify per frame.
+let _cacheTotalBytes = 0;
+
+function estimateBodyBytes(body) {
+  if (body == null) return 4;
+  if (typeof body === 'string') return body.length;
+  try {
+    const s = JSON.stringify(body);
+    return s ? s.length : 0;
+  } catch { return 0; }
+}
+
+function cacheSet(key, entry) {
+  const prev = etagCache.get(key);
+  if (prev) _cacheTotalBytes -= prev.byteSize || 0;
+  const byteSize = estimateBodyBytes(entry.body);
+  const full = { ...entry, byteSize };
+  etagCache.set(key, full);
+  _cacheTotalBytes += byteSize;
+  _cacheDirty = true;
+}
+
+function cacheDelete(key) {
+  const prev = etagCache.get(key);
+  if (prev) {
+    _cacheTotalBytes -= prev.byteSize || 0;
+    etagCache.delete(key);
+    _cacheDirty = true;
+  }
+}
+
+// Reads update recency in memory only — they must NOT mark the cache dirty,
+// otherwise every cache hit rewrites etag-cache.json on the 60s flush even in
+// a read-only session.
+function touchCacheEntry(entry) {
+  entry.lastAccess = Date.now();
+}
+
+function isFresh(entry, now = Date.now()) {
+  return !!entry && (now - entry.ts < ETAG_TTL);
+}
+
+function isUsableOffline(entry, now = Date.now()) {
+  return !!entry && (now - entry.ts < ETAG_OFFLINE_TTL);
+}
 
 function tokenIdentity(token) {
   return token
@@ -177,9 +259,13 @@ function loadEtagCache() {
       // cannot be safely attributed to the current token.
       if (typeof key !== 'string' || !key.startsWith('v2:')) continue;
       if (now - ts < ETAG_TTL * 6) { // Disk cache lives 6x longer (30 min)
-        etagCache.set(key, { etag, body, ts, lastAccess: lastAccess || ts });
+        cacheSet(key, { etag, body, ts, lastAccess: lastAccess || ts });
       }
     }
+    // Enforce the memory cap after load — a large persisted file must not
+    // exceed ETAG_CACHE_MAX in memory.
+    evictLRU();
+    _cacheDirty = false;
   } catch { /* corrupt cache → discard silently */ }
 }
 
@@ -202,9 +288,16 @@ function scheduleCacheFlush() {
   if (_cacheFlushTimer) return;
   _cacheFlushTimer = setInterval(() => {
     if (_cacheDirty) saveEtagCache();
+    if (_syncedDirty) saveLastSynced();
   }, 60_000);
   // Don't let the timer keep the process alive.
   if (_cacheFlushTimer.unref) _cacheFlushTimer.unref();
+}
+
+export function shutdownGithubCache() {
+  try { if (_cacheFlushTimer) { clearInterval(_cacheFlushTimer); _cacheFlushTimer = null; } } catch {}
+  try { if (_cacheDirty) saveEtagCache(); } catch {}
+  try { if (_syncedDirty) saveLastSynced(); } catch {}
 }
 
 // LRU eviction — evict least recently accessed entries.
@@ -213,13 +306,13 @@ function evictLRU() {
   // First try expired entries.
   const now = Date.now();
   for (const [k, v] of etagCache) {
-    if (now - v.ts >= ETAG_TTL) etagCache.delete(k);
+    if (now - v.ts >= ETAG_TTL) cacheDelete(k);
   }
   // If still over limit, evict by lastAccess down to the limit (F013 fix).
   if (etagCache.size > ETAG_CACHE_MAX) {
     const entries = [...etagCache.entries()].sort((a, b) => a[1].lastAccess - b[1].lastAccess);
     const toRemove = entries.slice(0, etagCache.size - ETAG_CACHE_MAX);
-    for (const [k] of toRemove) etagCache.delete(k);
+    for (const [k] of toRemove) cacheDelete(k);
   }
   _cacheDirty = true;
 }
@@ -255,7 +348,15 @@ function syncKey(path, token) {
 function recordSync(path, ts, token) {
   // Keep freshness metadata account-scoped just like response bodies. Cache
   // serves preserve the cached body's original age rather than claiming now.
-  lastSynced[syncKey(path, token)] = (typeof ts === 'number') ? ts : Date.now();
+  const key = syncKey(path, token);
+  const value = (typeof ts === 'number') ? ts : Date.now();
+  if (lastSynced[key] === value) return;
+  lastSynced[key] = value;
+  // Bound the map — evict oldest insertion when over cap.
+  const keys = Object.keys(lastSynced);
+  if (keys.length > LAST_SYNCED_MAX) {
+    for (let i = 0; i < keys.length - LAST_SYNCED_MAX; i++) delete lastSynced[keys[i]];
+  }
   _syncedDirty = true;
 }
 
@@ -290,9 +391,9 @@ process.on('exit', () => {
 export function clearAccountCache(token) {
   const identity = tokenIdentity(token);
   let removed = 0;
-  for (const key of etagCache.keys()) {
+  for (const key of [...etagCache.keys()]) {
     if (key.endsWith(':' + identity)) {
-      etagCache.delete(key);
+      cacheDelete(key);
       removed++;
     }
   }
@@ -311,14 +412,14 @@ export function clearAccountCache(token) {
 }
 
 export function getCacheStats() {
-  let totalBytes = 0;
+  // O(entries) over precomputed byte sizes — safe to call per frame.
   let oldestTs = Infinity;
   let newestTs = 0;
   for (const [, entry] of etagCache) {
-    try { totalBytes += JSON.stringify(entry.body).length; } catch {}
     if (entry.ts < oldestTs) oldestTs = entry.ts;
     if (entry.ts > newestTs) newestTs = entry.ts;
   }
+  const totalBytes = _cacheTotalBytes;
   return {
     entries: etagCache.size,
     maxEntries: ETAG_CACHE_MAX,
@@ -367,11 +468,19 @@ export function request(path, opts) {
   const cacheKey = cacheKeyFor(method, path, accept, raw, token);
 
   // Offline mode: return cached data for GETs when offline.
+  // Contract: offline may serve up to ETAG_OFFLINE_TTL (30 min, same as disk
+  // persistence); all wire fallbacks below require fresh ETAG_TTL entries.
+  // The global banner + per-pane staleness (getLastSynced age) mark these
+  // serves as stale — callers must not treat them as live.
   if (method === 'GET' && offlineState.isOffline && !force) {
     const cached = etagCache.get(cacheKey);
+    if (cached && isUsableOffline(cached)) {
+      touchCacheEntry(cached); noteCacheServe(cached.ts, isFresh(cached));
+      recordSync(path, cached.ts, token);
+      return Promise.resolve(cached.body);
+    }
     if (cached) {
-      cached.lastAccess = Date.now();
-      _cacheDirty = true;
+      touchCacheEntry(cached); noteCacheServe(cached.ts, isFresh(cached));
       recordSync(path, cached.ts, token);
       return Promise.resolve(cached.body);
     }
@@ -381,9 +490,8 @@ export function request(path, opts) {
   // Rate-limit-conservative mode: when budget is low, try cache before hitting the wire.
   if (method === 'GET' && !force && lastRateLimit.remaining !== null && lastRateLimit.remaining < LOW_RATE_WARN) {
     const cached = etagCache.get(cacheKey);
-    if (cached && Date.now() - cached.ts < ETAG_TTL) {
-      cached.lastAccess = Date.now();
-      _cacheDirty = true;
+    if (cached && isFresh(cached)) {
+      touchCacheEntry(cached); noteCacheServe(cached.ts, isFresh(cached));
       recordSync(path, cached.ts, token);
       return Promise.resolve(cached.body);
     }
@@ -401,19 +509,20 @@ export function request(path, opts) {
       cleanup();
       try { if (req) req.destroy(); } catch (e) {}
       // A slow endpoint is not proof that the whole connection is offline.
-      // Prefer this request's cached response, if any, while preserving its
-      // original age; only genuine socket errors can raise the global banner.
+      // Serve only a FRESH cached response (TTL-gated, same contract as the
+      // error fallback); otherwise surface the timeout so callers don't
+      // misread stale data as live.
       if (method === 'GET') {
         const cached = etagCache.get(cacheKey);
-        if (cached) {
-          cached.lastAccess = Date.now();
-          _cacheDirty = true;
+        if (cached && isFresh(cached)) {
+          touchCacheEntry(cached); noteCacheServe(cached.ts, isFresh(cached));
           recordSync(path, cached.ts, token);
           return resolve(cached.body);
         }
       }
       reject(new Error('Request timed out'));
     }, timeoutMs);
+    if (timer.unref) timer.unref();
 
     const options = buildOptions(path, token, method, bodyStr, accept, raw);
     if (accept) options.headers['Accept'] = accept;
@@ -489,9 +598,8 @@ export function request(path, opts) {
 
         if (res.statusCode === 304) {
           const cached = etagCache.get(cacheKey);
-          if (cached && Date.now() - cached.ts < ETAG_TTL) {
-            cached.lastAccess = Date.now();
-            _cacheDirty = true;
+          if (cached && isFresh(cached)) {
+            touchCacheEntry(cached); noteCacheServe(cached.ts, isFresh(cached));
             recordSync(path, cached.ts, token);
             return resolve(cached.body);
           }
@@ -506,7 +614,7 @@ export function request(path, opts) {
           // throw away a body the caller may still want on a later call.
           if (!o._retried304) {
             Promise.resolve(request(path, { ...o, _retried304: true }))
-              .catch(() => etagCache.delete(cacheKey)); // only drop it if the retry also fails
+              .catch(() => { if (etagCache.get(cacheKey)) cacheDelete(cacheKey); }); // only drop it if the retry also fails
             return;
           }
           // Pathological server answered 304 twice: a benign "cache is
@@ -517,7 +625,19 @@ export function request(path, opts) {
           ), { benign: true }));
           return;
         }
-        if (res.statusCode === 403 && rrParsed === 0) {
+        // Detect primary + secondary/abuse rate limits: 403 with remaining==0
+        // (when headers present), or a 403 whose body mentions rate limit when
+        // headers are missing (NaN===0 is false, so check the message too).
+        const _isRateLimited = (() => {
+          if (Number.isFinite(rrParsed) && rrParsed === 0) return true;
+          try {
+            const _b = JSON.parse(data || '{}');
+            const _m = String(_b.message || '');
+            if (/rate limit|abuse|secondary/i.test(_m)) return true;
+          } catch {}
+          return false;
+        })();
+        if (res.statusCode === 403 && _isRateLimited) {
           const resetDate = new Date((rsParsed || 0) * 1000);
           return reject(new GitHubApiError(
             'Rate limited. Try again at ' + resetDate.toLocaleTimeString(),
@@ -532,11 +652,13 @@ export function request(path, opts) {
             try { payload = JSON.parse(data); }
             catch (e) { return reject(new GitHubApiError('Invalid JSON response', res.statusCode, path)); }
           }
-          if (method === 'GET' && res.headers.etag) {
+          // Cache every GET 200 (etag or not) so recordSync() "Last synced"
+          // is truthful. Entries without an etag are served TTL-gated like
+          // etag entries but never send If-None-Match.
+          if (method === 'GET') {
             const now = Date.now();
-            etagCache.set(cacheKey, { etag: res.headers.etag, body: payload, ts: now, lastAccess: now });
+            cacheSet(cacheKey, { etag: res.headers.etag || null, body: payload, ts: now, lastAccess: now });
             evictLRU();
-            _cacheDirty = true;
           }
           if (method === 'GET') recordSync(path, undefined, token);
           return resolve(payload);
@@ -551,7 +673,7 @@ export function request(path, opts) {
         } catch (e) {}
         // Invalidate ETag cache on 4xx errors (except 403 rate limit) to prevent stale data
         if (res.statusCode >= 400 && res.statusCode < 500 && res.statusCode !== 403) {
-          etagCache.delete(cacheKey);
+          cacheDelete(cacheKey);
         }
         reject(new GitHubApiError(msg, res.statusCode, path));
       });
@@ -564,12 +686,13 @@ export function request(path, opts) {
       clearTimeout(timer);
       // Network error → mark offline.
       offlineState.isOffline = true;
-      // Try to return cached data for GETs.
+      // Try to return a FRESH cached response for GETs (TTL-gated). Stale
+      // entries are NOT served here — the caller sees the error and the UI
+      // keeps the global offline banner instead of misreading old data live.
       if (method === 'GET') {
         const cached = etagCache.get(cacheKey);
-        if (cached) {
-          cached.lastAccess = Date.now();
-          _cacheDirty = true;
+        if (cached && isFresh(cached)) {
+          touchCacheEntry(cached); noteCacheServe(cached.ts, isFresh(cached));
           recordSync(path, cached.ts, token);
           return resolve(cached.body);
         }
@@ -629,13 +752,13 @@ export const getReleaseAssets = (token, owner, repo, releaseId, signal) =>
 // ─── Notifications ──────────────────────────────────────────────────
 export const getNotifications = (token, page, perPage, signal) =>
   request('/notifications?page=' + (page||1) + '&per_page=' + (perPage||50), { token, signal });
-export const markNotificationRead = (token, threadId) =>
-  request('/notifications/threads/' + threadId, { token, method: 'PATCH' });
-export const markAllNotificationsRead = (token) =>
-  request('/notifications', { token, method: 'PUT', body: { read: true } });
-export const unsubscribeNotification = (token, threadId) =>
+export const markNotificationRead = (token, threadId, signal) =>
+  request('/notifications/threads/' + threadId, { token, method: 'PATCH', signal });
+export const markAllNotificationsRead = (token, signal) =>
+  request('/notifications', { token, method: 'PUT', body: { read: true }, signal });
+export const unsubscribeNotification = (token, threadId, signal) =>
   request('/notifications/threads/' + threadId + '/subscription', {
-    token, method: 'DELETE',
+    token, method: 'DELETE', signal,
   });
 
 // ─── Activity, trending, starred ────────────────────────────────────
@@ -662,10 +785,10 @@ export const isStarred = async (token, owner, repo) => {
     throw e;
   }
 };
-export const starRepo = (token, owner, repo) =>
-  request('/user/starred/' + owner + '/' + repo, { token, method: 'PUT' });
-export const unstarRepo = (token, owner, repo) =>
-  request('/user/starred/' + owner + '/' + repo, { token, method: 'DELETE' });
+export const starRepo = (token, owner, repo, signal) =>
+  request('/user/starred/' + owner + '/' + repo, { token, method: 'PUT', signal });
+export const unstarRepo = (token, owner, repo, signal) =>
+  request('/user/starred/' + owner + '/' + repo, { token, method: 'DELETE', signal });
 
 // ─── Code, READMEs, file browser ────────────────────────────────────
 export const getReadme = (token, owner, repo, signal) =>
@@ -696,20 +819,20 @@ export const getWorkflows = (token, owner, repo, signal) =>
 export const getWorkflowRuns = (token, owner, repo, page, perPage, signal) =>
   request('/repos/' + owner + '/' + repo + '/actions/runs?page=' + (page || 1) +
     '&per_page=' + (perPage || 20), { token, signal });
-export const rerunWorkflow = (token, owner, repo, runId) =>
+export const rerunWorkflow = (token, owner, repo, runId, signal) =>
   request('/repos/' + owner + '/' + repo + '/actions/runs/' + runId + '/rerun',
-    { token, method: 'POST' });
-export const cancelWorkflowRun = (token, owner, repo, runId) =>
+    { token, method: 'POST', signal });
+export const cancelWorkflowRun = (token, owner, repo, runId, signal) =>
   request('/repos/' + owner + '/' + repo + '/actions/runs/' + runId + '/cancel',
-    { token, method: 'POST' });
+    { token, method: 'POST', signal });
 export const getWorkflowJobs = (token, owner, repo, runId, signal) =>
   request('/repos/' + owner + '/' + repo + '/actions/runs/' + runId + '/jobs', { token, signal });
 export const getWorkflowJobLogs = (token, owner, repo, jobId, signal) =>
   fetchTextUrl('https://' + GITHUB_API + '/repos/' + owner + '/' + repo +
     '/actions/jobs/' + jobId + '/logs', token, signal);
-export const dispatchWorkflow = (token, owner, repo, workflowId, ref, inputs = {}) =>
+export const dispatchWorkflow = (token, owner, repo, workflowId, ref, inputs = {}, signal) =>
   request('/repos/' + owner + '/' + repo + '/actions/workflows/' + encodeURIComponent(workflowId) + '/dispatches', {
-    token, method: 'POST', body: { ref, inputs },
+    token, method: 'POST', body: { ref, inputs }, signal,
   });
 
 // ─── Branches, zipball, per-file commits, raw bytes ──────────────────
@@ -745,7 +868,14 @@ export function getZipballUrl(owner, repo, ref) {
 
 // Download an arbitrary URL straight to a local file path, streaming.
 // Used for zipballs. Requires only built-in https.
-export function downloadToFile(url, destPath, token) {
+// Bounded: MAX_DOWNLOAD_BYTES (200MB) + timeout/signal so a hostile or hung
+// endpoint cannot fill the disk or hang the TUI (fetchTextUrl already caps
+// at 2MB — downloads had no cap).
+export const MAX_DOWNLOAD_BYTES = 200 * 1024 * 1024;
+export function downloadToFile(url, destPath, token, opts = {}) {
+  const maxBytes = Number.isFinite(opts.maxBytes) && opts.maxBytes > 0 ? opts.maxBytes : MAX_DOWNLOAD_BYTES;
+  const timeoutMs = Number.isFinite(opts.timeoutMs) && opts.timeoutMs > 0 ? opts.timeoutMs : 120_000;
+  const signal = opts.signal || null;
   let parsedUrl;
   try {
     parsedUrl = new URL(url);
@@ -759,6 +889,32 @@ export function downloadToFile(url, destPath, token) {
     let settled = false;
     let cleanupRequested = false;
     let finished = false; // set when the writer flushed everything to disk
+    let req = null;
+    let abortHandler = null;
+    const overallTimer = setTimeout(() => {
+      if (settled) return;
+      try { if (req) req.destroy(); } catch {}
+      cleanup();
+      settle(() => reject(new Error('Download timed out after ' + timeoutMs + 'ms')));
+    }, timeoutMs);
+    if (overallTimer.unref) overallTimer.unref();
+    const clearOverall = () => { try { clearTimeout(overallTimer); } catch {} };
+    if (signal) {
+      if (signal.aborted) {
+        clearOverall();
+        cleanup();
+        return reject(new Error('Aborted'));
+      }
+      abortHandler = () => {
+        if (settled) return;
+        settled = true;
+        clearOverall();
+        try { if (req) req.destroy(); } catch {}
+        cleanup();
+        reject(new Error('Aborted'));
+      };
+      signal.addEventListener('abort', abortHandler, { once: true });
+    }
     const removeDestination = () => {
       // A stream can finish opening after destroy() is called. Retry removal
       // on close so failed downloads cannot recreate an empty artifact.
@@ -776,6 +932,8 @@ export function downloadToFile(url, destPath, token) {
     function settle(fn) {
       if (settled) return;
       settled = true;
+      clearOverall();
+      if (signal && abortHandler) { try { signal.removeEventListener('abort', abortHandler); } catch {} }
       fn();
     }
     function get(u, redirectsLeft, sendToken = true) {
@@ -790,7 +948,7 @@ export function downloadToFile(url, destPath, token) {
       const headers = { 'User-Agent': USER_AGENT };
       // Never forward a GitHub token to a different host after a redirect.
       if (token && sendToken && u2.hostname === GITHUB_API) headers['Authorization'] = 'token ' + token;
-      const req = https.get({
+      req = https.get({
         hostname: u2.hostname,
         path: u2.pathname + u2.search,
         headers,
@@ -812,7 +970,15 @@ export function downloadToFile(url, destPath, token) {
           cleanup();
           return settle(() => reject(new Error('Download HTTP ' + res.statusCode)));
         }
-        res.on('data', (chunk) => { bytes += chunk.length; });
+        res.on('data', (chunk) => {
+          bytes += chunk.length;
+          if (bytes > maxBytes) {
+            try { if (req) req.destroy(); } catch {}
+            res.resume();
+            cleanup();
+            return settle(() => reject(new Error('Download exceeds ' + maxBytes + ' byte cap')));
+          }
+        });
         res.pipe(out);
         out.on('finish', () => {
           // All data flushed to the fd — the download succeeded regardless
@@ -837,20 +1003,32 @@ export function downloadToFile(url, destPath, token) {
 // reuse JSON request(): the Actions logs endpoint redirects to a short-lived
 // plain-text URL, often on a different host, and credentials must not follow
 // that redirect.
-export function fetchTextUrl(url, token, signal, maxBytes = 2_000_000) {
+export function fetchTextUrl(url, token, signal, maxBytes = 2_000_000, timeoutMs = 30_000) {
   return new Promise((resolve, reject) => {
     let current;
     try { current = new URL(url); } catch { return reject(new Error('Invalid log URL')); }
     if (current.protocol !== 'https:') return reject(new Error('Log URL must use HTTPS'));
     let settled = false;
     let abortHandler;
-    const cleanup = () => { if (signal && abortHandler) signal.removeEventListener('abort', abortHandler); };
+    let activeReq = null;
+    const overallTimer = setTimeout(() => {
+      if (settled) return;
+      try { if (activeReq) activeReq.destroy(); } catch {}
+      settled = true;
+      if (signal && abortHandler) { try { signal.removeEventListener('abort', abortHandler); } catch {} }
+      reject(new Error('Log fetch timed out after ' + timeoutMs + 'ms'));
+    }, timeoutMs);
+    if (overallTimer.unref) overallTimer.unref();
+    const cleanup = () => {
+      try { clearTimeout(overallTimer); } catch {}
+      if (signal && abortHandler) signal.removeEventListener('abort', abortHandler);
+    };
     const finish = (fn, value) => { if (settled) return; settled = true; cleanup(); fn(value); };
     const get = (u, redirectsLeft) => {
       if (signal?.aborted) return finish(reject, new Error('Aborted'));
       const headers = { 'User-Agent': USER_AGENT };
       if (token && u.hostname === GITHUB_API) headers.Authorization = 'token ' + token;
-      const req = https.get({ hostname: u.hostname, path: u.pathname + u.search, headers }, (res) => {
+      activeReq = https.get({ hostname: u.hostname, path: u.pathname + u.search, headers }, (res) => {
         if (res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) {
           if (redirectsLeft <= 0) { res.resume(); return finish(reject, new Error('Too many log redirects')); }
           let next;
@@ -872,8 +1050,8 @@ export function fetchTextUrl(url, token, signal, maxBytes = 2_000_000) {
         res.on('end', () => finish(resolve, { text: data, truncated: bytes >= maxBytes, bytes, url: u.toString() }));
         res.on('error', e => finish(reject, e));
       });
-      req.on('error', e => finish(reject, e));
-      abortHandler = () => { try { req.destroy(); } catch {} finish(reject, new Error('Aborted')); };
+      activeReq.on('error', e => finish(reject, e));
+      abortHandler = () => { try { activeReq.destroy(); } catch {} finish(reject, new Error('Aborted')); };
       signal?.addEventListener('abort', abortHandler, { once: true });
     };
     get(current, 5);
@@ -896,44 +1074,44 @@ export const getPullRequestFiles = (token, owner, repo, number, page, perPage, s
 export const getPullRequestReviewComments = (token, owner, repo, number, page, perPage, signal) =>
   request('/repos/' + owner + '/' + repo + '/pulls/' + number + '/comments?page=' +
     (page || 1) + '&per_page=' + (perPage || 50), { token, signal });
-export const submitPullRequestReview = (token, owner, repo, number, event, body, comments = []) =>
+export const submitPullRequestReview = (token, owner, repo, number, event, body, comments = [], signal) =>
   request('/repos/' + owner + '/' + repo + '/pulls/' + number + '/reviews', {
-    token, method: 'POST', body: { event, body: body || '', comments: Array.isArray(comments) ? comments : [] },
+    token, method: 'POST', body: { event, body: body || '', comments: Array.isArray(comments) ? comments : [] }, signal,
   });
-export const postComment = (token, owner, repo, number, body) =>
+export const postComment = (token, owner, repo, number, body, signal) =>
   request('/repos/' + owner + '/' + repo + '/issues/' + number + '/comments', {
-    token, method: 'POST', body: { body },
+    token, method: 'POST', body: { body }, signal,
   });
-export const createReaction = (token, owner, repo, issueNumber, content) =>
+export const createReaction = (token, owner, repo, issueNumber, content, signal) =>
   request('/repos/' + owner + '/' + repo + '/issues/' + issueNumber +
-    '/reactions', { token, method: 'POST', body: { content },
+    '/reactions', { token, method: 'POST', body: { content }, signal,
     accept: 'application/vnd.github.squirrel-girl-preview+json',
   });
-export const closeIssue = (token, owner, repo, number) =>
+export const closeIssue = (token, owner, repo, number, signal) =>
   request('/repos/' + owner + '/' + repo + '/issues/' + number, {
-    token, method: 'PATCH', body: { state: 'closed' },
+    token, method: 'PATCH', body: { state: 'closed' }, signal,
   });
-export const reopenIssue = (token, owner, repo, number) =>
+export const reopenIssue = (token, owner, repo, number, signal) =>
   request('/repos/' + owner + '/' + repo + '/issues/' + number, {
-    token, method: 'PATCH', body: { state: 'open' },
+    token, method: 'PATCH', body: { state: 'open' }, signal,
   });
-export const mergePullRequest = (token, owner, repo, number, mergeMethod) =>
+export const mergePullRequest = (token, owner, repo, number, mergeMethod, signal) =>
   request('/repos/' + owner + '/' + repo + '/pulls/' + number + '/merge', {
-    token, method: 'PUT', body: { merge_method: mergeMethod || 'merge' },
+    token, method: 'PUT', body: { merge_method: mergeMethod || 'merge' }, signal,
   });
-export const requestReview = (token, owner, repo, number, reviewers, teamReviewers = []) =>
+export const requestReview = (token, owner, repo, number, reviewers, teamReviewers = [], signal) =>
   request('/repos/' + owner + '/' + repo + '/pulls/' + number + '/requested_reviewers', {
-    token, method: 'POST', body: { reviewers: reviewers || [], team_reviewers: teamReviewers || [] },
+    token, method: 'POST', body: { reviewers: reviewers || [], team_reviewers: teamReviewers || [] }, signal,
   });
-export const updateIssue = (token, owner, repo, number, patch) =>
-  request('/repos/' + owner + '/' + repo + '/issues/' + number, { token, method: 'PATCH', body: patch || {} });
+export const updateIssue = (token, owner, repo, number, patch, signal) =>
+  request('/repos/' + owner + '/' + repo + '/issues/' + number, { token, method: 'PATCH', body: patch || {}, signal });
 
 // ─── Rate Limit ────────────────────────────────────────────────────
 // force: always hit the wire — `/rate_limit` costs no quota, and a forced
 // request doubles as an offline-recovery probe (cached GETs can never clear
 // a latched offline flag or refresh ground truth).
-export const getRateLimit = (token) =>
-  request('/rate_limit', { token, force: true });
+export const getRateLimit = (token, signal) =>
+  request('/rate_limit', { token, force: true, signal });
 
 // ─── Traffic ────────────────────────────────────────────────────────
 export const getRepoTrafficViews = (token, owner, repo, signal) =>
@@ -972,11 +1150,11 @@ export const getUserFollowing = (token, page, perPage, signal) =>
 // ─── Security (Dependabot) ────────────────────────────────────────
 export const getRepoDependabotAlerts = (token, owner, repo, state, signal) =>
   request('/repos/' + owner + '/' + repo + '/dependabot/alerts' + (state ? '?state=' + encodeURIComponent(state) : ''), { token, signal });
-export const getDependabotAlert = (token, owner, repo, alertId) =>
-  request('/repos/' + owner + '/' + repo + '/dependabot/alerts/' + alertId, { token });
-export const dismissDependabotAlert = (token, owner, repo, alertId, dismissedReason, comment) =>
+export const getDependabotAlert = (token, owner, repo, alertId, signal) =>
+  request('/repos/' + owner + '/' + repo + '/dependabot/alerts/' + alertId, { token, signal });
+export const dismissDependabotAlert = (token, owner, repo, alertId, dismissedReason, comment, signal) =>
   request('/repos/' + owner + '/' + repo + '/dependabot/alerts/' + alertId, {
-    token, method: 'PATCH', body: { dismissed_reason: dismissedReason, dismissed_comment: comment || '' },
+    token, method: 'PATCH', body: { dismissed_reason: dismissedReason, dismissed_comment: comment || '' }, signal,
   });
 
 // ─── Security (Secret Scanning) ───────────────────────────────────
@@ -1027,20 +1205,20 @@ export async function searchCode(token, query, page, perPage, signal) {
 }
 
 // ─── Repo subscription (watch/unwatch) ─────────────────────────────
-export const getSubscription = (token, owner, repo) =>
-  request('/repos/' + owner + '/' + repo + '/subscription', { token });
-export const setSubscription = (token, owner, repo, subscribed, ignored) =>
+export const getSubscription = (token, owner, repo, signal) =>
+  request('/repos/' + owner + '/' + repo + '/subscription', { token, signal });
+export const setSubscription = (token, owner, repo, subscribed, ignored, signal) =>
   request('/repos/' + owner + '/' + repo + '/subscription', {
-    token, method: 'PUT', body: { subscribed, ignored: ignored || false },
+    token, method: 'PUT', body: { subscribed, ignored: ignored || false }, signal,
   });
-export const deleteSubscription = (token, owner, repo) =>
-  request('/repos/' + owner + '/' + repo + '/subscription', { token, method: 'DELETE' });
+export const deleteSubscription = (token, owner, repo, signal) =>
+  request('/repos/' + owner + '/' + repo + '/subscription', { token, method: 'DELETE', signal });
 
 // ─── Create issue ─────────────────────────────────────────────────
-export const createIssue = (token, owner, repo, title, body, labels, assignees) =>
+export const createIssue = (token, owner, repo, title, body, labels, assignees, signal) =>
   request('/repos/' + owner + '/' + repo + '/issues', {
     token, method: 'POST',
-    body: { title, body: body || '', labels: labels || [], assignees: assignees || [] },
+    body: { title, body: body || '', labels: labels || [], assignees: assignees || [] }, signal,
   });
 export const getUserOrganizations = (token, page, perPage, signal) =>
   request('/user/orgs?page=' + (page || 1) + '&per_page=' + (perPage || 50), { token, signal });
@@ -1052,7 +1230,7 @@ export const getOrganizationTeams = (token, org, page, perPage, signal) =>
     '&per_page=' + (perPage || 50), { token, signal });
 export const getRelease = (token, owner, repo, releaseId, signal) =>
   request('/repos/' + owner + '/' + repo + '/releases/' + releaseId, { token, signal });
-export const createRelease = (token, owner, repo, payload) =>
-  request('/repos/' + owner + '/' + repo + '/releases', { token, method: 'POST', body: payload || {} });
-export const updateRelease = (token, owner, repo, releaseId, payload) =>
-  request('/repos/' + owner + '/' + repo + '/releases/' + releaseId, { token, method: 'PATCH', body: payload || {} });
+export const createRelease = (token, owner, repo, payload, signal) =>
+  request('/repos/' + owner + '/' + repo + '/releases', { token, method: 'POST', body: payload || {}, signal });
+export const updateRelease = (token, owner, repo, releaseId, payload, signal) =>
+  request('/repos/' + owner + '/' + repo + '/releases/' + releaseId, { token, method: 'PATCH', body: payload || {}, signal });

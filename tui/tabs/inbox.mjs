@@ -12,9 +12,9 @@ import { emptyState, loadingIndicator, scrollIndicators } from '../render.mjs';
 import { openDetail } from './detail.mjs';
 import { loadRepoDetails } from './analyze.mjs';
 import { startInput, registerInputHandler } from '../input.mjs';
-import { showError } from '../error-recovery.mjs';
+import { showError, isAuthError, handleAuthFailure } from '../error-recovery.mjs';
 import { groupNotifications } from '../recommended-features.mjs';
-import { addInboxFilter } from '../store.mjs';
+import { addInboxFilter, normalizeInboxFiltersResult } from '../store.mjs';
 import { CONFIG_DIR, readJson, writeJson } from '../config.mjs';
 import { join } from 'path';
 
@@ -85,7 +85,10 @@ export async function loadNotifications() {
     bumpInboxFilterGen();
     showMessage('Loaded ' + appState.notifications.length + ' notifications', 'success');
   } catch (e) {
-    if (!isStale(gen)) showError(e.message || 'Unknown error', 'Load notifications', { retry: loadNotifications });
+    if (!isStale(gen)) {
+      if (isAuthError(e)) { finishLoading(gen); await handleAuthFailure(e, loadNotifications); return; }
+      showError(e.message || 'Unknown error', 'Load notifications', { retry: loadNotifications });
+    }
   }
   finishLoading(gen);
   if (!isStale(gen)) render();
@@ -113,7 +116,10 @@ export async function loadMoreNotifications() {
     bumpInboxFilterGen();
     normalizeInboxCursor();
   } catch (e) {
-    if (!isStale(gen)) showMessage(e.message || 'Failed to load more', 'error');
+    if (!isStale(gen)) {
+      if (isAuthError(e)) { finishLoading(gen); await handleAuthFailure(e, loadMoreNotifications); return; }
+      showMessage(e.message || 'Failed to load more', 'error');
+    }
   } finally {
     _inboxMoreInflight = false;
   }
@@ -620,12 +626,12 @@ export function renderInbox(screen, y, h) {
 registerInputHandler('inbox-filter-save', (value) => {
   const label = String(value || '').trim();
   if (!label) return;
-  appState.inboxSavedFilters = addInboxFilter(label, {
+  appState.inboxSavedFilters = normalizeInboxFiltersResult(addInboxFilter(label, {
     inboxFilter: appState.inboxFilter,
     inboxTextFilter: appState.inboxTextFilter,
     inboxHideProcessed: appState.inboxHideProcessed,
     inboxGrouped: appState.inboxGrouped,
-  });
+  }));
   showMessage('Saved Inbox filter: ' + label, 'success');
 });
 

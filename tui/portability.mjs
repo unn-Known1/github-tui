@@ -24,7 +24,7 @@ const SESSION_FILE = join(CONFIG_DIR, 'session.json');
 const SESSION_KEYS = [
   'tab', 'recentRepos', 'analyzeView', 'searchQuery', 'searchType',
   'reposView', 'autoRefreshEnabled', 'autoRefreshIntervalMs',
-  'inboxTextFilter', 'lastSeenVersion',
+  'inboxTextFilter', 'lastSeenVersion', 'localAutoPoll',
 ];
 
 // 5MB cap on imported bundles — a few orders of magnitude above any real
@@ -34,6 +34,17 @@ const MAX_BUNDLE_BYTES = 5 * 1024 * 1024;
 export function buildPortableConfig() {
   let theme = null;
   try { theme = readFileSync(THEME_FILE, 'utf8').trim() || null; } catch {}
+  // Only carry allow-listed session keys so a stale/foreign key on disk can
+  // never produce a bundle that validatePortableConfig() then rejects
+  // (self-breaking export→import). Unknown keys are dropped here.
+  let sessionRaw = {};
+  try { sessionRaw = readJson(SESSION_FILE, {}); } catch {}
+  const session = {};
+  if (sessionRaw && typeof sessionRaw === 'object' && !Array.isArray(sessionRaw)) {
+    for (const k of SESSION_KEYS) {
+      if (sessionRaw[k] !== undefined) session[k] = sessionRaw[k];
+    }
+  }
   return {
     schemaVersion: 1,
     appVersion: APP_VERSION,
@@ -46,7 +57,7 @@ export function buildPortableConfig() {
     keybindings: readJson(KEYBINDINGS_FILE, []),
     theme,
     // Session is navigation-only and deliberately excludes token/private API data.
-    session: readJson(SESSION_FILE, {}),
+    session,
   };
 }
 

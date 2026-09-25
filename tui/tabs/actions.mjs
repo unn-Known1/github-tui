@@ -15,7 +15,7 @@ import { openUrl, relTime, truncate, displayWidth, stripAnsi } from '../utils.mj
 import { color } from '../theme.mjs';
 import { emptyState, loadingIndicator, scrollIndicators, collapsibleHeader } from '../render.mjs';
 import { startInput, registerInputHandler } from '../input.mjs';
-import { showError } from '../error-recovery.mjs';
+import { showError, isAuthError, handleAuthFailure } from '../error-recovery.mjs';
 
 const RUNS_PER_PAGE = 30;
 
@@ -333,6 +333,7 @@ export async function loadFailureQueue() {
     const candidates = [...appState.actionsRepos].sort((a,b) => Date.parse(b.pushed_at||b.updated_at||0) - Date.parse(a.pushed_at||a.updated_at||0)).slice(0, 20);
     const queue = candidates.slice();
     let probeFailures = 0;
+    let authFailure = null;
     const worker = async () => {
       while (queue.length > 0) {
         if (isStale(gen)) return;
@@ -343,16 +344,23 @@ export async function loadFailureQueue() {
         try {
           const result = await getWorkflowRuns(appState.token, owner, name, 1, 10, gen.signal);
           groups.push({ repo: repo.full_name, runs: result?.workflow_runs || [] });
-        } catch {
+        } catch (e) {
           // Preserve the partial aggregate, but count the failure: a 401 or
           // rate-limit burst must not be indistinguishable from "no failures
           // found" (the repos simply never got counted into the queue).
+          // Auth failures short-circuit the whole scan via the unified wipe.
+          if (isAuthError(e) && !authFailure) authFailure = e;
           probeFailures++;
         }
       }
     };
     const count = Math.min(5, Math.max(1, queue.length));
     await Promise.all(Array.from({ length: count }, worker));
+    if (authFailure && !isStale(gen)) {
+      appState.actionsFailureLoading = false;
+      await handleAuthFailure(authFailure, loadFailureQueue);
+      return;
+    }
     if (!isStale(gen)) {
       appState.actionsFailures = buildFailureQueue(groups);
       const total = appState.actionsRepos.length;
@@ -406,7 +414,10 @@ export async function loadWorkflowRuns() {
     appState.actionsRunsHasMore = runs.length >= RUNS_PER_PAGE;
     appState.actionsView = 'runs';
   } catch (e) {
-    if (!isStale(gen)) showError(e.message, 'Load workflow runs', { retry: loadWorkflowRuns });
+    if (!isStale(gen)) {
+      if (isAuthError(e)) { appState.actionsLoading = false; await handleAuthFailure(e, loadWorkflowRuns); return; }
+      showError(e.message, 'Load workflow runs', { retry: loadWorkflowRuns });
+    }
   }
   if (!isStale(gen)) {
     appState.actionsLoading = false;
@@ -431,7 +442,10 @@ export async function loadMoreWorkflowRuns() {
     appState.actionsRunsHasMore = more.length >= RUNS_PER_PAGE;
     showMessage(more.length ? 'Loaded ' + appState.actionsRuns.length + ' workflow runs' : 'All workflow runs loaded', 'info');
   } catch (e) {
-    if (!isStale(gen)) showMessage(e.message || 'Failed to load more workflow runs', 'error');
+    if (!isStale(gen)) {
+      if (isAuthError(e)) { await handleAuthFailure(e, loadMoreWorkflowRuns); return; }
+      showMessage(e.message || 'Failed to load more workflow runs', 'error');
+    }
   } finally {
     if (!isStale(gen)) {
       appState.actionsLoading = false;

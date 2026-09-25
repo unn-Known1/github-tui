@@ -101,7 +101,7 @@ const CATEGORIES = [
   ]},
   { id: 'actions',    name: 'ACTIONS',           shortcuts: [
     { key: '↑↓ / j k',  desc: 'Navigate repos or runs' },
-    { key: 'Enter',     desc: 'View runs for selected repo / open run in browser' },
+    { key: 'Enter',     desc: 'Expand run inline (runs view) / view runs (repos view); o opens in browser' },
     { key: 'r',         desc: 'Re-run selected workflow' },
     { key: 'x',         desc: 'Cancel running workflow' },
     { key: 't',         desc: 'Back to repo list (from runs view)' },
@@ -170,8 +170,11 @@ const CATEGORIES = [
     { key: 'f',         desc: 'Fetch --prune (read-only)' },
     { key: 'p / P',     desc: 'Pull --rebase --autostash / push (lease-only force)' },
     { key: 'B / b',     desc: 'Branch picker (checkout / new / delete)' },
+    { key: 'S',         desc: 'Toggle auto-poll (status refresh)' },
+    { key: 'o',         desc: 'Open commit / repo in browser' },
+    { key: 'A (staged)', desc: 'Unstage all (index cleared, worktree kept)' },
     { key: 'n / d',     desc: 'New branch / delete branch (in picker)' },
-    { key: 'z / Z / X*', desc: 'Collapse toggle / collapse all (*X discards in Local)' },
+    { key: 'z / Z / X*', desc: 'Collapse toggle / collapse-all (*X discards in Local, z also toggles Local sections)' },
     { key: 'Esc / h',   desc: 'Step back: fullscreen → split → closed → Dashboard' },
   ]},
   { id: 'settings',   name: 'SETTINGS',          shortcuts: [
@@ -183,7 +186,7 @@ const CATEGORIES = [
     { key: 'r',         desc: 'Refresh dashboard + user data' },
   ]},
   { id: 'confirm',    name: 'CONFIRM DIALOG',    shortcuts: [
-    { key: 'y / Y / Enter', desc: 'Confirm a destructive action' },
+    { key: 'y / Y', desc: 'Confirm (Enter NEVER confirms danger — use y)' },
     { key: 'n / N / Esc',   desc: 'Cancel a destructive action' },
   ]},
   { id: 'power',      name: 'POWER USER',        shortcuts: [
@@ -291,8 +294,16 @@ export function getHelpLines(q) {
   const lines = [];
   const query = (q || '').trim();
 
-  const TAB_CATS = ['dashboard', 'repos', 'analyze', 'actions', 'inbox', 'local', 'settings'];
-  const currentCat = TAB_CATS[tabState.current] || 'global';
+  // Context-aware: files/security/detail panes get their own category first
+  // (previously they fell back to GLOBAL, hiding pane-specific keys).
+  let currentCat = ['dashboard', 'repos', 'analyze', 'actions', 'inbox', 'local', 'settings'][tabState.current] || 'global';
+  try {
+    if (tabState.current === 2 && appState.analyzeView === 'details') {
+      if (appState.detailsPane === 'files') currentCat = 'files';
+      else if (appState.detailsPane === 'security') currentCat = 'security';
+    }
+    if (appState.showDetail) currentCat = 'detail';
+  } catch {}
 
   if (!query) {
     const current = CATEGORIES.find(c => c.id === currentCat);

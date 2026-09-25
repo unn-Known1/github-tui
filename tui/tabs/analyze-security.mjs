@@ -10,6 +10,7 @@ import {
 import { truncate, sectionHeader, relTime, openUrl, displayWidth } from '../utils.mjs';
 import { color } from '../theme.mjs';
 import { scrollIndicators, loadingIndicator } from '../render.mjs';
+import { isAuthError, handleAuthFailure } from '../error-recovery.mjs';
 
 // Raw GitHub API error messages can leak internals (exact missing scope,
 // rate-limit reset timing, 404-vs-403 distinctions useful for probing
@@ -115,8 +116,12 @@ export async function loadSecurity() {
     }
   } catch (e) {
     if (!isStale(gen, 'analyze-security')) {
+      if (isAuthError(e)) { finishLoading(gen); await handleAuthFailure(e, loadSecurity); return; }
       appState.securityError = safeSecurityError('Security request failed', e);
-      showMessage(appState.securityError, 'error');
+      // Distinguish denied (403/404 with safe message) from transport errors
+      // so empty-vs-denied is never conflated into a bare "No alerts" pane.
+      const { showError } = await import('../error-recovery.mjs');
+      showError(e.message, 'Security', { retry: loadSecurity });
     }
   }
   finishLoading(gen);

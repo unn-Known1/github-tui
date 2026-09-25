@@ -13,6 +13,7 @@ function gitOut(args, timeoutMs = 5000) {
     timeout: timeoutMs,
     maxBuffer: 64 * 1024,
     encoding: 'utf-8',
+    env: { ...process.env, GIT_TERMINAL_PROMPT: '0' },
   }).trim();
 }
 
@@ -27,14 +28,18 @@ export function getLocalGitMeta() {
     const root = gitOut(['rev-parse', '--show-toplevel']);
     if (!root) return empty;
     // --git-dir may print a relative path (`.git`) or, for worktrees and
-    // submodules, a gitdir-pointer file. Resolve against cwd so watchers
-    // and op-state checks always get a real directory.
+    // submodules, a gitdir-pointer file. Resolve against the work-tree root
+    // (not process.cwd(), which may be a subdirectory or change after boot)
+    // with a cwd fallback when root is not yet known.
     let gitDir = '';
+    let _rootEarly = '';
+    try { _rootEarly = root || ''; } catch {}
     try {
       const rawDir = gitOut(['rev-parse', '--git-dir']);
+      const base = _rootEarly || process.cwd();
       gitDir = rawDir && rawDir.startsWith('/')
         ? rawDir
-        : resolvePath(process.cwd(), rawDir || '.git');
+        : resolvePath(base, rawDir || '.git');
     } catch {
       gitDir = '';
     }
@@ -45,7 +50,7 @@ export function getLocalGitMeta() {
       if (gitDir && existsSync(gitDir) && statSync(gitDir).isFile()) {
         const ptr = readFileSync(gitDir, 'utf-8').trim();
         const m = ptr.match(/^gitdir:\s*(.+)$/);
-        if (m) gitDir = m[1].startsWith('/') ? m[1] : resolvePath(process.cwd(), m[1]);
+        if (m) gitDir = m[1].startsWith('/') ? m[1] : resolvePath(_rootEarly || process.cwd(), m[1]);
       }
     } catch { /* keep the unresolved path — callers treat misses as absent */ }
     let branch = '';

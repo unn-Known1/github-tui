@@ -291,6 +291,8 @@ export function numstatArgs(staged = false) {
 export function showArgs(sha) {
   return ['show', '--no-color', '--unified=3', '--stat', sha, '--'];
 }
+// Used by amendFlow() to prefill the HEAD subject/body without relying on a
+// possibly-stale in-memory history list.
 export function headSubjectArgs() {
   return ['log', '-1', '--pretty=format:%s%x1f%b'];
 }

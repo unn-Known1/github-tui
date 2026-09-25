@@ -13,7 +13,7 @@ import { relTime, eventGlyph, greeting, shortNum, truncate, openUrl, displayWidt
 import { color } from '../theme.mjs';
 import { emptyState, collapsibleHeader, loadingIndicator, getScreen, getStatCardLayout, scrollIndicators } from '../render.mjs';
 import { loadRepoDetails } from './analyze.mjs';
-import { showError } from '../error-recovery.mjs';
+import { showError, isAuthError, handleAuthFailure } from '../error-recovery.mjs';
 
 // Refresh the complete Dashboard-owned snapshot. Repository metadata is
 // loaded first because cards, stale counts, languages, and the heatmap all
@@ -74,17 +74,29 @@ export async function loadDashboardWidgets(force = false) {
     // and a freshness badge.
     const widgetLabels = ['events', 'trending', 'starred', 'issues', 'prs', 'followers', 'notifications'];
     let failCount = 0;
+    let authFailure = null;
     for (let i = 0; i < results.length; i++) {
       if (results[i].status === 'rejected') {
         failCount++;
-        // DEBUG is module-private to app.mjs; check env vars inline so we
-        // don't have to plumb a new export through state.mjs. Avoids
-        // uncontrolled stderr writes that would tear the TUI.
+        const reason = results[i].reason;
+        // A 401 must not look like "N widgets failed" — it means the token
+        // is dead. Handle once via the unified wipe instead of counting.
+        if (!authFailure && isAuthError(reason)) authFailure = reason;
+        // Route through the shared debug sink (GITHUB_TUI_HOME-aware,
+        // rotated) — never console.error to stderr, which corrupts the TUI.
         if (process.env.DEBUG || process.env.GITHUB_TUI_DEBUG) {
-          console.error('[dashboard] widget "' + widgetLabels[i] + '" failed:',
-            results[i].reason && (results[i].reason.message || String(results[i].reason)));
+          try {
+            const { debugLog } = await import('../debug.mjs');
+            debugLog('[dashboard] widget "' + widgetLabels[i] + '" failed:',
+              reason && (reason.message || String(reason)));
+          } catch {}
         }
       }
+    }
+    if (authFailure && !isStale(gen, 'dashboard-widgets')) {
+      try { finishLoading(gen); } catch {}
+      await handleAuthFailure(authFailure, () => loadDashboardWidgets(true));
+      return;
     }
     // Stale check BEFORE the freshness/error-count writes: writing them
     // first made the "Updated Xm ago" badge show "just now" for a fetch
@@ -184,20 +196,28 @@ export async function loadDashboardWidgets(force = false) {
         appState.customSectionsLoaded = true;
       } catch (e) {
         if (process.env.DEBUG || process.env.GITHUB_TUI_DEBUG) {
-          console.error('[dashboard] custom sections failed to load:',
-            (e && e.message) || String(e));
+          try {
+            const { debugLog } = await import('../debug.mjs');
+            debugLog('[dashboard] custom sections failed to load:',
+              (e && e.message) || String(e));
+          } catch {}
         }
       }
     }
 
     if (results[2].status === 'fulfilled' && appState.starred.length >= 100) {
-      loadDashboardStarredPages(gen).catch((e) => {
-        if (!isStale(gen)) showError((e && e.message) || 'Background starred pagination failed', 'Dashboard stars');
+      loadDashboardStarredPages(gen).catch(async (e) => {
+        if (isStale(gen)) return;
+        if (isAuthError(e)) { await handleAuthFailure(e, () => loadDashboardWidgets(true)); return; }
+        showError((e && e.message) || 'Background starred pagination failed', 'Dashboard stars');
       });
     }
     render();
   } catch (e) {
-    if (!isStale(gen, 'dashboard-widgets')) showError(e.message, 'Dashboard widgets', { retry: () => loadDashboardWidgets(true) });
+    if (!isStale(gen, 'dashboard-widgets')) {
+      if (isAuthError(e)) { try { finishLoading(gen); } catch {} await handleAuthFailure(e, () => loadDashboardWidgets(true)); return; }
+      showError(e.message, 'Dashboard widgets', { retry: () => loadDashboardWidgets(true) });
+    }
   }
   finishLoading(gen);
 }

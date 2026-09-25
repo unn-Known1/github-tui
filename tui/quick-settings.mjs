@@ -269,14 +269,16 @@ export function renderQuickSettings(screen) {
       screen.writeStr(x + 2, row, '[' + shortLabel + ']', { fg: 'cyan', bold: true });
     }
 
-    // Label
-    screen.writeStr(x + 6, row, truncate(setting.label, boxW - 20),
+    // Value (right-aligned, clamped so narrow boxes never overlap the label).
+    const valueText = String(setting.type === 'toggle' ? value : value);
+    const labelShown = truncate(setting.label, Math.max(4, boxW - 22 - Math.min(valueText.length, Math.max(0, boxW - 12))));
+    screen.writeStr(x + 6, row, labelShown,
       sel ? color('selection') : null);
-
-    // Value (right-aligned)
-    const valueText = setting.type === 'toggle' ? value : value;
-    screen.writeStr(x + boxW - valueText.length - 3, row,
-      valueText, sel ? color('selection') : { fg: 'cyan' });
+    const vx = Math.max(x + 7 + labelShown.length + 1, x + boxW - valueText.length - 3);
+    if (vx + valueText.length < x + boxW - 1) {
+      screen.writeStr(vx, row,
+        valueText, sel ? color('selection') : { fg: 'cyan' });
+    }
   }
 
   // Footer

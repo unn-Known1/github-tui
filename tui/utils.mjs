@@ -609,31 +609,88 @@ export function dirExists(path) {
 
 // Run a command, streaming stdout/stderr to /dev/null (we don't redraw while
 // it runs — TUI raw mode is paused by the caller). Resolves to exit code.
+// Non-interactive env (GIT_TERMINAL_PROMPT=0), hard timeout, abort support,
+// and unref'd timers so one-shots/tests exit cleanly.
 export function runCommand(cmd, args, opts = {}) {
+  const timeoutMs = Number.isFinite(opts.timeoutMs) ? opts.timeoutMs : 30000;
+  const signal = opts.signal || null;
+  const env = { ...process.env, GIT_TERMINAL_PROMPT: '0', ...(opts.env || {}) };
   return new Promise((resolve, reject) => {
     let child;
     try {
       child = spawn(cmd, args, {
         stdio: opts.inherit ? 'inherit' : 'ignore',
         cwd: opts.cwd || process.cwd(),
+        env,
       });
     } catch (e) { reject(e); return; }
-    child.on('error', reject);
-    child.on('exit', (code) => resolve(code ?? 0));
+    let settled = false;
+    const finish = (fn, v) => { if (settled) return; settled = true; cleanup(); fn(v); };
+    const timer = setTimeout(() => {
+      try { child.kill('SIGKILL'); } catch {}
+      finish(reject, Object.assign(new Error(cmd + ' timed out after ' + timeoutMs + 'ms'), { code: 'ETIMEDOUT' }));
+    }, Math.max(1, timeoutMs));
+    if (timer.unref) timer.unref();
+    let abortHandler = null;
+    const cleanup = () => {
+      clearTimeout(timer);
+      if (signal && abortHandler) { try { signal.removeEventListener('abort', abortHandler); } catch {} }
+    };
+    if (signal) {
+      if (signal.aborted) { try { child.kill('SIGTERM'); } catch {} finish(reject, Object.assign(new Error('Aborted'), { code: 'EABORTED' })); return; }
+      abortHandler = () => { try { child.kill('SIGTERM'); } catch {} finish(reject, Object.assign(new Error('Aborted'), { code: 'EABORTED' })); };
+      signal.addEventListener('abort', abortHandler, { once: true });
+    }
+    child.on('error', (e) => finish(reject, e));
+    child.on('exit', (code) => finish(resolve, code ?? 0));
   });
 }
 
 export function runCommandCapture(cmd, args, opts = {}) {
+  const timeoutMs = Number.isFinite(opts.timeoutMs) ? opts.timeoutMs : 30000;
+  const signal = opts.signal || null;
+  const env = { ...process.env, GIT_TERMINAL_PROMPT: '0', ...(opts.env || {}) };
+  const maxBytes = Number.isFinite(opts.maxBytes) && opts.maxBytes > 0 ? opts.maxBytes : MAX_GIT_BYTES;
   return new Promise((resolve, reject) => {
     let child;
     try {
-      child = spawn(cmd, args, { cwd: opts.cwd || process.cwd(), stdio: ['ignore', 'pipe', 'pipe'] });
+      child = spawn(cmd, args, { cwd: opts.cwd || process.cwd(), stdio: ['ignore', 'pipe', 'pipe'], env });
     } catch (e) { reject(e); return; }
     let stdout = '', stderr = '';
-    child.stdout.on('data', chunk => { stdout += chunk; });
-    child.stderr.on('data', chunk => { stderr += chunk; });
-    child.on('error', reject);
-    child.on('exit', code => resolve({ code: code ?? 0, stdout, stderr }));
+    let stdoutBytes = 0, stderrBytes = 0;
+    let settled = false;
+    const finish = (fn, v) => { if (settled) return; settled = true; cleanup(); fn(v); };
+    const timer = setTimeout(() => {
+      try { child.kill('SIGKILL'); } catch {}
+      finish(reject, Object.assign(new Error(cmd + ' timed out after ' + timeoutMs + 'ms'), { code: 'ETIMEDOUT' }));
+    }, Math.max(1, timeoutMs));
+    if (timer.unref) timer.unref();
+    let abortHandler = null;
+    const cleanup = () => {
+      clearTimeout(timer);
+      if (signal && abortHandler) { try { signal.removeEventListener('abort', abortHandler); } catch {} }
+    };
+    if (signal) {
+      if (signal.aborted) { try { child.kill('SIGTERM'); } catch {} finish(reject, Object.assign(new Error('Aborted'), { code: 'EABORTED' })); return; }
+      abortHandler = () => { try { child.kill('SIGTERM'); } catch {} finish(reject, Object.assign(new Error('Aborted'), { code: 'EABORTED' })); };
+      signal.addEventListener('abort', abortHandler, { once: true });
+    }
+    const cap = (chunk, which) => {
+      const s = String(chunk);
+      if (which === 'out') {
+        stdoutBytes += s.length;
+        if (stdoutBytes > maxBytes) { try { child.kill('SIGKILL'); } catch {} finish(reject, Object.assign(new Error('output exceeded cap'), { code: 'EOUTPUTCAP' })); return; }
+        stdout += s;
+      } else {
+        stderrBytes += s.length;
+        if (stderrBytes > maxBytes) { try { child.kill('SIGKILL'); } catch {} finish(reject, Object.assign(new Error('output exceeded cap'), { code: 'EOUTPUTCAP' })); return; }
+        stderr += s;
+      }
+    };
+    child.stdout.on('data', chunk => cap(chunk, 'out'));
+    child.stderr.on('data', chunk => cap(chunk, 'err'));
+    child.on('error', (e) => finish(reject, e));
+    child.on('exit', code => finish(resolve, { code: code ?? 0, stdout, stderr }));
   });
 }
 
@@ -687,7 +744,8 @@ export function runGit(args, opts = {}) {
       abortHandler = () => {
         killAll('SIGTERM');
         // Escalate: a hung credential helper may ignore SIGTERM.
-        setTimeout(() => { if (!settled) killAll('SIGKILL'); }, 2000);
+        const esc = setTimeout(() => { if (!settled) killAll('SIGKILL'); }, 2000);
+        if (esc.unref) esc.unref();
         finish(reject, Object.assign(new Error('Aborted'), { code: 'EABORTED' }));
       };
       signal.addEventListener('abort', abortHandler, { once: true });

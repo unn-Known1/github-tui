@@ -154,5 +154,17 @@ export function addInboxFilter(label, filter) {
   });
   const truncated = list.length > 30;
   const saved = saveInboxFilters(list.slice(0, 30));
-  return truncated ? { ...saved, truncated: true } : saved;
+  // saveInboxFilters returns an array — never spread an array into an object
+  // (that produced {0:…,1:…,truncated:true}). Return a stable shape:
+  // array when nothing was dropped, {list,truncated} descriptor when capped.
+  // Callers assigning the result to appState.inboxSavedFilters must keep an
+  // array, so unwrap via normalizeInboxFiltersResult().
+  if (truncated) return { list: saved, truncated: true };
+  return saved;
+}
+
+export function normalizeInboxFiltersResult(v) {
+  if (Array.isArray(v)) return v;
+  if (v && Array.isArray(v.list)) return v.list;
+  return [];
 }

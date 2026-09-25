@@ -7,6 +7,7 @@ import {
 } from '../github.mjs';
 import { truncate, sectionHeader } from '../utils.mjs';
 import { loadingIndicator, scrollIndicators } from '../render.mjs';
+import { isAuthError, handleAuthFailure, showError } from '../error-recovery.mjs';
 
 export async function loadTraffic() {
   const repo = appState.repoDetails;
@@ -35,12 +36,21 @@ export async function loadTraffic() {
     appState.repoTrafficPopularReferrers = Array.isArray(referrers) ? referrers : [];
     // Surface total failure: safe() previously converted every rejection to
     // null and the user saw a silent empty pane for 401/403/rate-limit.
+    // Distinguish auth (unified wipe) from permission-denied vs empty.
     if (loadErrors.length === 4) {
       const first = loadErrors[0];
-      showMessage('Traffic unavailable: ' + (first && first.message || 'all endpoints failed'), 'error');
+      if (isAuthError(first)) { finishLoading(gen); await handleAuthFailure(first, loadTraffic); return; }
+      const denied = loadErrors.some(e => e && (e.status === 403 || e.status === 404));
+      showError((first && first.message) || 'all endpoints failed', denied ? 'Traffic (access denied — requires push access)' : 'Traffic', { retry: loadTraffic });
+    } else if (loadErrors.length > 0) {
+      const auth = loadErrors.find(isAuthError);
+      if (auth) { finishLoading(gen); await handleAuthFailure(auth, loadTraffic); return; }
     }
   } catch (e) {
-    if (!isStale(gen)) showMessage('Failed to load traffic: ' + e.message, 'error');
+    if (!isStale(gen)) {
+      if (isAuthError(e)) { finishLoading(gen); await handleAuthFailure(e, loadTraffic); return; }
+      showError(e.message, 'Traffic', { retry: loadTraffic });
+    }
   }
   finishLoading(gen);
   if (!isStale(gen)) render();

@@ -11,6 +11,7 @@ import {
 } from '../github.mjs';
 import { startInput } from '../input.mjs';
 import { removeToken } from '../config.mjs';
+import { isAuthError, handleAuthFailure } from '../error-recovery.mjs';
 import { shortNum, truncate, truncateToWidth, displayWidth, padRight, openUrl, sectionHeader, formatBytes, relTime, wrapText } from '../utils.mjs';
 import { color } from '../theme.mjs';
 import { loadForks, loadMoreForks, renderForks, toggleForkSort } from './forks.mjs';
@@ -325,16 +326,18 @@ export async function loadRepoDetails(owner, name) {
     }).catch(() => {});
   } catch (e) {
     if (!isStale(gen, 'analyze-details')) {
-      const msg = (e && e.message) || '';
-      const status = e && e.status;
-      if (status === 401 || /401|Bad credentials|Unauthorized/i.test(msg)) {
+      if (isAuthError(e)) {
+        const { clearAccountCache } = await import('../github.mjs');
+        try { if (appState.token) clearAccountCache(appState.token); } catch {}
         resetAccountState();
         resetRateLimit();
         removeToken();
+        if (globalThis._bumpRatePollEpoch) { try { globalThis._bumpRatePollEpoch(); } catch {} }
         setTab(6); // Settings sits last (key 0)
-        showMessage('Token expired or invalid — please log in again in Settings', 'error', 8000);
+        const { showError } = await import('../error-recovery.mjs');
+        showError('Token expired or invalid — please log in again', 'Authentication', { retry: () => loadRepoDetails(appState.selectedRepo) });
       } else {
-        showMessage(msg || 'Failed to load repository', 'error');
+        showMessage((e && e.message) || 'Failed to load repository', 'error');
       }
     }
   }

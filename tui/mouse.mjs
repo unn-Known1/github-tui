@@ -11,8 +11,9 @@ import * as repos from './tabs/repos.mjs';
 import * as dashboard from './tabs/dashboard.mjs';
 import * as settings from './tabs/settings.mjs';
 import * as inbox from './tabs/inbox.mjs';
+import * as actions from './tabs/actions.mjs';
 import * as localTab from './tabs/local.mjs';
-import { focusDashboardZone } from './focus.mjs';
+import { focusDashboardZone, resetFocus } from './focus.mjs';
 import * as quickSettings from './quick-settings.mjs';
 import * as paletteMod from './palette.mjs';
 
@@ -325,20 +326,15 @@ export function handleMouseEvent(event) {
       }
     }
 
-    // Repos tab list.
+    // Repos tab list — reuse the click-path geometry (reposItemAt: density +
+    // pinned headers) so hover and click can never diverge.
     if (t === 1) {
-      const rowOff = appState.reposView === 'starred' ? TAB_CONTENT_Y[1] + 3 : TAB_CONTENT_Y[1] + 6;
-      if (sy >= rowOff) {
-        const listIdx = sy - rowOff;
-        const scroll = appState.reposView === 'starred' ? appState.starredScroll : appState.repoScroll;
-        const absIdx = listIdx + scroll;
-        const maxLen = appState.reposView === 'starred' ? appState.starred.length : (appState._filteredReposCount || appState.repos.length);
-        if (absIdx >= 0 && absIdx < maxLen) {
-          if (appState.reposView === 'starred') {
-            if (absIdx !== appState.starredSelected) { appState.starredSelected = absIdx; render(); }
-          } else {
-            if (absIdx !== appState.repoSelected) { appState.repoSelected = absIdx; render(); }
-          }
+      const hit = reposItemAt(sx, sy);
+      if (hit) {
+        if (appState.reposView === 'starred') {
+          if (hit.index !== appState.starredSelected) { appState.starredSelected = hit.index; render(); }
+        } else {
+          if (hit.index !== appState.repoSelected) { appState.repoSelected = hit.index; render(); }
         }
       }
     }
@@ -729,6 +725,21 @@ function handleDblClick(sx, sy) {
   if (tabState.current === 1) {
     return reposDblClickOpen(sx, sy);
   }
+  // Parity: Inbox/Actions/Explore/Settings double-click acts like Enter
+  // (single click only selects). Uses the keyboard enter path so geometry
+  // cannot diverge from the keyboard truth.
+  if (tabState.current === 4) {
+    try { inbox.enter(); return true; } catch { return false; }
+  }
+  if (tabState.current === 3) {
+    try { actions.enter(); return true; } catch { return false; }
+  }
+  if (tabState.current === 2) {
+    try { analyze.enter(); return true; } catch { return false; }
+  }
+  if (tabState.current === 6) {
+    try { settings.enter(); return true; } catch { return false; }
+  }
   const screen = getScreen();
   if (!screen) return false;
   const W = screen.width, H = screen.height;
@@ -753,6 +764,7 @@ function handleDblClick(sx, sy) {
     if (cardIndex === 4) {
       // Stale → repos with stale filter
       setTab(1);
+      try { resetFocus(1); } catch {}
       appState.reposView = 'own';
       appState.repoStaleOnly = true;
       appState.repoScroll = 0;
@@ -763,6 +775,7 @@ function handleDblClick(sx, sy) {
     }
     if (cardIndex === 0 || cardIndex === 1) {
       setTab(1);
+      try { resetFocus(1); } catch {}
       render();
       return true;
     }
@@ -781,6 +794,7 @@ function handleDblClick(sx, sy) {
         if (r && r.full_name) {
           const [owner, name] = r.full_name.split('/');
           setTab(2);
+          try { resetFocus(2); } catch {}
           analyze.loadRepoDetails(owner, name);
           return true;
         }
@@ -830,6 +844,7 @@ function handleDblClick(sx, sy) {
           const [owner, repoName] = repo.full_name.split('/');
           if (owner && repoName) {
             setTab(2);
+            try { resetFocus(2); } catch {}
             analyze.loadRepoDetails(owner, repoName);
             return true;
           }
@@ -874,6 +889,7 @@ function handleDblClick(sx, sy) {
             const [owner, name] = r.full_name.split('/');
             if (owner && name) {
               setTab(2);
+              try { resetFocus(2); } catch {}
               analyze.loadRepoDetails(owner, name);
               return true;
             }
@@ -896,6 +912,7 @@ function handleTabClick(sx) {
   for (let i = 0; i < TABS.length; i++) {
     if (sx >= x && sx < x + tabW) {
       setTab(i);
+      try { resetFocus(i); } catch {}
       return;
     }
     x += tabW;
@@ -1010,27 +1027,11 @@ function localHitRow(sy) {
 }
 
 function localHover(sx, sy) {
-  void sx;
-  const hit = localHitRow(sy);
-  if (!hit) return;
-  if (localTab.isBranchPickerOpen() && hit.kind !== 'branch') return;
-  if (hit.kind === 'branch') {
-    localTab.setBranchCursor(hit.index);
-    return;
-  }
-  if (hit.kind === 'status') {
-    if (appState.localStatusSelected !== hit.index || appState.localFocus !== 'status') {
-      appState.localFocus = 'status';
-      appState.localStatusSelected = hit.index;
-      render();
-    }
-  } else if (hit.kind === 'history') {
-    if (appState.localHistorySelected !== hit.index || appState.localFocus !== 'history') {
-      appState.localFocus = 'history';
-      appState.localHistorySelected = hit.index;
-      render();
-    }
-  }
+  // Click-only selection (plan §6.7): hover must NEVER move the status/history
+  // cursor — it only repaints hover affordances via render. Selection changes
+  // on click (dispatchLocalClick) so keyboard and mouse never fight.
+  void sx; void sy;
+  return;
 }
 
 function dispatchLocalClick(sx, sy) {
@@ -1609,7 +1610,15 @@ function scrollUp(sx, sy) {
       if (appState.repoScroll > 0) { appState.repoScroll--; render(); }
     }
   } else if (t === 2) {
+    // Explore: search/user/code/forks/file/readme panes all scroll the same
+    // detailsScroll (previously only detailsScroll moved, and search lists
+    // felt frozen under the wheel).
     if (appState.detailsScroll > 0) { appState.detailsScroll--; render(); }
+    else if ((appState.searchScroll || 0) > 0) { appState.searchScroll--; render(); }
+    else if ((appState.userSearchScroll || 0) > 0) { appState.userSearchScroll--; render(); }
+    else if ((appState.codeSearchScroll || 0) > 0) { appState.codeSearchScroll--; render(); }
+    else if ((appState.forkScroll || 0) > 0) { appState.forkScroll--; render(); }
+    else if ((appState.fileScroll || 0) > 0) { appState.fileScroll--; render(); }
   } else if (t === 3) {
     // A log overlay owns the viewport — the wheel must scroll the LOG, not
     // the run list hiding underneath it (previously wheel-over-log silently
@@ -1625,6 +1634,12 @@ function scrollUp(sx, sy) {
     }
   } else if (t === 4) {
     if (appState.inboxScroll > 0) { appState.inboxScroll--; render(); }
+  } else if (t === 6) {
+    // Settings: wheel moves the menu cursor (was a no-op).
+    try { settings.up(); } catch {}
+  } else if (appState.showDetail) {
+    // Detail popup: wheel scrolls detail (was a no-op — felt frozen).
+    if ((appState.detailScroll || 0) > 0) { appState.detailScroll--; render(); }
   }
 }
 
@@ -1652,6 +1667,13 @@ function scrollDown(sx, sy) {
     }
   } else if (t === 2) {
     appState.detailsScroll++;
+    if (appState.analyzeView === 'results') {
+      appState.searchScroll = (appState.searchScroll || 0) + 1;
+      appState.userSearchScroll = (appState.userSearchScroll || 0) + 1;
+      appState.codeSearchScroll = (appState.codeSearchScroll || 0) + 1;
+    }
+    if (appState.analyzeView === 'forks') appState.forkScroll = (appState.forkScroll || 0) + 1;
+    if (appState.fileViewing) appState.fileScroll = (appState.fileScroll || 0) + 1;
     render();
   } else if (t === 3) {
     if (appState.actionsLog) {
@@ -1669,6 +1691,11 @@ function scrollDown(sx, sy) {
     const maxV = Math.max(1, screen.height - 12);
     const inboxCount = inbox.getFilteredNotifications().length;
     if (appState.inboxScroll + maxV < inboxCount) { appState.inboxScroll++; render(); }
+  } else if (t === 6) {
+    try { settings.down(); } catch {}
+  } else if (appState.showDetail) {
+    appState.detailScroll = (appState.detailScroll || 0) + 1;
+    render();
   }
 }
 

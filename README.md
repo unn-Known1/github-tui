@@ -268,7 +268,7 @@ The app is split into focused zero-dependency modules. Adding a new tab is: crea
 ├── app.mjs                          # Entrypoint — lifecycle, CLI, and terminal wiring
 ├── README.md
 ├── VISION.md                        # Roadmap + persona-driven brainstorm
-├── tests/                           # 329 tests (Node built-in test runner, zero deps)
+├── tests/                           # 500+ tests (Node built-in test runner, zero deps)
 │   ├── utils.test.mjs
 │   ├── repos-logic.test.mjs
 │   ├── theme.test.mjs
@@ -282,7 +282,7 @@ The app is split into focused zero-dependency modules. Adding a new tab is: crea
     ├── utils.mjs                    # Pure helpers (time, format, OSC-52, openUrl, safeCwdJoin, runCommand)
     ├── state.mjs                    # Single appState + async-stale guard + message bus + collapsible state
     ├── input.mjs                    # Modal text input + cursor movement + handler registry + paste support
-    ├── theme.mjs                    # 10 themes — persisted to ~/.github-tui/theme + NO_COLOR support
+    ├── theme.mjs                    # 2 themes (light/default) — persisted to ~/.github-tui/theme + NO_COLOR support
     ├── store.mjs                    # Bookmarks + saved searches + pins (on-disk JSON)
     ├── palette.mjs                  # Command palette (Ctrl-P) with fuzzy match
     ├── render.mjs                   # Top-level render: chrome + dispatch to tabs + hover effects
@@ -312,6 +312,11 @@ The app is split into focused zero-dependency modules. Adding a new tab is: crea
         ├── analyze-compare.mjs      # Branch and ref comparison pane
         ├── forks.mjs                # Forks sub-view with concurrent ahead/behind
         ├── settings.mjs             # Settings + System info panel
+        ├── which-key.mjs            # prefix-key overlay (g sequences)
+        ├── quick-settings.mjs       # Ctrl-, quick settings popup
+        ├── custom-sections.mjs      # user-defined dashboard sections
+        ├── issue-create.mjs         # issue creation flow
+        ├── git-context.mjs          # local worktree detection (root/gitDir/branch/upstream)
         ├── inbox.mjs                # Notifications with triage actions
         ├── local.mjs                # Local git tab: status, history, diff, stage/commit/pull/push/branch
         └── help.mjs                 # Help overlay (?) — context-aware
@@ -369,7 +374,7 @@ Every tab module exports `render(screen, y, h)`, an optional `keys` map for tab-
 - **Actions:** Refresh Dashboard, Refresh User Data (`r` refreshes both), Auto-Refresh (interval persists across restarts), **Change Theme**, Clear Token File, Token display.
 - **Integrations:** Enterprise host, profiles list/switch, organizations, config export/import.
 - **Data management:** Clear Local Data (bookmarks/pins/searches/filters/sections/cache) with per-store counts in the System panel.
-- **System panel:** app version (`0.7.4`), config dir, token file path, Node version, platform/arch, terminal size, **API remaining / limit / reset-in minutes**, **token scopes**, active keychain backend.
+- **System panel:** app version (from package.json — single source of truth), config dir, token file path, Node version, platform/arch, terminal size, **API remaining / limit / reset-in minutes**, **token scopes**, active keychain backend.
 
 ### 6 · Inbox
 - Per-row: ▶ selection, ● yellow unread dot, color-coded subject type (PR/cyan, Issue/yellow, Release/green, Discussion/magenta, Commit/blue, CheckSuite/red), repo·title, reason, relative time.
@@ -421,7 +426,7 @@ Every tab module exports `render(screen, y, h)`, an optional `keys` map for tab-
 - Read/write actions are confirmation-protected and ship in waves:
   - ✅ **shipped:** star/unstar, bookmark, pin, save file, save folder, zipball, `git clone`, `gh clone`, notification mark/unsubscribe.
   - ✅ **shipped (v0.5):** commenting on issues/PRs, reactions, close/reopen, merge PRs, PR diff viewer, review comments.
-  - ✅ **shipped (v0.5.8):** rate limit indicator, traffic/milestones/labels/checks/security panes, mouse support, collapsible sections, hover effects, followers section, Windows and terminal icon compatibility, File Explorer selection fixes, help overlay scroll clamping.
+  - ✅ **shipped (v0.5.8):** rate limit indicator, traffic/checks/security panes, mouse support, collapsible sections, hover effects, followers section, Windows and terminal icon compatibility, File Explorer selection fixes, help overlay scroll clamping. (Milestone/Label sub-tabs shipped in v0.5.8, removed as detail tabs in v0.7.1 — milestone/label state remains for issue-edit fields.)
   - ✅ **shipped (v0.6.2):** Actions tab full rewrite (rerun, cancel, expand jobs/steps, correct key bindings), Inbox triage fixes (append-more, true unsubscribe, filtered scroll bounds, fallback URLs).
   - ✅ **shipped (v0.7.0):** workflow logs/dispatch/failure queue, PR review submission, issue metadata updates, release actions, security aggregation, repository health, compare/history/blame, Inbox grouping/snoozing/saved filters, configuration portability, Enterprise profiles, organization context, CLI output, and linear accessibility.
 - Only the GitHub REST v3 API is used (no GraphQL yet).

@@ -225,6 +225,26 @@ export function parseBlamePorcelain(output = '') {
   return result;
 }
 
+// Recipe R4 (minimal): items updated since the last session timestamp.
+// Pure: callers pass arrays + lastSeenMs, get human-readable lines back.
+export function sinceLastVisit({ notifications = [], issues = [], prs = [], failures = [], lastSeenMs = 0 } = {}) {
+  const out = [];
+  const isNew = (ts) => { const t = Date.parse(ts || ''); return Number.isFinite(t) && t > lastSeenMs; };
+  for (const n of (notifications || []).slice(0, 20)) {
+    if (n && n.unread && isNew(n.updated_at || n.last_read_at)) out.push('Unread: ' + (n.repository?.full_name || '?') + ' — ' + (n.subject?.title || ''));
+  }
+  for (const i of (issues || []).slice(0, 10)) {
+    if (i && isNew(i.updated_at)) out.push('Issue: ' + (i.repository_url?.split('/').slice(-2).join('/') || i.url || '?') + ' #' + (i.number || '?'));
+  }
+  for (const pr of (prs || []).slice(0, 10)) {
+    if (pr && isNew(pr.updated_at)) out.push('PR updated: ' + (pr.title || pr.number || '?'));
+  }
+  for (const f of (failures || []).slice(0, 10)) {
+    if (f && isNew(f.created_at || f.updated_at)) out.push('CI failure: ' + (f.repository || f.repo || '?') + ' #' + (f.run_number || f.id || '?'));
+  }
+  return out;
+}
+
 export function validatePluginManifest(manifest) {
   if (!manifest || typeof manifest !== 'object') return { ok: false, error: 'Manifest must be an object' };
   if (typeof manifest.id !== 'string' || !/^[a-z0-9][a-z0-9._-]{1,63}$/.test(manifest.id)) return { ok: false, error: 'Invalid plugin id' };

@@ -90,7 +90,10 @@ export function renderSecurityAggregate(screen, y, h) {
   const listY = y + (errors.length ? 5 : 4);
   const alerts = appState.securityAggregate || [];
   if (!alerts.length) {
-    screen.writeStr(2, listY, 'No open alerts found (or the selected repositories denied access).', color('dim'));
+    // Never conflate empty vs permission-denied: errors[] carries the denied
+    // repos, so name them instead of printing a bare "No alerts" line.
+    if (errors.length) screen.writeStr(2, listY, 'No open alerts in accessible repos — ' + errors.length + ' repo(s) denied access (see above).', color('dim'));
+    else screen.writeStr(2, listY, 'No open alerts found in the scanned watchlist.', color('dim'));
     return;
   }
   const rows = Math.max(1, h - (listY - y) - 2);
